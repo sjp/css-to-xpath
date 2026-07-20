@@ -1,7 +1,7 @@
 mod parser;
 mod translate;
 
-pub use translate::{Error, Translator};
+pub use translate::{Error, Mode, Translator};
 
 /// The version of this crate, from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -13,25 +13,23 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// * `css` — A CSS selector string.
 /// * `prefix` — An XPath path prefix prepended to the result
 ///   (e.g. `"descendant-or-self::"`).  Pass `""` for none.
-/// * `kind` — The translator flavour: `"generic"`, `"html"`, or `"xhtml"`.
+/// * `mode` — The translator flavour: [`Mode::Generic`], [`Mode::Html`], or
+///   [`Mode::Xhtml`].
 ///
 /// # Errors
 ///
-/// Returns an [`Error`] when the selector is syntactically invalid, uses an
-/// unsupported construct, or `kind` is not a recognised translator name.
-pub fn css_to_xpath(css: &str, prefix: &str, kind: &str) -> Result<String, Error> {
-    Translator::new(kind)
-        .ok_or_else(|| Error::UnknownTranslator(kind.to_owned()))?
-        .css_to_xpath(css, prefix)
+/// Returns an [`Error`] when the selector is syntactically invalid or uses
+/// an unsupported construct.
+pub fn css_to_xpath(css: &str, prefix: &str, mode: Mode) -> Result<String, Error> {
+    Translator::new(mode).css_to_xpath(css, prefix)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::translate::Translator;
+    use crate::translate::{Mode, Translator};
 
     fn xpath(css: &str) -> String {
-        Translator::new("generic")
-            .unwrap()
+        Translator::new(Mode::Generic)
             .css_to_xpath(css, "")
             .unwrap()
     }
@@ -163,7 +161,7 @@ mod tests {
 
     #[test]
     fn unsupported_errors() {
-        let t = Translator::new("generic").unwrap();
+        let t = Translator::new(Mode::Generic);
         // The non-standard [a!=b] and :contains() are not supported.
         assert!(t.css_to_xpath("e[foo!=\"bar\"]", "").is_err());
         assert!(t.css_to_xpath("e:contains(\"foo\")", "").is_err());
@@ -716,7 +714,7 @@ mod tests {
     /// self:: axis and the prefix is not applied.
     #[test]
     fn scope_pseudo() {
-        let t = Translator::new("generic").unwrap();
+        let t = Translator::new(Mode::Generic);
         assert_eq!(xpath(":scope"), "self::*");
         assert_eq!(xpath(":ScoPE"), "self::*");
         assert_eq!(xpath(":scope > a"), "self::*/a");
@@ -765,7 +763,7 @@ mod tests {
         // must not be confused with the head of an interior wildcard.
         assert_eq!(xpath("e:lang(*, fr)"), "e[true() or lang('fr')]");
         // HTML: nearest lang-attributed ancestor, lowercased prefix match.
-        let html = Translator::new("html").unwrap();
+        let html = Translator::new(Mode::Html);
         assert_eq!(
             html.css_to_xpath("e:lang(EN)", "").unwrap(),
             "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')]]"
@@ -775,7 +773,7 @@ mod tests {
             "e[ancestor-or-self::*[@lang]]"
         );
         // xhtml shares the HTML overrides.
-        let xhtml = Translator::new("xhtml").unwrap();
+        let xhtml = Translator::new(Mode::Xhtml);
         assert_eq!(
             xhtml.css_to_xpath("E:lang(*)", "").unwrap(),
             "E[ancestor-or-self::*[@lang]]"
@@ -783,7 +781,7 @@ mod tests {
         // Interior wildcards (RFC 4647 extended filtering) are valid CSS
         // but inexpressible in XPath 1.0, so both spellings error rather
         // than over-match (unquoted *-CH) or never match (quoted "*-CH").
-        let t = Translator::new("generic").unwrap();
+        let t = Translator::new(Mode::Generic);
         for sel in [
             "e:lang(*-CH)",
             "e:lang(\"*-CH\")",
@@ -814,7 +812,7 @@ mod tests {
     /// The HTML translator's pseudo-class overrides.
     #[test]
     fn html_pseudo_overrides() {
-        let html = Translator::new("html").unwrap();
+        let html = Translator::new(Mode::Html);
         let h = |css: &str| html.css_to_xpath(css, "").unwrap();
         assert_eq!(
             h("a:link"),
@@ -906,7 +904,7 @@ mod tests {
 
     #[test]
     fn html_translator_lowercases_names_not_values() {
-        let html = Translator::new("html").unwrap();
+        let html = Translator::new(Mode::Html);
         assert_eq!(html.css_to_xpath("DIV", "").unwrap(), "div");
         assert_eq!(html.css_to_xpath("[FOO]", "").unwrap(), "*[@foo]");
         // Names lowercase, values keep their case.
@@ -920,22 +918,16 @@ mod tests {
             "*[local-name() = 'div']"
         );
         // xhtml preserves case
-        let xhtml = Translator::new("xhtml").unwrap();
+        let xhtml = Translator::new(Mode::Xhtml);
         assert_eq!(xhtml.css_to_xpath("DIV", "").unwrap(), "DIV");
     }
 
     #[test]
     fn prefix_applied_per_branch() {
-        let t = Translator::new("generic").unwrap();
+        let t = Translator::new(Mode::Generic);
         assert_eq!(
             t.css_to_xpath("a, b", "descendant-or-self::").unwrap(),
             "descendant-or-self::a | descendant-or-self::b"
         );
-    }
-
-    #[test]
-    fn unknown_translator_errors() {
-        assert!(crate::css_to_xpath("a", "", "bad-name").is_err());
-        assert!(crate::css_to_xpath("a", "", "").is_err());
     }
 }

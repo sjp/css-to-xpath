@@ -24,16 +24,16 @@ css-to-xpath = "0.1"
 ## Quick start
 
 ```rust,no_run
-use css_to_xpath::css_to_xpath;
+use css_to_xpath::{css_to_xpath, Mode};
 
-// kind: "generic" | "html" | "xhtml"; prefix: prepended to the result.
+// mode: Mode::Generic | Mode::Html | Mode::Xhtml; prefix: prepended to the result.
 assert_eq!(
-    css_to_xpath("div.warning > a", "", "generic").unwrap(),
+    css_to_xpath("div.warning > a", "", Mode::Generic).unwrap(),
     "div[@class and contains(concat(' ', normalize-space(@class), ' '), ' warning ')]/a"
 );
 
 assert_eq!(
-    css_to_xpath("li:nth-child(odd)", "", "generic").unwrap(),
+    css_to_xpath("li:nth-child(odd)", "", Mode::Generic).unwrap(),
     "li[count(preceding-sibling::*) mod 2 = 0]"
 );
 ```
@@ -41,9 +41,9 @@ assert_eq!(
 For repeated translations, build a `Translator` once and reuse it:
 
 ```rust,no_run
-use css_to_xpath::Translator;
+use css_to_xpath::{Mode, Translator};
 
-let translator = Translator::new("generic").expect("known translator kind");
+let translator = Translator::new(Mode::Generic);
 let xpath = translator.css_to_xpath("e:has(> .foo)", "").unwrap();
 assert_eq!(
     xpath,
@@ -53,18 +53,18 @@ assert_eq!(
 
 ## Translator flavours
 
-`Translator::new` takes one of three flavour names:
+`Translator::new` takes one of three `Mode` variants:
 
-- **`generic`** — plain CSS/XPath semantics, case-sensitive names, no
+- **`Mode::Generic`** — plain CSS/XPath semantics, case-sensitive names, no
   HTML-specific pseudo-classes.
-- **`html`** — lowercases element and attribute names (as HTML parsing
+- **`Mode::Html`** — lowercases element and attribute names (as HTML parsing
   does) and gives dynamic-seeming pseudo-classes their static HTML
   meaning where one exists: `:link`/`:any-link` (has `href`),
   `:checked`, `:disabled`/`:enabled` (including the fieldset/legend
   "actually disabled" carve-out), `:required`/`:optional`, and
   `:lang()` (nearest `@lang` ancestor, case-folded prefix match).
-- **`xhtml`** — the same HTML pseudo-class semantics as `html`, but
-  preserves case (XHTML is XML, so names are case-sensitive).
+- **`Mode::Xhtml`** — the same HTML pseudo-class semantics as `Mode::Html`,
+  but preserves case (XHTML is XML, so names are case-sensitive).
 
 Pseudo-classes with no static equivalent (`:hover`, `:visited`,
 `:focus`, …) always translate to an unmatchable `[0]` rather than
@@ -77,10 +77,10 @@ erroring, in every flavour.
 expression:
 
 ```rust,no_run
-use css_to_xpath::css_to_xpath;
+use css_to_xpath::{css_to_xpath, Mode};
 
 assert_eq!(
-    css_to_xpath("a, b", "descendant-or-self::", "generic").unwrap(),
+    css_to_xpath("a, b", "descendant-or-self::", Mode::Generic).unwrap(),
     "descendant-or-self::a | descendant-or-self::b"
 );
 ```
@@ -90,10 +90,10 @@ anchors on the `self::` axis, since `:scope` names the context node the
 XPath is evaluated from:
 
 ```rust,no_run
-use css_to_xpath::css_to_xpath;
+use css_to_xpath::{css_to_xpath, Mode};
 
 assert_eq!(
-    css_to_xpath(":scope > a", "descendant-or-self::", "generic").unwrap(),
+    css_to_xpath(":scope > a", "descendant-or-self::", Mode::Generic).unwrap(),
     "self::*/a"
 );
 ```
@@ -114,7 +114,7 @@ assert_eq!(
   `:has()`, including complex (combinator-bearing) arguments and
   relative-selector leading combinators inside `:has()`.
 - `:scope`, `:root`, `:empty`, `:lang()`.
-- The `html`/`xhtml` form and link pseudo-classes listed above.
+- The `Mode::Html`/`Mode::Xhtml` form and link pseudo-classes listed above.
 
 ## Not supported
 
@@ -140,9 +140,9 @@ express them faithfully:
 `Error` carries enough detail to build a user-facing diagnostic:
 
 ```rust,no_run
-use css_to_xpath::css_to_xpath;
+use css_to_xpath::{css_to_xpath, Mode};
 
-if let Err(e) = css_to_xpath("col || td", "", "generic") {
+if let Err(e) = css_to_xpath("col || td", "", Mode::Generic) {
     eprintln!("{}", e.into_message("col || td"));
 }
 ```

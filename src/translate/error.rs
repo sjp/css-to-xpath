@@ -12,8 +12,6 @@ pub enum Error {
     /// The selector is valid CSS, but uses a construct outside the
     /// supported set: this crate errors rather than approximating.
     Unsupported(String),
-    /// The requested translator name is not recognised.
-    UnknownTranslator(String),
 }
 
 impl Error {
@@ -30,7 +28,6 @@ impl Error {
             Error::Unsupported(construct) => format!(
                 "The CSS selector {selector:?} uses {construct}, which this translator does not support"
             ),
-            Error::UnknownTranslator(name) => format!("Unknown translator '{name}'"),
         }
     }
 }

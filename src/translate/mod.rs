@@ -23,6 +23,16 @@ pub(crate) enum Kind {
     Html,
 }
 
+/// The translator flavour: which pseudo-class overrides and name-casing
+/// rules to apply. `Html` and `Xhtml` share the HTML overrides; only
+/// `Html` lowercases element and attribute names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    Generic,
+    Html,
+    Xhtml,
+}
+
 /// One struct with a kind tag and lowercasing flags. Casing is applied
 /// here in the translator, never via Servo's parser settings, so the
 /// translator families differ only in these fields.
@@ -47,24 +57,23 @@ enum NsConstraint<'a> {
 }
 
 impl Translator {
-    pub fn new(kind: &str) -> Option<Self> {
-        match kind {
-            "generic" => Some(Translator {
+    pub fn new(mode: Mode) -> Self {
+        match mode {
+            Mode::Generic => Translator {
                 kind: Kind::Generic,
                 lower_case_element_names: false,
                 lower_case_attribute_names: false,
-            }),
-            "html" => Some(Translator {
+            },
+            Mode::Html => Translator {
                 kind: Kind::Html,
                 lower_case_element_names: true,
                 lower_case_attribute_names: true,
-            }),
-            "xhtml" => Some(Translator {
+            },
+            Mode::Xhtml => Translator {
                 kind: Kind::Html,
                 lower_case_element_names: false,
                 lower_case_attribute_names: false,
-            }),
-            _ => None,
+            },
         }
     }
 
