@@ -1,0 +1,28 @@
+[package]
+name = "css-to-xpath"
+version = "0.1.0"
+edition = "2024"
+# The floor is set by cssparser 0.37.0 / selectors 0.38.0: those crates'
+# minimum supported Rust version. Keep in lockstep with the selectrs
+# wrapper's rust-version (src/rust/Cargo.toml).
+rust-version = "1.88"
+description = "Translate CSS selectors to XPath 1.0 expressions"
+license = "MIT"
+
+[dependencies]
+# Exact pins: `selectors` is a 0.x crate tied to Servo's needs. Upgrades
+# are deliberate events, gated on the full test suite.
+selectors = "=0.38.0"
+cssparser = "=0.37.0"
+precomputed-hash = "=0.1.1"
+
+# NOTE: no [workspace] table here intentionally. While this crate lives
+# under src/rust/ it is absorbed into the wrapper's workspace (which needs
+# [workspace] to avoid being absorbed by any outer workspace). When the
+# crate moves to its own repository, add [workspace] = {} so that it
+# becomes its own standalone workspace root.
+
+[profile.release]
+# Reachable panics must not abort the caller's process — unwind so they
+# surface as errors that the caller (e.g. the savvy wrapper) can catch.
+panic = "unwind"
