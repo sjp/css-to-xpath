@@ -1,5 +1,5 @@
 //! `SelectorImpl` and `Parser` implementations bridging Servo's `selectors`
-//! crate to the selectrs translator.
+//! crate to this crate's translator.
 
 pub mod impls;
 
@@ -17,9 +17,9 @@ pub use impls::CssString;
 use crate::translate::error::Error;
 
 #[derive(Clone, Debug)]
-pub struct SelectrsImpl;
+pub struct CssToXpathImpl;
 
-impl SelectorImpl for SelectrsImpl {
+impl SelectorImpl for CssToXpathImpl {
     type ExtraMatchingData<'a> = ();
     type AttrValue = CssString;
     type Identifier = CssString;
@@ -53,7 +53,7 @@ pub enum LangArg {
 /// semantics rest on user or runtime state a static document cannot have
 /// (the user-action, link, and target families) parse and never match.
 /// Names that are unknown, or whose semantics a static translation could
-/// at least partially answer but selectrs has not implemented (e.g. the
+/// at least partially answer but this crate has not implemented (e.g. the
 /// form pseudo-classes `:read-only` or `:placeholder-shown`), error
 /// instead, so typos and genuinely missing features stay loud.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -132,7 +132,7 @@ impl ToCss for PseudoClass {
 }
 
 impl NonTSPseudoClass for PseudoClass {
-    type Impl = SelectrsImpl;
+    type Impl = CssToXpathImpl;
 
     fn is_active_or_hover(&self) -> bool {
         matches!(self, PseudoClass::Active | PseudoClass::Hover)
@@ -162,13 +162,13 @@ impl ToCss for NeverPseudoElement {
 }
 
 impl PseudoElement for NeverPseudoElement {
-    type Impl = SelectrsImpl;
+    type Impl = CssToXpathImpl;
 }
 
-pub struct SelectrsParser;
+pub struct CssToXpathParser;
 
-impl<'i> selectors::parser::Parser<'i> for SelectrsParser {
-    type Impl = SelectrsImpl;
+impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
+    type Impl = CssToXpathImpl;
     type Error = SelectorParseErrorKind<'i>;
 
     /// Strict everywhere: a selector that fails to parse must surface an
@@ -360,13 +360,13 @@ fn uses_column_combinator(css: &str) -> bool {
 }
 
 /// Parse a full selector list (comma-separated groups).
-pub fn parse(css: &str) -> Result<SelectorList<SelectrsImpl>, Error> {
+pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
     if uses_column_combinator(css) {
         return Err(Error::Unsupported("the `||` column combinator".into()));
     }
     let mut input = ParserInput::new(css);
     let mut parser = CssParser::new(&mut input);
-    SelectorList::parse(&SelectrsParser, &mut parser, ParseRelative::No).map_err(|e| {
+    SelectorList::parse(&CssToXpathParser, &mut parser, ParseRelative::No).map_err(|e| {
         let detail = match e.kind {
             cssparser::ParseErrorKind::Basic(ref kind) => format!("{kind:?}"),
             cssparser::ParseErrorKind::Custom(ref kind) => format!("{kind:?}"),

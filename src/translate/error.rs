@@ -1,7 +1,7 @@
 //! Error types for selector translation.
 //!
 //! Errors always name the selector and the construct. The exact wording
-//! here is pinned by snapshot tests on the R side.
+//! here is part of this crate's output contract and is pinned by tests.
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Error {
@@ -10,7 +10,7 @@ pub enum Error {
     /// selector string, used to render a caret pointer.
     Parse(String, u32),
     /// The selector is valid CSS, but uses a construct outside the
-    /// supported set: selectrs errors rather than approximating.
+    /// supported set: this crate errors rather than approximating.
     Unsupported(String),
     /// The requested translator name is not recognised.
     UnknownTranslator(String),
@@ -28,7 +28,7 @@ impl Error {
                 )
             }
             Error::Unsupported(construct) => format!(
-                "The CSS selector {selector:?} uses {construct}, which selectrs does not support"
+                "The CSS selector {selector:?} uses {construct}, which this translator does not support"
             ),
             Error::UnknownTranslator(name) => format!("Unknown translator '{name}'"),
         }

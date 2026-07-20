@@ -11,7 +11,7 @@ pub use error::Error;
 use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
 use selectors::parser::{Combinator, Component, Selector};
 
-use crate::parser::{self, SelectrsImpl};
+use crate::parser::{self, CssToXpathImpl};
 use xpath_expr::{Condition, XPathExpr, is_safe_name};
 
 /// Which translator family the pseudo-class overrides come from: generic
@@ -85,7 +85,7 @@ impl Translator {
     /// compound.
     fn selector_to_xpath(
         &self,
-        selector: &Selector<SelectrsImpl>,
+        selector: &Selector<CssToXpathImpl>,
         prefix: &str,
     ) -> Result<String, Error> {
         let seqs = collect_seqs(selector);
@@ -110,7 +110,7 @@ impl Translator {
 
         // Leftmost compound first, then fold rightwards.
         let mut xpath = if scope_anchored {
-            let compound: Vec<&Component<SelectrsImpl>> = seqs[leftmost]
+            let compound: Vec<&Component<CssToXpathImpl>> = seqs[leftmost]
                 .0
                 .iter()
                 .filter(|c| !matches!(c, Component::Scope))
@@ -140,7 +140,7 @@ impl Translator {
     /// order.
     fn compound_to_xpath(
         &self,
-        components: &[&Component<SelectrsImpl>],
+        components: &[&Component<CssToXpathImpl>],
     ) -> Result<XPathExpr, Error> {
         let mut ns = NsConstraint::None;
         let mut element: Option<&str> = None;
@@ -151,7 +151,7 @@ impl Translator {
                 Component::Namespace(prefix, _) if xpath.is_none() => {
                     ns = NsConstraint::Prefix(prefix.as_str());
                 }
-                // The sentinel default namespace (see SelectrsParser):
+                // The sentinel default namespace (see CssToXpathParser):
                 // plain `e` and type-less compounds — no constraint written.
                 Component::DefaultNamespace(_) if xpath.is_none() => {
                     ns = NsConstraint::None;
@@ -256,7 +256,7 @@ impl Translator {
     fn apply_simple(
         &self,
         xpath: &mut XPathExpr,
-        component: &Component<SelectrsImpl>,
+        component: &Component<CssToXpathImpl>,
     ) -> Result<(), Error> {
         match component {
             // :root
@@ -520,7 +520,7 @@ impl Translator {
     /// on the remaining arguments.
     fn arg_conditions(
         &self,
-        selectors: &[Selector<SelectrsImpl>],
+        selectors: &[Selector<CssToXpathImpl>],
         context: &str,
     ) -> Result<Option<Vec<Condition>>, Error> {
         let mut conditions = Vec::new();
@@ -552,7 +552,7 @@ impl Translator {
     /// `None` means the chain imposes no condition (a bare `*` argument).
     fn argument_condition(
         &self,
-        seqs: &[(Vec<&Component<SelectrsImpl>>, Option<Combinator>)],
+        seqs: &[(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)],
         idx: usize,
         context: &str,
     ) -> Result<Option<Condition>, Error> {
@@ -593,12 +593,12 @@ impl Translator {
 /// so `seqs[0]` is the rightmost compound and only the last entry's
 /// combinator is `None`.
 fn collect_seqs(
-    selector: &Selector<SelectrsImpl>,
-) -> Vec<(Vec<&Component<SelectrsImpl>>, Option<Combinator>)> {
+    selector: &Selector<CssToXpathImpl>,
+) -> Vec<(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)> {
     let mut iter = selector.iter();
-    let mut seqs: Vec<(Vec<&Component<SelectrsImpl>>, Option<Combinator>)> = Vec::new();
+    let mut seqs: Vec<(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)> = Vec::new();
     loop {
-        let compound: Vec<&Component<SelectrsImpl>> = (&mut iter).collect();
+        let compound: Vec<&Component<CssToXpathImpl>> = (&mut iter).collect();
         let combinator = iter.next_sequence();
         let done = combinator.is_none();
         seqs.push((compound, combinator));
@@ -634,7 +634,7 @@ fn apply_case_flag(
 }
 
 /// Human-readable construct names for unsupported-error messages.
-fn describe_component(component: &Component<SelectrsImpl>) -> String {
+fn describe_component(component: &Component<CssToXpathImpl>) -> String {
     match component {
         // Top-level :scope is handled (or rejected) in selector_to_xpath,
         // so reaching this arm means :scope sits inside a functional
@@ -647,9 +647,9 @@ fn describe_component(component: &Component<SelectrsImpl>) -> String {
         Component::Host(..) => "the `:host` pseudo-class".into(),
         Component::ParentSelector => "the `&` parent selector".into(),
         // PseudoElement carries an uninhabited type and the remaining
-        // variants require parser features selectrs never enables; they are
-        // unreachable, but erroring beats panicking (panic = abort would
-        // terminate the R session).
+        // variants require parser features this crate never enables; they
+        // are unreachable, but erroring beats panicking (panic = abort
+        // would tear down the caller's process).
         other => format!("an unexpected construct ({other:?})"),
     }
 }

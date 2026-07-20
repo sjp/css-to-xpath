@@ -1,4 +1,4 @@
-//! The associated types for `SelectrsImpl`.
+//! The associated types for `CssToXpathImpl`.
 //!
 //! A plain `String` newtype is used for every string-ish associated type.
 //! This deliberately avoids `string_cache` and its static atom tables — a

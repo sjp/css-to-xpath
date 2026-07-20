@@ -5,7 +5,8 @@
 //! top-level `or` (a `Condition` with `or_group` set) is wrapped when it
 //! is conjoined with other conditions, since `and` binds tighter than
 //! `or`. The exact output (like `e[@foo = 'bar']`) and the `*/`-collapse
-//! guard in `join` are load-bearing in test-translation.R.
+//! guard in `join` are load-bearing for the crate's output contract and
+//! are pinned by tests.
 
 /// Whether a name can be used directly in an XPath name test (no quoting
 /// needed).

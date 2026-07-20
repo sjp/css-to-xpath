@@ -13,7 +13,7 @@ use selectors::parser::{NthSelectorData, NthType, Selector};
 use super::Translator;
 use super::error::Error;
 use super::xpath_expr::{Condition, XPathExpr};
-use crate::parser::SelectrsImpl;
+use crate::parser::CssToXpathImpl;
 
 impl Translator {
     /// Route one `NthSelectorData` (with Servo's pre-parsed `(a, b)`) to
@@ -23,7 +23,7 @@ impl Translator {
         &self,
         xpath: &mut XPathExpr,
         data: &NthSelectorData,
-        selector_list: Option<&[Selector<SelectrsImpl>]>,
+        selector_list: Option<&[Selector<CssToXpathImpl>]>,
     ) -> Result<(), Error> {
         let a = data.an_plus_b.0;
         let b = data.an_plus_b.1;
@@ -91,7 +91,7 @@ impl Translator {
         b: i32,
         last: bool,
         nodetest: &str,
-        selector_list: Option<&[Selector<SelectrsImpl>]>,
+        selector_list: Option<&[Selector<CssToXpathImpl>]>,
     ) -> Result<(), Error> {
         // i64 throughout: `-(b-1)` / `abs(a)` must not overflow for
         // extreme i32 inputs.
