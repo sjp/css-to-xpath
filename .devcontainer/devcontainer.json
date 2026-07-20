@@ -4,5 +4,15 @@
 	"features": {
 		"ghcr.io/devcontainers/features/rust:1": {}
 	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer"
+			],
+			"settings": {
+				"rust-analyzer.server.path": "/usr/local/cargo/bin/rust-analyzer"
+			}
+		}
+	},
 	"remoteUser": "vscode"
 }
