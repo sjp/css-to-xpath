@@ -11,7 +11,7 @@ license = "MIT"
 [dependencies]
 # Exact pins: `selectors` is a 0.x crate tied to Servo's needs. Upgrades
 # are deliberate events, gated on the full test suite.
-selectors = "=0.38.0"
+selectors = "=0.39.0"
 cssparser = "=0.37.0"
 precomputed-hash = "=0.1.1"
 
