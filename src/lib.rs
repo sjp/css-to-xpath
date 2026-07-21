@@ -49,6 +49,9 @@ mod tests {
         assert_eq!(xpath("e[foo|bar]"), "e[@foo:bar]");
         assert_eq!(xpath("[*|foo]"), "*[@*[local-name() = 'foo']]");
         assert_eq!(xpath("[|foo]"), "*[@foo]");
+        assert_eq!(xpath("ns|e"), "ns:e");
+        assert_eq!(xpath("[ns|a]"), "*[@ns:a]");
+        assert_eq!(xpath("[*|a='v']"), "*[@*[local-name() = 'a'] = 'v']");
         assert_eq!(xpath("e[foo=\"bar\"]"), "e[@foo = 'bar']");
         assert_eq!(xpath("e[foo=\"\"]"), "e[@foo = '']");
         assert_eq!(
@@ -75,6 +78,30 @@ mod tests {
             xpath("e[hreflang|=\"en\"]"),
             "e[@hreflang and (@hreflang = 'en' or starts-with(@hreflang, 'en-'))]"
         );
+        // Empty values can never satisfy substring/token operators.
+        assert_eq!(xpath("*[aval~=\"\"]"), "*[0]");
+        assert_eq!(xpath("*[aval^=\"\"]"), "*[0]");
+        assert_eq!(xpath("*[aval$=\"\"]"), "*[0]");
+        assert_eq!(xpath("*[aval*=\"\"]"), "*[0]");
+        // Parenthesised / hex-digit-looking string content is not
+        // mistaken for a unicode escape: it survives literally.
+        assert_eq!(xpath("e[foo='(test)']"), "e[@foo = '(test)']");
+        assert_eq!(xpath("e[foo='(abc)']"), "e[@foo = '(abc)']");
+        assert_eq!(xpath("e[foo='(e2e)']"), "e[@foo = '(e2e)']");
+        assert_eq!(xpath("e[foo='(123)']"), "e[@foo = '(123)']");
+        assert_eq!(xpath("e[foo='(12345)']"), "e[@foo = '(12345)']");
+        // Six hex digits is the max for a CSS unicode escape.
+        assert_eq!(xpath("e[foo='(abcdef)']"), "e[@foo = '(abcdef)']");
+        assert_eq!(xpath("e[foo='(123456)']"), "e[@foo = '(123456)']");
+        // Seven hex digits exceeds the max, so no unicode escape applies.
+        assert_eq!(xpath("e[foo='(1234567)']"), "e[@foo = '(1234567)']");
+        assert_eq!(xpath("e[foo='(AbCdEf)']"), "e[@foo = '(AbCdEf)']");
+        assert_eq!(xpath("e[foo='(E2E)']"), "e[@foo = '(E2E)']");
+        assert_eq!(xpath("e[foo='(o2o)']"), "e[@foo = '(o2o)']");
+        assert_eq!(xpath("e[foo='(xyz)']"), "e[@foo = '(xyz)']");
+        assert_eq!(xpath("e[foo='(test123)']"), "e[@foo = '(test123)']");
+        assert_eq!(xpath("e[foo='(abc)(def)']"), "e[@foo = '(abc)(def)']");
+        assert_eq!(xpath("e[foo='(abc )']"), "e[@foo = '(abc )']");
     }
 
     #[test]
@@ -95,6 +122,75 @@ mod tests {
         assert_eq!(xpath("e + *"), "e/following-sibling::*[1][self::*]");
         assert_eq!(xpath("div#container p"), "div[@id = 'container']//p");
         assert_eq!(xpath("a , b"), "a | b");
+        // Namespaces on the '>' and '+' combinators' right-hand side.
+        assert_eq!(xpath("div > *|e"), "div/*[local-name() = 'e']");
+        assert_eq!(xpath("e + |f"), "e/following-sibling::*[1][self::f]");
+        assert_eq!(xpath("e + ns|f"), "e/following-sibling::*[1][self::ns:f]");
+        assert_eq!(
+            xpath("e + *|f"),
+            "e/following-sibling::*[1][self::*][local-name() = 'f']"
+        );
+        // A compound stacks further simple selectors after the '+'
+        // position test, in the order the CSS names them.
+        assert_eq!(
+            xpath("a + b.test"),
+            "a/following-sibling::*[1][self::b][@class and contains(concat(' ', normalize-space(@class), ' '), ' test ')]"
+        );
+        assert_eq!(
+            xpath("a + b#myid"),
+            "a/following-sibling::*[1][self::b][@id = 'myid']"
+        );
+        assert_eq!(
+            xpath("a + b[id][title]"),
+            "a/following-sibling::*[1][self::b][@id and @title]"
+        );
+        assert_eq!(
+            xpath("a + b.test[title]"),
+            "a/following-sibling::*[1][self::b][@class and contains(concat(' ', normalize-space(@class), ' '), ' test ') and @title]"
+        );
+        assert_eq!(
+            xpath("a.link + b[id]"),
+            "a[@class and contains(concat(' ', normalize-space(@class), ' '), ' link ')]/following-sibling::*[1][self::b][@id]"
+        );
+        assert_eq!(
+            xpath("a[href] + b.test"),
+            "a[@href]/following-sibling::*[1][self::b][@class and contains(concat(' ', normalize-space(@class), ' '), ' test ')]"
+        );
+        assert_eq!(
+            xpath("div#main + p.intro[title]"),
+            "div[@id = 'main']/following-sibling::*[1][self::p][@class and contains(concat(' ', normalize-space(@class), ' '), ' intro ') and @title]"
+        );
+        assert_eq!(
+            xpath("h1 + *[rel=up]"),
+            "h1/following-sibling::*[1][self::*][@rel = 'up']"
+        );
+        // A leading combinator chain applies '+' after the preceding step.
+        assert_eq!(
+            xpath("div > h1 + p"),
+            "div/h1/following-sibling::*[1][self::p]"
+        );
+        assert_eq!(
+            xpath("div#main > h1 + p[class]"),
+            "div[@id = 'main']/h1/following-sibling::*[1][self::p][@class]"
+        );
+        assert_eq!(
+            xpath("section a + b"),
+            "section//a/following-sibling::*[1][self::b]"
+        );
+        assert_eq!(
+            xpath("article.post > h2.title + p.intro[data-info]"),
+            "article[@class and contains(concat(' ', normalize-space(@class), ' '), ' post ')]/h2[@class and contains(concat(' ', normalize-space(@class), ' '), ' title ')]/following-sibling::*[1][self::p][@class and contains(concat(' ', normalize-space(@class), ' '), ' intro ') and @data-info]"
+        );
+        // '+' combines with the of-type pseudo family on the right-hand
+        // side, testing the sibling's own preceding-sibling count.
+        assert_eq!(
+            xpath("h1 + p:first-child"),
+            "h1/following-sibling::*[1][self::p][count(preceding-sibling::*) = 0]"
+        );
+        assert_eq!(
+            xpath("h1 + p:nth-child(2)"),
+            "h1/following-sibling::*[1][self::p][count(preceding-sibling::*) = 1]"
+        );
     }
 
     #[test]
@@ -109,6 +205,13 @@ mod tests {
         assert_eq!(xpath("[\\31 23]"), "*[attribute::*[name() = '123']]");
         assert_eq!(xpath("e[foo='\\31 23']"), "e[@foo = '123']");
         assert_eq!(xpath("e[foo='x\\79 z']"), "e[@foo = 'xyz']");
+        // A single hex digit is still a valid escape.
+        assert_eq!(xpath("e[foo='\\4a']"), "e[@foo = 'J']");
+        // An escaped backslash yields a literal backslash; what follows
+        // it must not be re-processed as another escape.
+        assert_eq!(xpath("e[foo='x\\\\79 z']"), "e[@foo = 'x\\79 z']");
+        assert_eq!(xpath("e[foo='\\\\31 23']"), "e[@foo = '\\31 23']");
+        assert_eq!(xpath("#\\\\31 x"), "*[@id = '\\31']//x");
         // '*|' bypasses the safe-name fallback: quoting handles it.
         assert_eq!(xpath("*|di\\[v"), "*[local-name() = 'di[v']");
         assert_eq!(xpath("[*|h\\]ref]"), "*[@*[local-name() = 'h]ref']]");
@@ -139,6 +242,29 @@ mod tests {
                  string-length({LOWER_FOO})-2) = 'bar']"
             )
         );
+        assert_eq!(
+            xpath("e[foo*=\"Bar\" i]"),
+            format!("e[{LOWER_FOO} and contains({LOWER_FOO}, 'bar')]")
+        );
+        assert_eq!(
+            xpath("e[foo~=\"Bar\" i]"),
+            format!(
+                "e[{LOWER_FOO} and contains(concat(' ', \
+                 normalize-space({LOWER_FOO}), ' '), ' bar ')]"
+            )
+        );
+        assert_eq!(
+            xpath("e[foo|=\"Bar\" i]"),
+            format!(
+                "e[{LOWER_FOO} and ({LOWER_FOO} = 'bar' or \
+                 starts-with({LOWER_FOO}, 'bar-'))]"
+            )
+        );
+        // 's' requests default case-sensitive matching on any operator.
+        assert_eq!(
+            xpath("e[foo^=\"Bar\" s]"),
+            "e[@foo and starts-with(@foo, 'Bar')]"
+        );
         // ASCII-only lowering: non-ASCII characters are left alone.
         assert_eq!(
             xpath("e[foo=\"B\u{e4}r\" i]"),
@@ -156,6 +282,24 @@ mod tests {
                  'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
                  'abcdefghijklmnopqrstuvwxyz') = 'bar']"
             )
+        );
+    }
+
+    /// Attribute values containing quote characters pick a delimiter that
+    /// avoids escaping, falling back to per-character `concat(...)` when
+    /// the value contains both.
+    #[test]
+    fn quote_escaping() {
+        // A value with only apostrophes is wrapped in double quotes.
+        assert_eq!(xpath("*[aval=\"'\"]"), "*[@aval = \"'\"]");
+        assert_eq!(xpath("*[aval=\"'''\"]"), "*[@aval = \"'''\"]");
+        // A value with only double quotes is wrapped in single quotes.
+        assert_eq!(xpath("*[aval='\"']"), "*[@aval = '\"']");
+        assert_eq!(xpath("*[aval='\"\"\"']"), "*[@aval = '\"\"\"']");
+        // A value with both falls back to concat(), one literal per char.
+        assert_eq!(
+            xpath("*[aval='\"\\'\"']"),
+            "*[@aval = concat('\"',\"'\",'\"')]"
         );
     }
 
@@ -221,6 +365,8 @@ mod tests {
         // sibling's name with the matched element's own name, so only a
         // type named in the compound itself gives a sibling node test.
         assert!(t.css_to_xpath("*:first-of-type", "").is_err());
+        assert!(t.css_to_xpath("*:last-of-type", "").is_err());
+        assert!(t.css_to_xpath("*:nth-of-type(2n)", "").is_err());
         assert!(t.css_to_xpath("*:nth-last-of-type(2)", "").is_err());
         assert!(t.css_to_xpath("*:only-of-type", "").is_err());
         assert!(t.css_to_xpath(".foo:first-of-type", "").is_err());
@@ -236,6 +382,64 @@ mod tests {
         assert!(t.css_to_xpath("e:nth-child(2 n)", "").is_err());
         assert!(t.css_to_xpath("e:nth-child(2.5)", "").is_err());
         assert!(t.css_to_xpath("e:nth-child(2e1)", "").is_err());
+    }
+
+    /// CSS syntax errors on malformed selectors, ported from selectr's
+    /// parse-error suite. selectr pins its own hand-written parser's
+    /// exact message text; css-to-xpath parses through Servo's `selectors`
+    /// crate, so only the fact of an error is asserted here (message
+    /// wording is pinned separately in `error_messages`).
+    #[test]
+    fn parse_errors() {
+        let t = Translator::new(Mode::Generic);
+        // Dangling/missing selectors around commas and combinators.
+        assert!(t.css_to_xpath("div, ", "").is_err());
+        assert!(t.css_to_xpath(" , div", "").is_err());
+        assert!(t.css_to_xpath("p, , div", "").is_err());
+        assert!(t.css_to_xpath("div > ", "").is_err());
+        assert!(t.css_to_xpath("  > div", "").is_err());
+        assert!(t.css_to_xpath(" ", "").is_err());
+        // Malformed namespace syntax.
+        assert!(t.css_to_xpath("foo|#bar", "").is_err());
+        assert!(t.css_to_xpath("e|", "").is_err());
+        assert!(t.css_to_xpath("div .|x", "").is_err());
+        // A selector cannot start with a bare '#' or ':' before a class
+        // token, nor a bare '.' before a hash/pseudo token.
+        assert!(t.css_to_xpath("#.foo", "").is_err());
+        assert!(t.css_to_xpath(".#foo", "").is_err());
+        assert!(t.css_to_xpath(":#foo", "").is_err());
+        // Malformed attribute selectors.
+        assert!(t.css_to_xpath("[*]", "").is_err());
+        assert!(t.css_to_xpath("[foo|]", "").is_err());
+        assert!(t.css_to_xpath("[#]", "").is_err());
+        assert!(t.css_to_xpath("[foo=#]", "").is_err());
+        assert!(t.css_to_xpath("[href]a", "").is_err());
+        assert!(t.css_to_xpath("[rel:stylesheet]", "").is_err());
+        // :nth-child() requires at least one argument.
+        assert!(t.css_to_xpath(":nth-child()", "").is_err());
+        // Stray/invalid characters.
+        assert!(t.css_to_xpath("attributes(href)/html/body/a", "").is_err());
+        assert!(t.css_to_xpath("attributes(href)", "").is_err());
+        assert!(t.css_to_xpath("html/body/a", "").is_err());
+        assert!(t.css_to_xpath("foo!", "").is_err());
+        assert!(t.css_to_xpath("a[rel!=nofollow]", "").is_err());
+        assert!(t.css_to_xpath("a:not(b;)", "").is_err());
+        // Mis-placed pseudo-elements: not at the end of a selector, or
+        // anywhere inside a functional pseudo-class's argument.
+        assert!(t.css_to_xpath("a:before:empty", "").is_err());
+        assert!(t.css_to_xpath("li:before a", "").is_err());
+        assert!(t.css_to_xpath(":not(:before)", "").is_err());
+        assert!(t.css_to_xpath(":not(a,)", "").is_err());
+        assert!(t.css_to_xpath(":is(:before)", "").is_err());
+        assert!(t.css_to_xpath(":matches(:before)", "").is_err());
+        assert!(t.css_to_xpath(":is(a:before b)", "").is_err());
+        assert!(t.css_to_xpath(":is(a b:before)", "").is_err());
+        // A trailing combinator inside a functional pseudo-class's
+        // argument is still a dangling combinator.
+        assert!(t.css_to_xpath(":is(a >)", "").is_err());
+        // The corresponding well-formed selectors are valid.
+        assert!(t.css_to_xpath("[rel=stylesheet]", "").is_ok());
+        assert!(t.css_to_xpath(":lang(fr)", "").is_ok());
     }
 
     /// The nth-* family and its an+b arithmetic.
@@ -340,6 +544,16 @@ mod tests {
             xpath("é:only-of-type"),
             "*[name() = 'é' and count(preceding-sibling::*[name() = 'é']) = 0 and count(following-sibling::*[name() = 'é']) = 0]"
         );
+        // Explicit-namespace and no-namespace elements go through
+        // local-name()/name()-plus-namespace-uri() the same way.
+        assert_eq!(
+            xpath("*|e:first-of-type"),
+            "*[local-name() = 'e' and count(preceding-sibling::*[local-name() = 'e']) = 0]"
+        );
+        assert_eq!(
+            xpath("|é:first-of-type"),
+            "*[name() = 'é' and namespace-uri() = '' and count(preceding-sibling::*[name() = 'é' and namespace-uri() = '']) = 0]"
+        );
         assert_eq!(
             xpath("e ~ f:nth-child(3)"),
             "e/following-sibling::f[count(preceding-sibling::*) = 2]"
@@ -429,6 +643,7 @@ mod tests {
         );
         assert_eq!(xpath("e:nOT(*)"), "e[0]");
         assert_eq!(xpath("e:not(a)"), "e[not(name() = 'a')]");
+        assert_eq!(xpath(":not(*|e)"), "*[not(local-name() = 'e')]");
         assert_eq!(xpath("e:not(a, b)"), "e[not(name() = 'a' or name() = 'b')]");
         // A universal argument makes :not() unmatchable...
         assert_eq!(xpath("div:not(a, *)"), "div[0]");
@@ -438,6 +653,20 @@ mod tests {
         assert_eq!(
             xpath("div:where(p, span)"),
             "div[name() = 'p' or name() = 'span']"
+        );
+        assert_eq!(xpath("section:where(#main)"), "section[@id = 'main']");
+        assert_eq!(xpath("input:where([required])"), "input[@required]");
+        assert_eq!(
+            xpath("*:where(.highlight)"),
+            "*[@class and contains(concat(' ', normalize-space(@class), ' '), ' highlight ')]"
+        );
+        assert_eq!(
+            xpath("div:where(.foo, .bar)"),
+            "div[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') or @class and contains(concat(' ', normalize-space(@class), ' '), ' bar ')]"
+        );
+        assert_eq!(
+            xpath("p:where(.highlight, #special, [data-key])"),
+            "p[@class and contains(concat(' ', normalize-space(@class), ' '), ' highlight ') or @id = 'special' or @data-key]"
         );
         assert_eq!(
             xpath("*:where(div.content)"),
@@ -473,6 +702,9 @@ mod tests {
             "section[.//*[@class and contains(concat(' ', normalize-space(@class), ' '), ' content ') and name() = 'div']]"
         );
         assert_eq!(xpath("div:has(*)"), "div[.//*]");
+        assert_eq!(xpath("section:has(#main)"), "section[.//*[@id = 'main']]");
+        assert_eq!(xpath("form:has([required])"), "form[.//*[@required]]");
+        assert_eq!(xpath("*:has(img)"), "*[.//*[name() = 'img']]");
         // Leading combinators in :has() (selectors-4 relative selectors).
         assert_eq!(xpath("e:has(> img)"), "e[child::*[name() = 'img']]");
         assert_eq!(xpath("e:has(~ p)"), "e[following-sibling::*[name() = 'p']]");
@@ -670,6 +902,10 @@ mod tests {
             "e[following-sibling::*[name() = 'a']/following-sibling::*[1][name() = 'b']]"
         );
         assert_eq!(
+            xpath("e:has(~ a > b)"),
+            "e[following-sibling::*[name() = 'a']/*[name() = 'b']]"
+        );
+        assert_eq!(
             xpath("e:has(a > b + c)"),
             "e[.//*[name() = 'a']/*[name() = 'b']/following-sibling::*[1][name() = 'c']]"
         );
@@ -757,8 +993,15 @@ mod tests {
         assert_eq!(xpath("e:lang(en-*)"), "e[lang('en')]");
         assert_eq!(xpath("e:lang(*)"), "e[true()]");
         assert_eq!(xpath("e:lang(en, fr)"), "e[lang('en') or lang('fr')]");
+        assert_eq!(
+            xpath("e:lang(en, de, fr)"),
+            "e[lang('en') or lang('de') or lang('fr')]"
+        );
         // Whitespace is a separator too.
         assert_eq!(xpath("e:lang(en fr)"), "e[lang('en') or lang('fr')]");
+        // Trailing/leading hyphens are still valid idents, not wildcards.
+        assert_eq!(xpath("e:lang(en--)"), "e[lang('en--')]");
+        assert_eq!(xpath("e:lang(--x)"), "e[lang('--x')]");
         // A bare * stays match-anything even alongside other ranges: it
         // must not be confused with the head of an interior wildcard.
         assert_eq!(xpath("e:lang(*, fr)"), "e[true() or lang('fr')]");
@@ -771,6 +1014,16 @@ mod tests {
         assert_eq!(
             html.css_to_xpath("e:lang(*)", "").unwrap(),
             "e[ancestor-or-self::*[@lang]]"
+        );
+        // A hyphenated range keeps its full spelling in the prefix match.
+        assert_eq!(
+            html.css_to_xpath("e:lang(en-nz)", "").unwrap(),
+            "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-nz-')]]"
+        );
+        // A comma list ORs the per-range ancestor-or-self:: tests.
+        assert_eq!(
+            html.css_to_xpath("e:lang(en, fr)", "").unwrap(),
+            "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')] or ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'fr-')]]"
         );
         // xhtml shares the HTML overrides.
         let xhtml = Translator::new(Mode::Xhtml);
@@ -802,6 +1055,8 @@ mod tests {
         assert_eq!(xpath("e:dir(rtl)"), "e[0]");
         assert_eq!(html.css_to_xpath("e:dir(rtl)", "").unwrap(), "e[0]");
         assert_eq!(xhtml.css_to_xpath("e:dir(ltr)", "").unwrap(), "e[0]");
+        // Never-match applies regardless of the (valid) ident's value.
+        assert_eq!(xpath("e:dir(foo)"), "e[0]");
         assert!(t.css_to_xpath("e:dir()", "").is_err());
         assert!(t.css_to_xpath("e:dir(ltr rtl)", "").is_err());
         assert!(t.css_to_xpath("e:dir(ltr, rtl)", "").is_err());
@@ -900,6 +1155,23 @@ mod tests {
         assert_eq!(h("a:visited"), "a[0]");
         assert_eq!(h("a:focus-within"), "a[0]");
         assert_eq!(h("a:focus-visible"), "a[0]");
+        // Xhtml shares every HTML pseudo-class override (only name/
+        // attribute-value casing differs between the two modes).
+        let xhtml = Translator::new(Mode::Xhtml);
+        let x = |css: &str| xhtml.css_to_xpath(css, "").unwrap();
+        assert_eq!(x("a:link"), h("a:link"));
+        assert_eq!(x("input:checked"), h("input:checked"));
+        assert_eq!(x("input:required"), h("input:required"));
+        assert_eq!(x("select:optional"), h("select:optional"));
+        assert_eq!(x("input:disabled"), h("input:disabled"));
+        assert_eq!(x("input:enabled"), h("input:enabled"));
+        // Form-state pseudo-classes with no exact static translation
+        // stay unknown in every mode, HTML included.
+        assert!(html.css_to_xpath("input:read-only", "").is_err());
+        assert!(html.css_to_xpath("input:read-write", "").is_err());
+        assert!(html.css_to_xpath("input:placeholder-shown", "").is_err());
+        assert!(html.css_to_xpath("input:default", "").is_err());
+        assert!(html.css_to_xpath("input:indeterminate", "").is_err());
     }
 
     #[test]
@@ -928,6 +1200,109 @@ mod tests {
         assert_eq!(
             t.css_to_xpath("a, b", "descendant-or-self::").unwrap(),
             "descendant-or-self::a | descendant-or-self::b"
+        );
+    }
+
+    /// css-syntax-3 auto-closes open blocks, functions, and strings at
+    /// EOF: the parse error is flagged, not fatal, so a selector left
+    /// unclosed at end-of-input translates identically to its closed
+    /// form, in every translator mode.
+    #[test]
+    fn eof_autocloses() {
+        fn eof(unclosed: &str, closed: &str) {
+            for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+                let t = Translator::new(mode);
+                assert_eq!(
+                    t.css_to_xpath(unclosed, "").unwrap(),
+                    t.css_to_xpath(closed, "").unwrap(),
+                    "{unclosed:?} vs {closed:?} in {mode:?}"
+                );
+            }
+        }
+
+        eof("[rel", "[rel]");
+        eof("[rel=stylesheet", "[rel=stylesheet]");
+        eof("[rel=stylesheet i", "[rel=stylesheet i]");
+        eof("[foo=\"bar", "[foo=\"bar\"]");
+        eof("[foo=\"", "[foo=\"\"]");
+        eof(":lang(fr", ":lang(fr)");
+        eof(":nth-child(2n+1", ":nth-child(2n+1)");
+        eof(":is(a", ":is(a)");
+        eof("e:is(a, b", "e:is(a, b)");
+        eof(":not(a", ":not(a)");
+        eof(":has(> a", ":has(> a)");
+        // The unclosed string is auto-closed at parse time; the
+        // pseudo-class is then rejected at translation time either way.
+        let t = Translator::new(Mode::Generic);
+        assert!(t.css_to_xpath(":contains(\"foo", "").is_err());
+    }
+
+    /// `Error::into_message`'s wording — including the caret-pointer
+    /// gutter under a `Parse` error, and the plain sentence for an
+    /// `Unsupported` one — is documented in `translate::error` as part
+    /// of the crate's output contract. Pin it here, plus the `Parse` vs
+    /// `Unsupported` variant split, which selects the message shape.
+    #[test]
+    fn error_messages() {
+        let t = Translator::new(Mode::Generic);
+
+        // A dangling combinator: not valid CSS, so `Error::Parse`. The
+        // caret lands one past the last character, at the EOF position.
+        let sel = "div > ";
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        assert_eq!(err, crate::Error::Parse("DanglingCombinator".to_owned(), 7));
+        assert_eq!(
+            err.into_message(sel),
+            "Unable to parse the CSS selector \"div > \": DanglingCombinator\n\
+             \x20 |\n\
+             \x20 | div > \n\
+             \x20 |       ^"
+        );
+
+        // A stray '#' where an attribute value is expected: also a
+        // `Parse` error, caret under the offending character.
+        let sel = "[foo=#]";
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        assert_eq!(
+            err,
+            crate::Error::Parse("BadValueInAttr(Delim('#'))".to_owned(), 6)
+        );
+        assert_eq!(
+            err.into_message(sel),
+            "Unable to parse the CSS selector \"[foo=#]\": BadValueInAttr(Delim('#'))\n\
+             \x20 |\n\
+             \x20 | [foo=#]\n\
+             \x20 |      ^"
+        );
+
+        // An invalid character ('/' is not valid CSS syntax here).
+        let sel = "html/body";
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        assert_eq!(
+            err,
+            crate::Error::Parse("UnexpectedToken(Delim('/'))".to_owned(), 5)
+        );
+        assert_eq!(
+            err.into_message(sel),
+            "Unable to parse the CSS selector \"html/body\": UnexpectedToken(Delim('/'))\n\
+             \x20 |\n\
+             \x20 | html/body\n\
+             \x20 |     ^"
+        );
+
+        // The column combinator is valid CSS syntax but has no XPath 1.0
+        // translation, so it is `Error::Unsupported` — no caret gutter,
+        // since there is no single offending byte position.
+        let sel = "col || td";
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        assert_eq!(
+            err,
+            crate::Error::Unsupported("the `||` column combinator".to_owned())
+        );
+        assert_eq!(
+            err.into_message(sel),
+            "The CSS selector \"col || td\" uses the `||` column combinator, \
+             which this translator does not support"
         );
     }
 }
