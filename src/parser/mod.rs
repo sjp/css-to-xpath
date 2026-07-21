@@ -374,3 +374,89 @@ pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
         Error::Parse(detail, e.location.column)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn css(pc: &PseudoClass) -> String {
+        let mut s = String::new();
+        pc.to_css(&mut s).unwrap();
+        s
+    }
+
+    #[test]
+    fn pseudo_class_to_css_names() {
+        assert_eq!(css(&PseudoClass::AnyLink), ":any-link");
+        assert_eq!(css(&PseudoClass::Link), ":link");
+        assert_eq!(css(&PseudoClass::Visited), ":visited");
+        assert_eq!(css(&PseudoClass::Hover), ":hover");
+        assert_eq!(css(&PseudoClass::Active), ":active");
+        assert_eq!(css(&PseudoClass::Focus), ":focus");
+        assert_eq!(css(&PseudoClass::FocusWithin), ":focus-within");
+        assert_eq!(css(&PseudoClass::FocusVisible), ":focus-visible");
+        assert_eq!(css(&PseudoClass::Target), ":target");
+        assert_eq!(css(&PseudoClass::TargetWithin), ":target-within");
+        assert_eq!(css(&PseudoClass::LocalLink), ":local-link");
+        assert_eq!(css(&PseudoClass::Enabled), ":enabled");
+        assert_eq!(css(&PseudoClass::Disabled), ":disabled");
+        assert_eq!(css(&PseudoClass::Checked), ":checked");
+        assert_eq!(css(&PseudoClass::Required), ":required");
+        assert_eq!(css(&PseudoClass::Optional), ":optional");
+    }
+
+    #[test]
+    fn pseudo_class_to_css_lang() {
+        assert_eq!(
+            css(&PseudoClass::Lang(vec![LangArg::Value("en".into())])),
+            ":lang(en)"
+        );
+        assert_eq!(
+            css(&PseudoClass::Lang(vec![
+                LangArg::Value("en".into()),
+                LangArg::Value("fr".into()),
+            ])),
+            ":lang(en fr)"
+        );
+        assert_eq!(
+            css(&PseudoClass::Lang(vec![
+                LangArg::Value("de".into()),
+                LangArg::Star,
+            ])),
+            ":lang(de *)"
+        );
+        // Values are run through `serialize_identifier`, not written raw:
+        // a leading digit needs escaping to remain a valid CSS identifier.
+        assert_eq!(
+            css(&PseudoClass::Lang(vec![LangArg::Value("1x".into())])),
+            ":lang(\\31 x)"
+        );
+    }
+
+    #[test]
+    fn pseudo_class_to_css_dir() {
+        assert_eq!(css(&PseudoClass::Dir("ltr".into())), ":dir(ltr)");
+    }
+
+    #[test]
+    fn pseudo_class_is_active_or_hover() {
+        assert!(PseudoClass::Active.is_active_or_hover());
+        assert!(PseudoClass::Hover.is_active_or_hover());
+        assert!(!PseudoClass::Focus.is_active_or_hover());
+        assert!(!PseudoClass::Link.is_active_or_hover());
+        assert!(!PseudoClass::Target.is_active_or_hover());
+    }
+
+    #[test]
+    fn pseudo_class_is_user_action_state() {
+        assert!(PseudoClass::Active.is_user_action_state());
+        assert!(PseudoClass::Hover.is_user_action_state());
+        assert!(PseudoClass::Focus.is_user_action_state());
+        assert!(PseudoClass::FocusWithin.is_user_action_state());
+        assert!(PseudoClass::FocusVisible.is_user_action_state());
+        assert!(!PseudoClass::Link.is_user_action_state());
+        assert!(!PseudoClass::Target.is_user_action_state());
+        assert!(!PseudoClass::Enabled.is_user_action_state());
+        assert!(!PseudoClass::Checked.is_user_action_state());
+    }
+}
