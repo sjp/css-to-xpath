@@ -346,10 +346,28 @@ mod tests {
         assert!(t.css_to_xpath("a :scope", "").is_err());
         assert!(t.css_to_xpath("a > :scope", "").is_err());
         assert!(t.css_to_xpath(":scope :scope", "").is_err());
-        assert!(t.css_to_xpath("e:is(:scope)", "").is_err());
-        assert!(t.css_to_xpath("e:not(:scope)", "").is_err());
-        assert!(t.css_to_xpath("e:has(:scope)", "").is_err());
-        assert!(t.css_to_xpath("e:nth-child(2 of :scope)", "").is_err());
+        // Inside a functional pseudo-class, the context node is
+        // unreachable from an XPath 1.0 predicate: all four entry points
+        // hit the same `describe_component` message.
+        let scope_in_functional = crate::Error::Unsupported(
+            "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
+        );
+        assert_eq!(
+            t.css_to_xpath("e:is(:scope)", "").unwrap_err(),
+            scope_in_functional
+        );
+        assert_eq!(
+            t.css_to_xpath("e:not(:scope)", "").unwrap_err(),
+            scope_in_functional
+        );
+        assert_eq!(
+            t.css_to_xpath("e:has(:scope)", "").unwrap_err(),
+            scope_in_functional
+        );
+        assert_eq!(
+            t.css_to_xpath("e:nth-child(2 of :scope)", "").unwrap_err(),
+            scope_in_functional
+        );
         // A leading combinator is :has()-only; dangling and doubled
         // combinators are parse errors everywhere.
         assert!(t.css_to_xpath("e:is(> a)", "").is_err());
@@ -1303,6 +1321,26 @@ mod tests {
             err.into_message(sel),
             "The CSS selector \"col || td\" uses the `||` column combinator, \
              which this translator does not support"
+        );
+
+        // `:scope` inside a functional pseudo-class argument has no
+        // reachable context node in an XPath 1.0 predicate: also
+        // `Error::Unsupported`, and the only `describe_component` branch
+        // reachable through the public API (the other branches all
+        // require parser constructs — `::slotted()`, `::part()`, `:host`,
+        // `&`, relative-selector scoping — this crate never enables).
+        let sel = "e:is(:scope)";
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        assert_eq!(
+            err,
+            crate::Error::Unsupported(
+                "the `:scope` pseudo-class inside a functional pseudo-class".to_owned()
+            )
+        );
+        assert_eq!(
+            err.into_message(sel),
+            "The CSS selector \"e:is(:scope)\" uses the `:scope` pseudo-class \
+             inside a functional pseudo-class, which this translator does not support"
         );
     }
 }
