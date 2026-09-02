@@ -12,9 +12,18 @@ use super::error::Error;
 use super::xpath_expr::{XPathExpr, xpath_literal};
 use super::{Kind, Translator};
 
-/// The HTML translators' lang attribute. (The generic translator has no
-/// use for one — its `:lang()` goes through XPath's `lang()` function.)
+/// The HTML translators' lang attribute. The generic translator's
+/// `:lang()` goes through XPath's `lang()` function instead, which reads
+/// `xml:lang` itself — except for the wildcard range, which `lang()`
+/// cannot express and which walks [`XML_LANG_ATTRIBUTE`] directly.
 const LANG_ATTRIBUTE: &str = "lang";
+
+/// The generic translator's language attribute, used only by the `:lang(*)`
+/// walk. XML binds the `xml` prefix implicitly, so it needs no entry in
+/// the caller's namespace map — libxml2 pre-binds it; a processor that
+/// resolves prefixes purely from a caller-supplied map (sxd-xpath, say)
+/// needs it registered.
+const XML_LANG_ATTRIBUTE: &str = "xml:lang";
 
 /// The HTML `type` attribute, ASCII-lowercased so comparisons against
 /// enumerated-attribute keywords are case-insensitive: `type` is an
@@ -153,12 +162,13 @@ impl Translator {
 
     /// Generic `:lang()`: XPath's `lang()` does language-range prefix
     /// matching natively, so `en` and `en-*` both become `lang('en')`-style
-    /// tests and a bare `*` is `true()`.
+    /// tests. A bare `*` matches elements whose language is *known*, which
+    /// `lang()` cannot express, so it walks `xml:lang` instead.
     fn lang_generic(&self, xpath: &mut XPathExpr, args: &[LangArg]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in lang_values(args)? {
             if value == "*" {
-                conditions.push("true()".to_owned());
+                conditions.push(lang_known_condition(XML_LANG_ATTRIBUTE));
             } else if let Some(prefix) = value.strip_suffix('*') {
                 // lang('en-') would never match: libxml2 expects the
                 // argument itself to end at a subtag boundary.
@@ -178,8 +188,7 @@ impl Translator {
         let mut conditions: Vec<String> = Vec::new();
         for value in lang_values(args)? {
             if value == "*" {
-                // Wildcard * matches any element with a lang attribute.
-                conditions.push(format!("ancestor-or-self::*[@{LANG_ATTRIBUTE}]"));
+                conditions.push(lang_known_condition(LANG_ATTRIBUTE));
             } else if let Some(prefix) = value.strip_suffix('*') {
                 // Wildcard suffix like "en-*": don't add '-' if the prefix
                 // already ends with it.
@@ -268,6 +277,15 @@ fn add_lang_conditions(xpath: &mut XPathExpr, conditions: Vec<String>) {
         1 => xpath.add_condition(&conditions[0]),
         _ => xpath.add_or_condition(&conditions.join(" or ")),
     }
+}
+
+/// The wildcard range `*`, which matches an element whose language is
+/// known. The language comes from the nearest ancestor-or-self carrying
+/// `attribute` (`[1]` counts backwards along a reverse axis), and an empty
+/// value there resets the language to unknown rather than deferring to a
+/// further ancestor — so the nearest one must also be non-empty.
+fn lang_known_condition(attribute: &str) -> String {
+    format!("ancestor-or-self::*[@{attribute}][1][string-length(@{attribute}) > 0]")
 }
 
 /// The HTML nearest-ancestor language test.

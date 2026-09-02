@@ -113,7 +113,12 @@ assert_eq!(
 - `:is()` / `:matches()` (legacy alias) / `:where()` / `:not()` /
   `:has()`, including complex (combinator-bearing) arguments and
   relative-selector leading combinators inside `:has()`.
-- `:scope`, `:root`, `:empty`, `:lang()`.
+- `:scope`, `:root`, `:empty`, `:lang()`. Under `Mode::Generic` a range
+  translates to XPath's `lang()`, except the wildcard `:lang(*)` —
+  "any known language", which `lang()` cannot express — which walks
+  `@xml:lang` instead. That relies on the `xml` prefix, which XML binds
+  implicitly and so needs no entry in the caller's namespace map;
+  processors that do not pre-bind it need it registered.
 - The `Mode::Html`/`Mode::Xhtml` form and link pseudo-classes listed above.
 
 ## Not supported

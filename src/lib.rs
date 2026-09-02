@@ -1206,7 +1206,12 @@ mod tests {
         assert_eq!(xpath("e:lang(en)"), "e[lang('en')]");
         assert_eq!(xpath("e:lang(\"en\")"), "e[lang('en')]");
         assert_eq!(xpath("e:lang(en-*)"), "e[lang('en')]");
-        assert_eq!(xpath("e:lang(*)"), "e[true()]");
+        // A bare * matches a *known* language, which XPath's lang() cannot
+        // express: walk xml:lang instead (xml:lang="" is unknown).
+        assert_eq!(
+            xpath("e:lang(*)"),
+            "e[ancestor-or-self::*[@xml:lang][1][string-length(@xml:lang) > 0]]"
+        );
         assert_eq!(xpath("e:lang(en, fr)"), "e[lang('en') or lang('fr')]");
         assert_eq!(
             xpath("e:lang(en, de, fr)"),
@@ -1219,7 +1224,10 @@ mod tests {
         assert_eq!(xpath("e:lang(--x)"), "e[lang('--x')]");
         // A bare * stays match-anything even alongside other ranges: it
         // must not be confused with the head of an interior wildcard.
-        assert_eq!(xpath("e:lang(*, fr)"), "e[true() or lang('fr')]");
+        assert_eq!(
+            xpath("e:lang(*, fr)"),
+            "e[ancestor-or-self::*[@xml:lang][1][string-length(@xml:lang) > 0] or lang('fr')]"
+        );
         // HTML: nearest lang-attributed ancestor, lowercased prefix match.
         let html = Translator::new(Mode::Html);
         assert_eq!(
@@ -1228,7 +1236,7 @@ mod tests {
         );
         assert_eq!(
             html.css_to_xpath("e:lang(*)", "").unwrap(),
-            "e[ancestor-or-self::*[@lang]]"
+            "e[ancestor-or-self::*[@lang][1][string-length(@lang) > 0]]"
         );
         // A hyphenated range keeps its full spelling in the prefix match.
         assert_eq!(
@@ -1244,7 +1252,7 @@ mod tests {
         let xhtml = Translator::new(Mode::Xhtml);
         assert_eq!(
             xhtml.css_to_xpath("E:lang(*)", "").unwrap(),
-            "E[ancestor-or-self::*[@lang]]"
+            "E[ancestor-or-self::*[@lang][1][string-length(@lang) > 0]]"
         );
         // Interior wildcards (RFC 4647 extended filtering) are valid CSS
         // but inexpressible in XPath 1.0, so both spellings error rather
