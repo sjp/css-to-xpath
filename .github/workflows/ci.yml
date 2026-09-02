@@ -76,6 +76,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets --all-features
 
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+      # Not in install-action's tool list, so install it from source.
+      - run: cargo install cargo-fuzz --locked
+      # Seed from the selectors the test suite already covers, so the
+      # budget goes on mutations of real syntax.
+      - run: ./fuzz/seed-corpus.sh
+      - run: cargo fuzz run translate -- -max_total_time=120 -max_len=4096
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

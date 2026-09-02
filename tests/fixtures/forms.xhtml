@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixture for Mode::Xhtml: XHTML served as XML, so element names live in
+  the XHTML namespace and the language comes from xml:lang.
+
+  Type selectors are therefore written xhtml|input in the test cases; an
+  unprefixed `input` means the null namespace and matches nothing here.
+  The HTML pseudo-class translations match on local-name(), so they are
+  namespace-agnostic and need no prefix.
+
+  The form is arranged around the awkward corners of :disabled — a
+  disabled fieldset, its first legend (carved out) versus a second one
+  (not carved out), and a disabled optgroup's options.
+-->
+<html xmlns="http://www.w3.org/1999/xhtml" id="doc" xml:lang="en">
+  <body id="body">
+    <form id="f1">
+      <fieldset id="fs1" disabled="disabled">
+        <legend id="lg1"><input id="i1" type="text"/></legend>
+        <legend id="lg2"><input id="i2" type="text"/></legend>
+        <input id="i3" type="text"/>
+      </fieldset>
+      <fieldset id="fs2">
+        <input id="i4" type="checkbox" checked="checked"/>
+        <input id="i5" type="radio"/>
+        <input id="i6" type="text" required="required"/>
+        <input id="i7" type="hidden" required="required"/>
+        <select id="se1">
+          <optgroup id="og1" disabled="disabled">
+            <option id="o1" selected="selected">A</option>
+            <option id="o2">B</option>
+          </optgroup>
+          <optgroup id="og2">
+            <option id="o3">C</option>
+          </optgroup>
+        </select>
+        <button id="bt1" disabled="disabled">Go</button>
+        <textarea id="ta1" required="required"></textarea>
+      </fieldset>
+    </form>
+    <a id="a1" href="#x">link</a>
+    <a id="a2">not a link</a>
+    <p id="p1" xml:lang="fr-CA">bonjour</p>
+    <p id="p2" lang="de">hallo</p>
+  </body>
+</html>

@@ -1,0 +1,474 @@
+*
+e
+*|e
+|e
+|*
+*|*
+e|f
+svg|*
+e[foo]
+e[foo|bar]
+[*|foo]
+[|foo]
+ns|e
+[ns|a]
+[*|a='v']
+e[foo="bar"]
+e[foo=""]
+e[foo|=""]
+e[foo~="bar"]
+e[foo^="bar"]
+e[foo$="bar"]
+e[foo*="bar"]
+e[hreflang|="en"]
+*[aval~=""]
+*[aval^=""]
+*[aval$=""]
+*[aval*=""]
+e[foo='(test)']
+e[foo='(abc)']
+e[foo='(e2e)']
+e[foo='(123)']
+e[foo='(12345)']
+e[foo='(abcdef)']
+e[foo='(123456)']
+e[foo='(1234567)']
+e[foo='(AbCdEf)']
+e[foo='(E2E)']
+e[foo='(o2o)']
+e[foo='(xyz)']
+e[foo='(test123)']
+e[foo='(abc)(def)']
+e[foo='(abc )']
+e.warning
+e#myid
+e f
+e > f
+e + f
+e ~ f
+e + f[bar]
+e + *
+div#container p
+a , b
+div > *|e
+e + |f
+e + ns|f
+e + *|f
+a + b.test
+a + b#myid
+a + b[id][title]
+a + b.test[title]
+a.link + b[id]
+a[href] + b.test
+div#main + p.intro[title]
+h1 + *[rel=up]
+div > h1 + p
+div#main > h1 + p[class]
+section a + b
+article.post > h2.title + p.intro[data-info]
+h1 + p:first-child
+h1 + p:nth-child(2)
+di\[v
+[h\]ref]
+di v
+#\31 23
+\31 23
+[\31 23]
+e[foo='\31 23']
+e[foo='x\79 z']
+e[foo='\4a']
+e[foo='x\\79 z']
+e[foo='\\31 23']
+#\\31 x
+*|di\[v
+[*|h\]ref]
+|di\[v
+|é
+svg|di\[v
+svg|\31 g
+[svg|h\]ref]
+[svg|h\]ref='v']
+e:is(svg|di\[v)
+e:has(> svg|di\[v)
+e:has(+ svg|di\[v)
+e + svg|di\[v
+svg|di\[v:first-of-type
+p
+|p
+body > p
+p ~ p
+p + p
+:is(p)
+:where(p)
+:not(p)
+:is(body > p)
+:is(p + p)
+e:nth-child(1 of p)
+:has(p)
+:has(> p)
+e:has(+ p)
+é
+é ~ é
+:is(é)
+e:is(é > é)
+e:has(é)
+e:has(+ é)
+e:nth-child(1 of é)
+*|p
+:is(*|p)
+:has(*|p)
+:is(*|body > *|p)
+e[foo="Bar" i]
+e[foo="Bar" I]
+e[foo^="Bar" i]
+e[foo$="Bar" i]
+e[foo*="Bar" i]
+e[foo~="Bar" i]
+e[foo|="Bar" i]
+e[foo^="Bar" s]
+e[foo="Bär" i]
+e[foo="" i]
+e[foo="Bar" s]
+e[*|foo="Bar" i]
+input[type=CHECKBOX]
+a[rel=Stylesheet]
+[TYPE=CHECKBOX]
+[type^=Check]
+[data-foo=Bar]
+[type='']
+[type=CHECKBOX s]
+[svg|type=X]
+[*|type=X]
+[|type=X]
+input[type=CHECKBOX i]
+*[aval="'"]
+*[aval="'''"]
+*[aval='"']
+*[aval='"""']
+*[aval='"\'"']
+e[foo!="bar"]
+e:contains("foo")
+e::before
+e:
+
+[rel i]
+[rel=stylesheet k]
+[rel=stylesheet i i]
+e:unknown-pseudo
+e:first-line
+col || td
+col||td
+e:nth-col(2)
+e:nth-last-col(2n)
+[foo="a||b"]
+a\|\|b
+a /* || */ b
+e:valid
+e:user-invalid
+e:read-only
+e:placeholder-shown
+e:defined
+a :scope
+a > :scope
+:scope :scope
+e:is(:scope)
+e:not(:scope)
+e:has(:scope)
+e:nth-child(2 of :scope)
+e:is(> a)
+e:has(> > a)
+e:has(>)
+e:has(a >)
+e:has(a:has(b))
+e:has(> a:has(b))
+*:first-of-type
+*:last-of-type
+*:nth-of-type(2n)
+*:nth-last-of-type(2)
+*:only-of-type
+.foo:first-of-type
+[bar]:nth-of-type(2)
+:is(e):first-of-type
+svg|*:first-of-type
+svg|*:last-of-type
+svg|*:nth-of-type(2)
+svg|*:nth-last-of-type(2)
+svg|*:only-of-type
+*|*:first-of-type
+|*:first-of-type
+:lang()
+:lang(5)
+:lang(-)
+\31 ns|div
+\31 ns|*
+\31 ns|di\[v
+[\31 ns|href]
+[\31 ns|href='v']
+e:is(\31 ns|div)
+e:has(> \31 ns|div)
+e:nth-child(3 7)
+e:nth-child(2 n)
+e:nth-child(2.5)
+e:nth-child(2e1)
+div, 
+ , div
+p, , div
+div > 
+  > div
+ 
+foo|#bar
+e|
+div .|x
+#.foo
+.#foo
+:#foo
+[*]
+[foo|]
+[#]
+[foo=#]
+[href]a
+[rel:stylesheet]
+:nth-child()
+attributes(href)/html/body/a
+attributes(href)
+html/body/a
+foo!
+a[rel!=nofollow]
+a:not(b;)
+a:before:empty
+li:before a
+:not(:before)
+:not(a,)
+:is(:before)
+:matches(:before)
+:is(a:before b)
+:is(a b:before)
+:is(a >)
+[rel=stylesheet]
+:lang(fr)
+e:nth-child(1)
+e:nth-child(3n+2)
+e:nth-child(3n-2)
+e:nth-child(-n+6)
+e:nth-child(n)
+e:nth-child(odd)
+e:nth-child(2n+1)
+e:nth-child(even)
+e:nth-child(2n)
+e:nth-child(2N)
+e:nth-child(ODD)
+e:nth-child(EVEN)
+e:nth-child(-N+3)
+e:nth-child(-n+3)
+e:nth-last-child(1)
+e:nth-last-child(2n)
+e:nth-last-child(2n+1)
+e:nth-last-child(2n+2)
+e:nth-last-child(3n+1)
+e:nth-last-child(-n+2)
+e:nth-of-type(1)
+e:nth-last-of-type(1)
+div e:nth-last-of-type(1) .aclass
+e:first-child
+e:last-child
+e:first-of-type
+e:last-of-type
+e:only-child
+e:only-of-type
+é:first-of-type
+é:nth-of-type(2)
+é:nth-last-of-type(1)
+é:only-of-type
+*|e:first-of-type
+|é:first-of-type
+e ~ f:nth-child(3)
+e:nth-child(n+1)
+e:nth-child(n-5)
+e:nth-child(-n)
+e:nth-child(-2n-1)
+e:nth-child(-n+0)
+e:nth-child(-n+1)
+e:nth-child(-2n+2)
+div:nth-child(2 of .foo)
+li:nth-child(n of .item)
+li:nth-child(-n of .item)
+div:nth-child(2 of div.foo)
+li:nth-child(2 of .foo, *)
+e:empty
+e:EmPTY
+e:root
+a:dir(ltr)
+e:not(:nth-child(odd))
+e:nOT(*)
+e:not(a)
+:not(*|e)
+e:not(a, b)
+div:not(a, *)
+div:where(p)
+div:where(p, span)
+section:where(#main)
+input:where([required])
+*:where(.highlight)
+div:where(.foo, .bar)
+p:where(.highlight, #special, [data-key])
+*:where(div.content)
+div:where(p):where(span)
+div:is(p)
+div:matches(p)
+e:is(*)
+div:is(a, *)
+div:where(a, *)
+div:has(p)
+div:has(.foo)
+div:has(p, span)
+div:has(p):has(span)
+section:has(div.content)
+div:has(*)
+section:has(#main)
+form:has([required])
+*:has(img)
+e:has(> img)
+e:has(~ p)
+e:has(> a, ~ p)
+e:has(> .foo)
+e:has(+ p.foo)
+:not(:not(a))
+e:is(:not(f))
+e:has(:not(f))
+e:is(svg|g)
+e:not(svg|g)
+e:is(svg|*)
+e:has(svg|g)
+e:has(> svg|g)
+e:has(~ svg|g)
+e:has(+ svg|g)
+e:has(svg|g.foo)
+:is()
+:where()
+a:where()
+e:matches()
+:IS( )
+:is(/**/)
+a:not(:is())
+div:has(:is())
+:not()
+:has()
+:nth-child(2 of)
+:is(a,)
+:is(,a)
+:is( , )
+:where(a,)
+:is(a, ::before)
+:is() > ::after
+e:is(a b)
+e:is(a > b)
+e:is(a + b)
+e:is(a ~ b)
+e:is(a b c)
+e:is(a > b ~ c)
+e:is(a + b > c)
+e:not(a b)
+e:not(a > b + c)
+e:is(a b, c)
+e:is(a, b c)
+e:is(* b)
+e:is(a *)
+e:not(a *)
+e:is(a b, *)
+e:not(a b, *)
+e:is(a.x b.y)
+e:is(a[foo='bar'] > b)
+e:is(a:first-child b)
+e:is(a:hover b)
+e:is(:not(a) b)
+e:not(:is(a b))
+e:is(:not(a b) c)
+e:is(:is(a, b) c)
+e:is(c :is(a, b))
+ns|e:is(a b)
+e:is(ns|a b)
+e:is(a ns|b)
+e:has(a b)
+e:has(a > b)
+e:has(a + b)
+e:has(a ~ b)
+e:has(> a b)
+e:has(> a > b)
+e:has(+ a > b)
+e:has(~ a + b)
+e:has(~ a > b)
+e:has(a > b + c)
+e:has(> a:is(b c))
+e:has(a.x > b.y)
+e:has(ns|a > b)
+e:has(a + ns|b)
+e:nth-child(2n of a b)
+e:nth-child(2n of a > b)
+e:nth-last-child(3 of a b)
+:scope
+:ScoPE
+:scope > a
+:scope a
+:scope + a
+:scope ~ a
+div:scope
+svg|g:scope
+:scope.foo > a
+:scope:first-child
+a, :scope > b
+e:lang(en)
+e:lang("en")
+e:lang(en-*)
+e:lang(*)
+e:lang(en, fr)
+e:lang(en, de, fr)
+e:lang( en , fr )
+e:lang(*, fr)
+e:lang(EN)
+e:lang(TÜRK)
+e:lang(en-nz)
+E:lang(*)
+E:lang(EN)
+E:lang(en-*)
+E:lang(en)
+E:lang(en-nz)
+E:lang(en, fr)
+E:lang(fr)
+e:dir(rtl)
+e:dir(ltr)
+e:dir(foo)
+e:dir()
+e:dir(ltr rtl)
+e:dir(ltr, rtl)
+e:dir("ltr")
+e:dir(*)
+input:read-only
+input:read-write
+input:placeholder-shown
+input:default
+input:indeterminate
+DIV
+[FOO]
+DIV[Value="Mixed Case"]
+*|DIV
+İ
+[İ]
+*|İ
+a, b
+[rel
+[rel=stylesheet
+[rel=stylesheet i
+[foo="bar
+[foo="
+:lang(fr
+:nth-child(2n+1
+:is(a
+e:is(a, b
+:not(a
+:has(> a
+:contains("foo
+p::before
+a
+div.warning > a
+li:nth-child(odd)
+div > p

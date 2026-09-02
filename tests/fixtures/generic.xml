@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixture for Mode::Generic: a namespace-bearing XML document with no
+  HTML semantics. Every element carries an id, which is how the test
+  harness names a selected node.
+
+  Namespaces are bound to prefixes rather than defaulted, because an
+  unprefixed CSS type selector means the null namespace in every mode
+  and would not otherwise match anything here.
+-->
+<library id="lib"
+         xmlns:svg="http://www.w3.org/2000/svg"
+         xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <shelf id="sh1" class="fiction featured" data-code="ab-cd" title="Fiction">
+    <book id="b1" class="hardback" xml:lang="en-GB">
+      <title id="ti1">Alpha</title>
+      <blank id="bl1"/>
+      <spaces id="sp1"> </spaces>
+      <dc:creator id="cr1">Ada</dc:creator>
+    </book>
+    <book id="b2" class="paperback hardback">
+      <title id="ti2">Beta</title>
+    </book>
+    <magazine id="mg1">
+      <title id="ti3">Gamma</title>
+    </magazine>
+    <book id="b3" xml:lang="fr">
+      <title id="ti4">Delta</title>
+    </book>
+  </shelf>
+  <shelf id="sh2" class="nonfiction" data-code="cd-ef">
+    <svg:svg id="sv1">
+      <svg:rect id="rc1" svg:role="frame"/>
+    </svg:svg>
+    <book id="b4" dc:role="reference">
+      <title id="ti5">Epsilon</title>
+    </book>
+  </shelf>
+</library>

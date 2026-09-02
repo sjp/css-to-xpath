@@ -1,0 +1,25 @@
+[package]
+name = "css-to-xpath-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.css-to-xpath]
+path = ".."
+
+[[bin]]
+name = "translate"
+path = "fuzz_targets/translate.rs"
+test = false
+doc = false
+bench = false
+
+# Its own workspace, so `cargo test` at the repository root does not try
+# to build a target that needs cargo-fuzz's instrumentation.
+[workspace]

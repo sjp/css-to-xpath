@@ -1,0 +1,35 @@
+name: Mutants
+
+on:
+  schedule:
+    # Every Monday at 05:00 UTC, an hour before the security audit.
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mutants:
+    name: cargo mutants
+    runs-on: ubuntu-latest
+    # The whole suite runs once per mutant, so this is long by design.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-mutants
+      # Surviving mutants are reported, not enforced: this is a signal
+      # about test coverage to look at, not a gate on every commit.
+      - run: cargo mutants --no-shuffle -- --all-features
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-out
+          path: mutants.out/

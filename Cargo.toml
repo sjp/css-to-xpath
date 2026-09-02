@@ -14,3 +14,8 @@ precomputed-hash = "0.1"
 
 [profile.release]
 panic = "unwind"
+
+[dev-dependencies]
+proptest = "1.11.0"
+sxd-document = "0.3.2"
+sxd-xpath = "0.4.2"

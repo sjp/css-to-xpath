@@ -289,6 +289,43 @@ dependency's internal error — and `offset` the byte position the caret
 points at. `Error::Unsupported { construct }` is a valid selector this
 crate declines to approximate. Both are `#[non_exhaustive]`.
 
+## Testing
+
+Four layers, all run by `cargo test`:
+
+- **Unit tests** (`src/`) pin the exact XPath string each selector
+  translates to — the output contract.
+- **Syntactic validity** (`tests/xpath_validity.rs`) re-translates every
+  selector in the shared corpus (`tests/corpus/selectors.txt`) in all
+  three modes, with and without a prefix, and parses the result with
+  [`sxd-xpath`](https://crates.io/crates/sxd-xpath). An unbalanced
+  bracket or a precedence mistake fails here even if the pinned string
+  matches.
+- **Semantics** (`tests/semantics.rs`) *evaluates* the translated XPath
+  against the fixture documents in `tests/fixtures/` and compares the
+  selected element ids against what the CSS selector should match. The
+  expectations come from the CSS semantics and the document, not from
+  the translator's own output. `tests/fixtures/html.xml` is libxml2's
+  HTML parse tree written out as XML — lowercased names, no namespaces —
+  so a pure-Rust XML parser can stand in for it.
+- **Properties** (`tests/nth_property.rs`) generate `An+B`, `An+B of S`
+  and sibling counts with [`proptest`](https://crates.io/crates/proptest)
+  and check the selected positions against the definition of `An+B`.
+
+Fuzzing lives in `fuzz/` and needs
+[`cargo-fuzz`](https://crates.io/crates/cargo-fuzz) and a nightly
+toolchain:
+
+```sh
+./fuzz/seed-corpus.sh
+cargo +nightly fuzz run translate -- -max_total_time=60 -max_len=4096
+```
+
+The target runs all three modes on a thread with the 2 MiB stack the
+nesting limit is sized for, and asserts that no input panics and that
+output length stays proportionate to input. CI runs a two-minute pass on
+every change; `cargo-mutants` runs weekly.
+
 ## Minimum supported Rust version
 
 Rust **1.88**, edition 2024 — set by the floor of the `cssparser`/`selectors`
