@@ -58,6 +58,13 @@ impl Fixture {
         }
     }
 
+    /// The parsed document, for a test that needs the tree itself
+    /// rather than the result of an XPath over it — the differential
+    /// test's reference matcher walks it directly.
+    pub(crate) fn document(&self) -> sxd_document::dom::Document<'_> {
+        self.package.as_document()
+    }
+
     /// Translate `css` in `mode` and return the `id` attributes of the
     /// elements the resulting XPath selects, in document order.
     ///

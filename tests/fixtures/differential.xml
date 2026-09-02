@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixture for the differential test: an XML document shaped to make the
+  generated selector grammar discriminate. Every element carries a
+  unique id, which is how both the XPath harness and the reference
+  matcher name a selected node.
+
+  The shapes that matter:
+    - long runs of siblings (a1 has seven element children), so An+B
+      picks out more than "the first" or "all of them";
+    - the same local name in two namespaces (b / x:b, café / x:café),
+      which is where a namespaced of-type pseudo can diverge;
+    - a name XPath cannot write as a node test (café), which the
+      translator folds into name()/local-name();
+    - an attribute with an empty value, one carrying whitespace, one in
+      a namespace, and one differing only in case;
+    - an element that is empty, one holding only white space, and one
+      holding text, for :empty.
+-->
+<root id="r0" xmlns:x="urn:example:x" xmlns:y="urn:example:y">
+  <a id="a1" class="one two" data-v="alpha-beta" role="main">
+    <b id="b1" class="one"/>
+    <b id="b2" class="two three" data-v="alpha"/>
+    <x:b id="b3" class="one" x:role="lead"/>
+    <c id="c1" data-v=""> </c>
+    <b id="b4" title=""/>
+    <c id="c2">text</c>
+    <b id="b5" class="three" data-v="BETA"/>
+  </a>
+  <a id="a2" y:role="aside">
+    <b id="b6" class="two" data-v="alpha beta"/>
+    <c id="c3" data-v="beta-gamma">
+      <b id="b7"/>
+      <café id="cf1" class="one"/>
+      <x:café id="cf2"/>
+      <b id="b8" data-v="gamma"/>
+    </c>
+    <x:c id="c4" class="one two"/>
+    <b id="b9"/>
+  </a>
+  <a id="a3"/>
+  <café id="cf3" data-v="beta"/>
+</root>

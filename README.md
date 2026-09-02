@@ -371,7 +371,7 @@ the input's length itself if that matters.
 
 ## Testing
 
-Four layers, all run by `cargo test`:
+Five layers, all run by `cargo test`:
 
 - **Output pinning** (`tests/`) pins the exact XPath string each
   selector translates to — the output contract — through the public API
@@ -398,6 +398,20 @@ Four layers, all run by `cargo test`:
 - **Properties** (`tests/nth_property.rs`) generate `An+B`, `An+B of S`
   and sibling counts with [`proptest`](https://crates.io/crates/proptest)
   and check the selected positions against the definition of `An+B`.
+- **Differential** (`tests/differential.rs`) checks the translation
+  against a second implementation rather than against an expectation
+  someone wrote down. The `selectors` crate this one parses with also
+  ships a matcher, so the test implements its `Element` trait over the
+  same fixture tree the XPath is evaluated on and requires the two
+  answers to agree. A `proptest` grammar generates the selectors —
+  compounds, the four combinators, the nth family including `of S`,
+  `:is()`/`:where()`/`:not()`/`:has()`, `:root`, `:empty` — while the
+  attribute and of-type shapes, being small finite cross-products, are
+  exhausted rather than sampled. `Mode::Generic` only, and only shapes
+  the translation renders exactly: the one divergence
+  (`*|e:first-of-type` counts siblings by local name, since XPath 1.0
+  cannot compare a sibling's namespace against the subject's) is pinned
+  as a test of its own.
 
 Fuzzing lives in `fuzz/` and needs
 [`cargo-fuzz`](https://crates.io/crates/cargo-fuzz) and a nightly
