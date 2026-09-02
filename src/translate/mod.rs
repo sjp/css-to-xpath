@@ -333,6 +333,14 @@ impl Translator {
             // arguments OR together into a single condition that is AND-ed
             // onto the outer expression, keeping the compound a conjunction.
             Component::Is(list) | Component::Where(list) => {
+                // Selectors 4 makes these argument lists forgiving, so an
+                // empty one is valid and matches nothing. The parser
+                // accepts that recovery and no other, so any other list
+                // here is an ordinary one.
+                if parser::is_empty_forgiving_list(list.slice()) {
+                    xpath.add_condition("0");
+                    return Ok(());
+                }
                 let context = match component {
                     Component::Is(_) => ":is()",
                     _ => ":where()",

@@ -126,7 +126,11 @@ assert_eq!(
   `:only-of-type`, and the Level 4 `An+B of S` syntax.
 - `:is()` / `:matches()` (legacy alias) / `:where()` / `:not()` /
   `:has()`, including complex (combinator-bearing) arguments and
-  relative-selector leading combinators inside `:has()`.
+  relative-selector leading combinators inside `:has()`. An empty
+  `:is()` / `:where()` argument list is valid and matches nothing
+  (`:is()` translates to `*[0]`), as the forgiving-selector-list grammar
+  requires; the rest of forgiveness is not adopted, so an argument that
+  fails to parse is an error rather than a silently dropped one.
 - `:scope`, `:root`, `:empty`, `:lang()`. Under `Mode::Generic` a range
   translates to XPath's `lang()`, except the wildcard `:lang(*)` —
   "any known language", which `lang()` cannot express — which walks

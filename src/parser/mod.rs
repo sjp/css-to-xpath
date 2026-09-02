@@ -7,9 +7,10 @@ use cssparser::{
     Parser as CssParser, ParserInput, SourceLocation, ToCss, Token, match_ignore_ascii_case,
 };
 use selectors::parser::{
-    NonTSPseudoClass, ParseRelative, PseudoElement, SelectorImpl, SelectorList,
-    SelectorParseErrorKind,
+    Component, NonTSPseudoClass, ParseRelative, PseudoElement, RelativeSelector, Selector,
+    SelectorImpl, SelectorList, SelectorParseErrorKind,
 };
+use selectors::visitor::{SelectorListKind, SelectorVisitor};
 use std::fmt;
 
 pub use impls::CssString;
@@ -166,17 +167,23 @@ impl PseudoElement for NeverPseudoElement {
     type Impl = CssToXpathImpl;
 }
 
-pub struct CssToXpathParser;
+pub struct CssToXpathParser {
+    /// Whether Servo may recover from an invalid `:is()` / `:where()`
+    /// argument instead of failing the whole parse. Only the retry in
+    /// [`parse`] sets this, and it then rejects every recovery bar the
+    /// empty argument list.
+    forgiving: bool,
+}
 
 impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
     type Impl = CssToXpathImpl;
     type Error = SelectorParseErrorKind<'i>;
 
-    /// Strict everywhere: a selector that fails to parse must surface an
-    /// error, never be silently dropped the way forgiving `:is()`/`:where()`
-    /// parsing would.
+    /// Strict unless [`parse`] is retrying: a selector that fails to
+    /// parse must surface an error, never be silently dropped the way
+    /// forgiving `:is()`/`:where()` parsing would.
     fn allow_forgiving_selectors(&self) -> bool {
-        false
+        self.forgiving
     }
 
     /// Enable `:is()` and `:where()`.
@@ -455,7 +462,20 @@ fn scan(css: &str) -> Scan {
     scan
 }
 
+/// The error one parse attempt produced, before it is turned into an
+/// [`Error`] — the kind is needed to tell an empty selector apart from
+/// everything else.
+type ParseFailure<'i> = cssparser::ParseError<'i, SelectorParseErrorKind<'i>>;
+
 /// Parse a full selector list (comma-separated groups).
+///
+/// Selectors 4 gives `:is()` and `:where()` a *forgiving* argument list,
+/// of which this crate wants exactly one part: an empty list is valid and
+/// matches nothing. Dropping *invalid* arguments is not wanted — a
+/// translation library must not quietly ignore what it was handed — so
+/// the strict parse decides, and forgiving parsing is only a retry whose
+/// result is accepted when the sole thing it recovered from was an empty
+/// argument list.
 pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
     let scan = scan(css);
     if scan.column_combinator {
@@ -466,15 +486,116 @@ pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
             "functional pseudo-classes nested more than {MAX_NESTING_DEPTH} levels deep"
         )));
     }
+    let strict = match parse_list(css, false) {
+        Ok(list) => return Ok(list),
+        Err(e) => e,
+    };
+    match parse_list(css, true) {
+        Ok(list) if dropped_nothing(&list) => Ok(list),
+        // The forgiving parse recovered from a genuinely invalid
+        // argument: the strict error is the one that names it, and
+        // points at it.
+        Ok(_) => Err(parse_error(css, strict)),
+        // Both parses failed. An empty argument list is no longer an
+        // error, so a strict `EmptySelector` may well be blaming one,
+        // while the forgiving parse — which accepts those — stopped at
+        // whatever is actually wrong.
+        Err(e) if is_empty_selector(&strict) => Err(parse_error(css, e)),
+        Err(_) => Err(parse_error(css, strict)),
+    }
+}
+
+/// One parse of the whole selector list.
+fn parse_list(
+    css: &str,
+    forgiving: bool,
+) -> Result<SelectorList<CssToXpathImpl>, ParseFailure<'_>> {
     let mut input = ParserInput::new(css);
     let mut parser = CssParser::new(&mut input);
-    SelectorList::parse(&CssToXpathParser, &mut parser, ParseRelative::No).map_err(|e| {
-        let detail = match e.kind {
-            cssparser::ParseErrorKind::Basic(ref kind) => format!("{kind:?}"),
-            cssparser::ParseErrorKind::Custom(ref kind) => format!("{kind:?}"),
-        };
-        Error::Parse(detail, byte_offset(css, e.location))
-    })
+    SelectorList::parse(
+        &CssToXpathParser { forgiving },
+        &mut parser,
+        ParseRelative::No,
+    )
+}
+
+fn parse_error(css: &str, e: ParseFailure<'_>) -> Error {
+    let detail = match e.kind {
+        cssparser::ParseErrorKind::Basic(ref kind) => format!("{kind:?}"),
+        cssparser::ParseErrorKind::Custom(ref kind) => format!("{kind:?}"),
+    };
+    Error::Parse(detail, byte_offset(css, e.location))
+}
+
+fn is_empty_selector(e: &ParseFailure<'_>) -> bool {
+    matches!(
+        e.kind,
+        cssparser::ParseErrorKind::Custom(SelectorParseErrorKind::EmptySelector)
+    )
+}
+
+/// Whether a forgiving parse recovered from nothing but empty `:is()` /
+/// `:where()` argument lists.
+fn dropped_nothing(list: &SelectorList<CssToXpathImpl>) -> bool {
+    list.slice()
+        .iter()
+        .all(|selector| selector.visit(&mut DroppedArgument))
+}
+
+/// Finds an argument the forgiving parse dropped. Every `visit_*` method
+/// returns `false` to stop the walk the moment one turns up, so a
+/// completed walk means there was none.
+struct DroppedArgument;
+
+impl SelectorVisitor for DroppedArgument {
+    type Impl = CssToXpathImpl;
+
+    fn visit_simple_selector(&mut self, component: &Component<CssToXpathImpl>) -> bool {
+        // The empty argument lists are skipped below, so any invalid
+        // component reaching here stands for a dropped argument.
+        !matches!(component, Component::Invalid(_))
+    }
+
+    fn visit_selector_list(
+        &mut self,
+        _list_kind: SelectorListKind,
+        list: &[Selector<CssToXpathImpl>],
+    ) -> bool {
+        if is_empty_forgiving_list(list) {
+            return true;
+        }
+        list.iter().all(|nested| nested.visit(self))
+    }
+
+    fn visit_relative_selector_list(&mut self, list: &[RelativeSelector<CssToXpathImpl>]) -> bool {
+        // `:has()` is never parsed forgivingly, but its arguments can
+        // nest `:is()`, and the default implementation does not descend.
+        list.iter().all(|relative| relative.selector.visit(self))
+    }
+}
+
+/// Whether `list` is what an empty `:is()` / `:where()` argument list
+/// parses to. Forgiving recovery replaces an argument it could not parse
+/// with a single [`Component::Invalid`] holding the source text, so an
+/// empty list is one such argument whose text holds no tokens: `:is()`,
+/// `:is( )`, `:is(/**/)`. A list of two — `:is(a,)` — is a dropped
+/// argument, not an empty list.
+pub fn is_empty_forgiving_list(list: &[Selector<CssToXpathImpl>]) -> bool {
+    let [selector] = list else {
+        return false;
+    };
+    let mut components = selector.iter_raw_match_order();
+    let Some(Component::Invalid(source)) = components.next() else {
+        return false;
+    };
+    if components.next().is_some() {
+        return false;
+    }
+    // Servo keeps the source text it could not parse, so whether the
+    // list was empty is decided on that text: nothing but whitespace and
+    // comments.
+    let mut input = ParserInput::new(source.as_str());
+    CssParser::new(&mut input).is_exhausted()
 }
 
 /// The byte offset within `css` that `location` points at.

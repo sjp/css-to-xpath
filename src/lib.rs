@@ -965,6 +965,48 @@ mod tests {
         );
     }
 
+    /// An empty `:is()` / `:where()` argument list. Selectors 4 makes
+    /// those lists forgiving, so an empty one is valid and matches
+    /// nothing — but nothing else about forgiveness is adopted: an
+    /// argument that fails to parse is still an error rather than a
+    /// silently dropped one.
+    #[test]
+    fn empty_forgiving_argument_lists() {
+        let t = Translator::new(Mode::Generic);
+        assert_eq!(xpath(":is()"), "*[0]");
+        assert_eq!(xpath(":where()"), "*[0]");
+        assert_eq!(xpath("a:where()"), "a[0]");
+        assert_eq!(xpath("e:matches()"), "e[0]");
+        // The name is matched case-insensitively, and the argument list
+        // is empty when it holds no tokens, not only when it is empty.
+        assert_eq!(xpath(":IS( )"), "*[0]");
+        assert_eq!(xpath(":is(/**/)"), "*[0]");
+        // Nested inside the non-forgiving pseudo-classes, whose own
+        // empty argument lists stay errors.
+        assert_eq!(xpath("a:not(:is())"), "a[not(0)]");
+        assert_eq!(xpath("div:has(:is())"), "div[.//*[0]]");
+        assert!(t.css_to_xpath(":not()", "").is_err());
+        assert!(t.css_to_xpath(":has()", "").is_err());
+        assert!(t.css_to_xpath(":nth-child(2 of)", "").is_err());
+        // An empty *argument* is a dropped argument, not an empty list.
+        assert!(t.css_to_xpath(":is(a,)", "").is_err());
+        assert!(t.css_to_xpath(":is(,a)", "").is_err());
+        assert!(t.css_to_xpath(":is( , )", "").is_err());
+        assert!(t.css_to_xpath(":where(a,)", "").is_err());
+        // An argument that fails to parse is reported, not dropped, and
+        // the error names it where it stands.
+        assert_eq!(
+            t.css_to_xpath(":is(a, ::before)", "").unwrap_err(),
+            crate::Error::Parse("InvalidState".to_owned(), 15)
+        );
+        // An empty list no longer being an error, the error reported for
+        // a selector holding one is the next thing that is wrong.
+        assert_eq!(
+            t.css_to_xpath(":is() > ::after", "").unwrap_err(),
+            crate::Error::Parse("UnsupportedPseudoClassOrElement(\"after\")".to_owned(), 9)
+        );
+    }
+
     /// Complex selectors (with combinators) inside the functional
     /// pseudo-classes (Selectors Level 4). :is()/:where()/:not() and the
     /// nth `of S` lists match their argument at the candidate element, so
