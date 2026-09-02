@@ -277,11 +277,9 @@ mod tests {
         // The flag composes with namespaced attribute forms.
         assert_eq!(
             xpath("e[*|foo=\"Bar\" i]"),
-            format!(
-                "e[translate(@*[local-name() = 'foo'], \
-                 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
-                 'abcdefghijklmnopqrstuvwxyz') = 'bar']"
-            )
+            "e[translate(@*[local-name() = 'foo'], \
+             'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+             'abcdefghijklmnopqrstuvwxyz') = 'bar']"
         );
     }
 
