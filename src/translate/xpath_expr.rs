@@ -79,11 +79,12 @@ pub struct XPathExpr {
     /// brackets must stay separate — e.g. the `+` combinator's `[1]`
     /// position test, which has to apply before any further filtering.
     predicates: Vec<String>,
-    /// When an element name cannot be used as an XPath name test (and so
-    /// `element` has been folded into a condition on `*`), an equivalent
-    /// node test for that name; `None` otherwise. Lets the of-type
-    /// pseudo-classes distinguish such elements from the universal
-    /// selector and count their siblings correctly.
+    /// When an element name cannot be used as an XPath name test on its
+    /// own — folded into a condition on `*`, or pinned by a condition
+    /// alongside a `prefix:*` test — an equivalent node test for that
+    /// name; `None` otherwise. Lets the of-type pseudo-classes
+    /// distinguish such elements from the universal selector and count
+    /// their siblings correctly.
     pub name_test: Option<String>,
 }
 
@@ -180,10 +181,13 @@ impl XPathExpr {
     /// The node test selecting siblings of the same type, for the of-type
     /// pseudo-classes. `None` when the element is a genuine universal.
     pub fn same_type_nodetest(&self) -> Option<String> {
-        if self.element != "*" {
-            Some(self.element.clone())
-        } else {
-            self.name_test.clone()
+        match &self.name_test {
+            // A name test is set whenever the element alone is not the
+            // whole story: either it was folded into a condition on `*`,
+            // or it is a prefixed wildcard pinned by a local-name() test.
+            Some(name_test) => Some(name_test.clone()),
+            None if self.element != "*" => Some(self.element.clone()),
+            None => None,
         }
     }
 

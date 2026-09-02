@@ -247,9 +247,28 @@ impl Translator {
                 }
                 return xpath;
             }
+            // Namespace prefixes are case-sensitive.
+            // https://www.w3.org/TR/css-namespaces-3/#prefixes
+            NsConstraint::Prefix(prefix) if !safe && is_safe_name(prefix) => {
+                // Only the local name needs quoting: keep the prefix in
+                // the node test so the engine still resolves it through
+                // the caller's namespace map, and compare the local part
+                // alone. Folding the whole 'prefix:name' into a name()
+                // test would instead match only documents that happen to
+                // use that very prefix.
+                let cond = format!("local-name() = {}", xpath_expr::xpath_literal(&name));
+                let mut xpath = XPathExpr::new(&format!("{prefix}:*"));
+                // The of-type nodetest must carry the local-name test set
+                // by the condition below.
+                xpath.name_test = Some(format!("{prefix}:*[{cond}]"));
+                xpath.add_condition(&cond);
+                return xpath;
+            }
             NsConstraint::Prefix(prefix) => {
-                // Namespace prefixes are case-sensitive.
-                // https://www.w3.org/TR/css-namespaces-3/#prefixes
+                // A prefix that itself needs quoting cannot appear in a
+                // node test, and XPath 1.0 gives no way to resolve it
+                // without the namespace URI, so the whole qualified name
+                // falls back to a name() comparison.
                 safe = safe && is_safe_name(prefix);
                 name = format!("{prefix}:{name}");
             }
@@ -456,8 +475,8 @@ impl Translator {
     }
 
     /// Attribute-name handling: lowercase (html), safety check, namespace
-    /// qualification (note: a specific namespace prefix is not part of the
-    /// safety check).
+    /// qualification. Prefixes take part in the safety check, as in
+    /// `xpath_element`: an unsafe one cannot be a node test at all.
     fn attrib_expr(&self, ns: NsConstraint, local_name: &str) -> String {
         let name = if self.lower_case_attribute_names {
             local_name.to_lowercase()
@@ -472,9 +491,20 @@ impl Translator {
                 // with no namespace, so test against local-name() instead.
                 format!("@*[local-name() = {}]", xpath_expr::xpath_literal(&name))
             }
+            NsConstraint::Prefix(prefix) if !safe && is_safe_name(prefix) => {
+                // As in `xpath_element`: the prefix stays in the node test
+                // so it resolves through the caller's namespace map, and
+                // only the local part is compared.
+                format!(
+                    "@{prefix}:*[local-name() = {}]",
+                    xpath_expr::xpath_literal(&name)
+                )
+            }
             NsConstraint::Prefix(prefix) => {
+                // A prefix that itself needs quoting cannot appear in a
+                // node test, so the whole qualified name is compared.
                 let name = format!("{prefix}:{name}");
-                if safe {
+                if safe && is_safe_name(prefix) {
                     format!("@{name}")
                 } else {
                     format!(

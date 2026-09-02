@@ -222,6 +222,45 @@ mod tests {
             "*[name() = 'di[v' and namespace-uri() = '']"
         );
         assert_eq!(xpath("|é"), "*[name() = 'é' and namespace-uri() = '']");
+        // A prefix with a name needing quoting keeps the prefix in the
+        // node test, so it still resolves through the caller's namespace
+        // map, and compares only the local part.
+        assert_eq!(xpath("svg|di\\[v"), "svg:*[local-name() = 'di[v']");
+        assert_eq!(xpath("svg|\\31 g"), "svg:*[local-name() = '1g']");
+        assert_eq!(xpath("[svg|h\\]ref]"), "*[@svg:*[local-name() = 'h]ref']]");
+        assert_eq!(
+            xpath("[svg|h\\]ref='v']"),
+            "*[@svg:*[local-name() = 'h]ref'] = 'v']"
+        );
+        assert_eq!(
+            xpath("e:is(svg|di\\[v)"),
+            "e[local-name() = 'di[v' and self::svg:*]"
+        );
+        assert_eq!(
+            xpath("e:has(> svg|di\\[v)"),
+            "e[child::svg:*[local-name() = 'di[v']]"
+        );
+        assert_eq!(
+            xpath("e:has(+ svg|di\\[v)"),
+            "e[following-sibling::*[1][local-name() = 'di[v' and self::svg:*]]"
+        );
+        assert_eq!(
+            xpath("e + svg|di\\[v"),
+            "e/following-sibling::*[1][self::svg:*][local-name() = 'di[v']"
+        );
+        // The of-type nodetest keeps both halves.
+        assert_eq!(
+            xpath("svg|di\\[v:first-of-type"),
+            "svg:*[local-name() = 'di[v' \
+             and count(preceding-sibling::svg:*[local-name() = 'di[v']) = 0]"
+        );
+        // A prefix that itself needs quoting cannot be a node test, so
+        // the whole qualified name falls back to a name() comparison.
+        assert_eq!(xpath("\\31 ns|div"), "*[name() = '1ns:div']");
+        assert_eq!(
+            xpath("[\\31 ns|href]"),
+            "*[attribute::*[name() = '1ns:href']]"
+        );
     }
 
     #[test]
