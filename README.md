@@ -238,12 +238,14 @@ express them faithfully:
   other malformed ranges (`en-`, `--x`, `en*`) rather than given that
   meaning; the ones that are supported are described below.
 - Functional pseudo-classes (`:is()`, `:not()`, `:where()`, `:has()`,
-  `:nth-child(… of S)`) nested more than **64** levels deep. Parsing and
+  `:nth-child(… of S)`) nested more than **32** levels deep. Parsing and
   translating both recurse once per level, so the depth is capped to turn
-  a pathological selector into an error instead of a stack overflow.
-  Nothing hand-written comes close; only the nesting depth is limited,
-  not the length of a selector or of an argument chain. The value is
-  exported as `MAX_NESTING_DEPTH`.
+  a pathological selector into an error instead of a stack overflow. The
+  cap is sized to fit a 1 MiB stack — a Windows main thread, a wasm32
+  module, a thread pool's worker — in an unoptimized build, the most
+  expensive combination. Nothing hand-written comes close; only the
+  nesting depth is limited, not the length of a selector or of an
+  argument chain. The value is exported as `MAX_NESTING_DEPTH`.
 - `:nth-child(… of S)` / `:nth-last-child(… of S)` nested more than **8**
   levels deep, or a single `of S` list translating to more than **1 MiB**.
   XPath 1.0 has no variables, so `S` has to be written out twice — once to

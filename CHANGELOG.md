@@ -74,6 +74,15 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   so they unify with other crates in a dependency graph.
 - `Translator`'s methods take `self` rather than `&self` — it is a one-byte
   `Copy` type — which call sites do not have to change for.
+- The functional-pseudo-class nesting limit is **32** levels rather than 64, so
+  the recursion it bounds fits the 1 MiB stack a library does not get to choose
+  — a Windows main thread, a wasm32 module, a thread pool's worker — in an
+  unoptimized build, where a level costs about 16 KB. At 64 such a build aborted
+  the process at 57 levels, six short of the depth the limit promised to accept,
+  which is the failure the limit exists to prevent. Selectors nested 33 to 64
+  deep now return `Error::Unsupported` rather than translating; nothing
+  hand-written comes close, and the length of a selector or an argument chain is
+  still unlimited.
 
 ### Deprecated
 

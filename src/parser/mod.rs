@@ -395,12 +395,23 @@ fn is_valid_lang_range(range: &str) -> bool {
 /// overflow the stack — a hard abort, not a panic, so the caller cannot
 /// catch it.
 ///
-/// The value is set from the profile that costs the most stack per level:
-/// an unoptimized build, which needs roughly 16 KB a level against about
-/// 4 KB optimized. 64 levels therefore fits in Rust's default 2 MB
-/// spawned-thread stack even in a debug build, with room to spare, and is
-/// still far beyond any hand-written selector.
-pub const MAX_NESTING_DEPTH: usize = 64;
+/// The value is set from the profile that costs the most stack per level,
+/// against the smallest stack the crate can be run on. An unoptimized
+/// build spends about 16 KB a level (against about 4 KB optimized), so 32
+/// levels need roughly 600 KB: a comfortable fit in the 1 MiB a library
+/// does not get to choose — the default reserve of a Windows main thread,
+/// rustc's `wasm32-unknown-unknown` stack, and whatever a thread pool
+/// hands its workers. Sizing against Rust's more generous 2 MB default
+/// for a spawned thread instead would let a debug build abort on those
+/// targets at a depth this limit promises to accept, which is the limit
+/// failing at the one job it has.
+///
+/// 32 is still far beyond any hand-written selector, and the depth counted
+/// is every parenthesis pair, including ones that do not recurse at all
+/// (`:nth-child(2n+1)`, `:lang(en)`) and ones that spend two per level
+/// (`:nth-child(2 of :is(…))`), so real selectors sit further under it
+/// than the number suggests.
+pub const MAX_NESTING_DEPTH: usize = 32;
 
 /// The facts about a selector that must be known before Servo is entered,
 /// gathered in one linear walk that skips strings, escapes, and comments.

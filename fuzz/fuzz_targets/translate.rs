@@ -5,7 +5,7 @@
 //! pre-parse `scan` — and this is what checks those bounds hold against
 //! input nobody thought of. Two properties:
 //!
-//! 1. no panic, and no stack overflow on the 2 MiB stack the depth
+//! 1. no panic, and no stack overflow on the 1 MiB stack the depth
 //!    limit is sized for (hence the worker thread: libFuzzer's own
 //!    thread is larger, which would hide a limit set too high);
 //! 2. output stays proportionate to input.
@@ -15,8 +15,9 @@
 use css_to_xpath::{Mode, Translator};
 use libfuzzer_sys::fuzz_target;
 
-/// The stack `MAX_NESTING_DEPTH` is sized against.
-const STACK_SIZE: usize = 2 * 1024 * 1024;
+/// The stack `MAX_NESTING_DEPTH` is sized against: the smallest the
+/// crate expects to run on, not the 2 MiB Rust gives a spawned thread.
+const STACK_SIZE: usize = 1024 * 1024;
 
 /// Generous ceiling on output length: `LINEAR * input + SLACK` bytes.
 ///

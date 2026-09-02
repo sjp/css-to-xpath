@@ -30,7 +30,7 @@ fn public_api_surface() {
     );
 
     // The limits are the ones the errors quote.
-    let deep = format!("{}a{}", ":is(".repeat(65), ")".repeat(65));
+    let deep = format!("{}a{}", ":is(".repeat(33), ")".repeat(33));
     assert!(
         Translator::new(Mode::Generic)
             .css_to_xpath(&deep, "")

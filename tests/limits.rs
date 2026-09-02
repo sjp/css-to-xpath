@@ -9,23 +9,27 @@ use css_to_xpath::{Mode, Translator};
 /// parser, the translator, nor dropping the selector tree can recurse
 /// far enough to overflow the stack — an overflow aborts the process
 /// outright, which no caller can catch. The whole test runs on a
-/// thread with the 2 MB stack the limit is sized against (Rust's
-/// default for a spawned thread), so a regression fails the build
-/// instead of tearing the test runner down.
+/// thread with the 1 MiB stack the limit is sized against, which is
+/// the *smallest* stack the crate expects (a Windows main thread, a
+/// wasm32 module, a thread pool's worker) rather than the 2 MB Rust
+/// gives a spawned thread by default. Testing against the generous
+/// figure would hide a limit set too high for the tight one, so a
+/// regression fails the build instead of tearing the test runner
+/// down — or, worse, only the caller's.
 #[test]
 fn nesting_depth_is_bounded() {
     std::thread::Builder::new()
-        .stack_size(2 << 20)
+        .stack_size(1 << 20)
         .spawn(|| {
             let t = Translator::new(Mode::Generic);
             let nest = |open: &str, n: usize| format!("{}a{}", open.repeat(n), ")".repeat(n));
             let too_deep = css_to_xpath::Error::Unsupported {
-                construct: "functional pseudo-classes nested more than 64 levels deep".to_owned(),
+                construct: "functional pseudo-classes nested more than 32 levels deep".to_owned(),
             };
 
             for open in [":not(", ":is(", ":where(", ":matches("] {
-                assert!(t.css_to_xpath(&nest(open, 64), "").is_ok());
-                assert_eq!(t.css_to_xpath(&nest(open, 65), "").unwrap_err(), too_deep);
+                assert!(t.css_to_xpath(&nest(open, 32), "").is_ok());
+                assert_eq!(t.css_to_xpath(&nest(open, 33), "").unwrap_err(), too_deep);
                 // Well past the depth that used to abort the process.
                 assert_eq!(
                     t.css_to_xpath(&nest(open, 10_000), "").unwrap_err(),
@@ -35,7 +39,7 @@ fn nesting_depth_is_bounded() {
             assert_eq!(
                 too_deep.message(":not(:not(a))"),
                 "The CSS selector \":not(:not(a))\" uses functional pseudo-classes \
-                 nested more than 64 levels deep, which this translator does not support"
+                 nested more than 32 levels deep, which this translator does not support"
             );
 
             // Parens inside strings, escapes, and comments are not
@@ -111,7 +115,17 @@ fn nth_child_of_nesting_is_bounded() {
     // Past the limit it is an error, and a cheap one: the depth is
     // checked before descending, so nothing exponential is built.
     assert_eq!(t.css_to_xpath(&nest(9), "").unwrap_err(), too_deep);
-    assert_eq!(t.css_to_xpath(&nest(40), "").unwrap_err(), too_deep);
+    assert_eq!(t.css_to_xpath(&nest(24), "").unwrap_err(), too_deep);
+    // Further out, the pre-parse paren scan gets there first: each
+    // `of S` level spends a parenthesis, so past `MAX_NESTING_DEPTH`
+    // of them the generic nesting error is what a caller sees. Both
+    // reject the same selectors; only the wording differs.
+    assert_eq!(
+        t.css_to_xpath(&nest(33), "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "functional pseudo-classes nested more than 32 levels deep".to_owned()
+        }
+    );
     // The selector is 154 bytes, so its quote is elided at 120
     // with a `…`: every message is bounded, not just the
     // caret-bearing ones.
