@@ -132,6 +132,12 @@ express them faithfully:
   or implicit-type compound: XPath 1.0 cannot compare a sibling's name
   against the matched element's own.
 - Nested `:has()`, `:host`, and the `&` parent selector.
+- Namespace prefixes that need quoting (`\31 ns|div`): a prefix that is
+  not a valid XPath name cannot appear in a node test, and XPath 1.0
+  cannot resolve one without the namespace URI, which this crate never
+  sees. A *local name* needing quoting is fine — `svg|di\[v` translates to
+  `svg:*[local-name() = 'di[v']`, so the prefix still resolves through the
+  caller's namespace map.
 - `:scope` outside the leftmost compound, or inside a functional
   pseudo-class argument.
 - Functional pseudo-classes (`:is()`, `:not()`, `:where()`, `:has()`,

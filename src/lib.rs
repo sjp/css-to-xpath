@@ -254,13 +254,8 @@ mod tests {
             "svg:*[local-name() = 'di[v' \
              and count(preceding-sibling::svg:*[local-name() = 'di[v']) = 0]"
         );
-        // A prefix that itself needs quoting cannot be a node test, so
-        // the whole qualified name falls back to a name() comparison.
-        assert_eq!(xpath("\\31 ns|div"), "*[name() = '1ns:div']");
-        assert_eq!(
-            xpath("[\\31 ns|href]"),
-            "*[attribute::*[name() = '1ns:href']]"
-        );
+        // A prefix that itself needs quoting errors; see
+        // `unsupported_errors`.
     }
 
     #[test]
@@ -485,6 +480,37 @@ mod tests {
         assert!(t.css_to_xpath(":lang()", "").is_err());
         assert!(t.css_to_xpath(":lang(5)", "").is_err());
         assert!(t.css_to_xpath(":lang(-)", "").is_err());
+        // A namespace prefix that is not a valid XPath name cannot be a
+        // node test, and XPath 1.0 cannot resolve it without the
+        // namespace URI: comparing the whole `prefix:name` against
+        // `name()` would match only documents using that very prefix.
+        let unsafe_prefix =
+            crate::Error::Unsupported("a namespace prefix that needs quoting (`1ns`)".to_owned());
+        assert_eq!(
+            t.css_to_xpath("\\31 ns|div", "").unwrap_err(),
+            unsafe_prefix
+        );
+        assert_eq!(t.css_to_xpath("\\31 ns|*", "").unwrap_err(), unsafe_prefix);
+        assert_eq!(
+            t.css_to_xpath("\\31 ns|di\\[v", "").unwrap_err(),
+            unsafe_prefix
+        );
+        assert_eq!(
+            t.css_to_xpath("[\\31 ns|href]", "").unwrap_err(),
+            unsafe_prefix
+        );
+        assert_eq!(
+            t.css_to_xpath("[\\31 ns|href='v']", "").unwrap_err(),
+            unsafe_prefix
+        );
+        assert_eq!(
+            t.css_to_xpath("e:is(\\31 ns|div)", "").unwrap_err(),
+            unsafe_prefix
+        );
+        assert_eq!(
+            t.css_to_xpath("e:has(> \\31 ns|div)", "").unwrap_err(),
+            unsafe_prefix
+        );
         // An+B must be whitespace-exact and integer-valued.
         assert!(t.css_to_xpath("e:nth-child(3 7)", "").is_err());
         assert!(t.css_to_xpath("e:nth-child(2 n)", "").is_err());
