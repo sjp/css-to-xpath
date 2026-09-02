@@ -94,7 +94,13 @@ assert_eq!(
 
 Pseudo-classes with no static equivalent (`:hover`, `:visited`,
 `:focus`, …) always translate to an unmatchable `[0]` rather than
-erroring, in every flavour.
+erroring, in every flavour. `:dir()` is one of them: it selects on
+*resolved* directionality, which needs the bidi algorithm, and the
+nearest-`@dir`-ancestor approximation was rejected because it gets
+`dir="auto"`, `bdi`, and HTML's invalid-value-means-inherit rule wrong.
+Its argument is parsed — exactly one identifier, as Selectors 4 spells
+it — but never interpreted, so `:dir(ltr)`, `:dir(rtl)` and
+`:dir(anything)` all translate alike.
 
 ## The `prefix` argument
 
@@ -216,10 +222,9 @@ express them faithfully:
 - Pseudo-elements (`::before`, `::slotted()`, `::part()`).
 - The Level 4 column combinator (`||`) and `:nth-col()`/`:nth-last-col()`.
 - Non-standard extensions: `[attr!=value]`, `:contains()`.
-- `:dir()` (needs resolved bidi directionality) and other pseudo-classes
-  outside the never-match allow-list, such as `:valid`, `:read-only`,
-  and `:placeholder-shown` — these error instead of silently matching
-  nothing, so typos stay loud.
+- Pseudo-classes outside the never-match allow-list, such as `:valid`,
+  `:read-only`, and `:placeholder-shown` — these error instead of
+  silently matching nothing, so typos stay loud.
 - of-type pseudos (`:first-of-type`, `:nth-of-type()`, …) on any
   wildcard subject (`*`, `*|*`, `|*`, `ns|*`) or implicit-type compound:
   XPath 1.0 cannot compare a sibling's name against the matched

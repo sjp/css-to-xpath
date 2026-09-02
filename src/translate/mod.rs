@@ -35,7 +35,8 @@ pub(crate) enum Kind {
 /// values, and only `Xhtml` reads `xml:lang`.
 ///
 /// Pseudo-classes with no static equivalent (`:hover`, `:visited`,
-/// `:focus`, …) translate to an unmatchable `[0]` in every flavour.
+/// `:focus`, `:dir()`, …) translate to an unmatchable `[0]` in every
+/// flavour, rather than erroring.
 ///
 /// The enum is deliberately exhaustive: these three are the document
 /// flavours CSS selector matching distinguishes, and callers benefit

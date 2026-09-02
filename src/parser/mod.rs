@@ -42,7 +42,9 @@ impl SelectorImpl for CssToXpathImpl {
 ///
 /// Policy for what belongs here versus erroring: pseudo-classes whose
 /// semantics rest on user or runtime state a static document cannot have
-/// (the user-action, link, and target families) parse and never match.
+/// (the user-action, link, and target families) parse and never match, as
+/// does `:dir()`, whose *resolved* directionality needs the bidi
+/// algorithm rather than the document tree (see `apply_pseudo_class`).
 /// Names that are unknown, or whose semantics a static translation could
 /// at least partially answer but this crate has not implemented (e.g. the
 /// form pseudo-classes `:read-only` or `:placeholder-shown`), error
@@ -69,6 +71,11 @@ pub(crate) enum PseudoClass {
     /// reassembled from the tokens it was spelled with (see
     /// [`is_valid_lang_range`]).
     Lang(Vec<String>),
+    /// The single identifier of `:dir()`, kept only so the selector can
+    /// be serialized back: the translation never matches whatever it
+    /// says, so `:dir(rtl)` and `:dir(foo)` translate alike. Selectors 4
+    /// defines `ltr` and `rtl`; any other identifier is accepted rather
+    /// than rejected, since no value can change the output.
     Dir(String),
 }
 
