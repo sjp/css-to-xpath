@@ -29,7 +29,7 @@ use css_to_xpath::{css_to_xpath, Mode};
 // mode: Mode::Generic | Mode::Html | Mode::Xhtml; prefix: prepended to the result.
 assert_eq!(
     css_to_xpath("div.warning > a", "", Mode::Generic).unwrap(),
-    "div[@class and contains(concat(' ', normalize-space(@class), ' '), ' warning ')]/a"
+    "div[contains(concat(' ', normalize-space(@class), ' '), ' warning ')]/a"
 );
 
 assert_eq!(
@@ -47,7 +47,7 @@ let translator = Translator::new(Mode::Generic);
 let xpath = translator.css_to_xpath("e:has(> .foo)", "").unwrap();
 assert_eq!(
     xpath,
-    "e[child::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
+    "e[child::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
 );
 ```
 
@@ -87,7 +87,10 @@ assert_eq!(
   ancestor, the parent `optgroup`, the `a`/`area` of `:link` — are matched
   by local name, so they see XHTML's namespaced elements and work with
   `*|input` and `h|input` subjects alike. Only the names you write follow
-  the namespace rule below.
+  the namespace rule below. When the compound names its element, those
+  local-name tests are settled during translation rather than by the
+  XPath engine: `option:checked` is `option[@selected]`, and a name
+  outside the pseudo-class's element set (`a:enabled`) leaves `a[0]`.
 
 Pseudo-classes with no static equivalent (`:hover`, `:visited`,
 `:focus`, …) always translate to an unmatchable `[0]` rather than

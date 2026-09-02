@@ -60,27 +60,21 @@ mod tests {
         assert_eq!(xpath("e[foo=\"\"]"), "e[@foo = '']");
         assert_eq!(
             xpath("e[foo|=\"\"]"),
-            "e[@foo and (@foo = '' or starts-with(@foo, '-'))]"
+            "e[@foo = '' or starts-with(@foo, '-')]"
         );
         assert_eq!(
             xpath("e[foo~=\"bar\"]"),
-            "e[@foo and contains(concat(' ', normalize-space(@foo), ' '), ' bar ')]"
+            "e[contains(concat(' ', normalize-space(@foo), ' '), ' bar ')]"
         );
-        assert_eq!(
-            xpath("e[foo^=\"bar\"]"),
-            "e[@foo and starts-with(@foo, 'bar')]"
-        );
+        assert_eq!(xpath("e[foo^=\"bar\"]"), "e[starts-with(@foo, 'bar')]");
         assert_eq!(
             xpath("e[foo$=\"bar\"]"),
-            "e[@foo and substring(@foo, string-length(@foo)-2) = 'bar']"
+            "e[substring(@foo, string-length(@foo)-2) = 'bar']"
         );
-        assert_eq!(
-            xpath("e[foo*=\"bar\"]"),
-            "e[@foo and contains(@foo, 'bar')]"
-        );
+        assert_eq!(xpath("e[foo*=\"bar\"]"), "e[contains(@foo, 'bar')]");
         assert_eq!(
             xpath("e[hreflang|=\"en\"]"),
-            "e[@hreflang and (@hreflang = 'en' or starts-with(@hreflang, 'en-'))]"
+            "e[@hreflang = 'en' or starts-with(@hreflang, 'en-')]"
         );
         // Empty values can never satisfy substring/token operators.
         assert_eq!(xpath("*[aval~=\"\"]"), "*[0]");
@@ -112,7 +106,7 @@ mod tests {
     fn class_id_combinators() {
         assert_eq!(
             xpath("e.warning"),
-            "e[@class and contains(concat(' ', normalize-space(@class), ' '), ' warning ')]"
+            "e[contains(concat(' ', normalize-space(@class), ' '), ' warning ')]"
         );
         assert_eq!(xpath("e#myid"), "e[@id = 'myid']");
         assert_eq!(xpath("e f"), "e//f");
@@ -123,22 +117,27 @@ mod tests {
             xpath("e + f[bar]"),
             "e/following-sibling::*[1][self::f][@bar]"
         );
-        assert_eq!(xpath("e + *"), "e/following-sibling::*[1][self::*]");
+        // `+ *` needs no self:: test: the node test is already `*`, so
+        // the [1] counts every sibling on its own.
+        assert_eq!(xpath("e + *"), "e/following-sibling::*[1]");
         assert_eq!(xpath("div#container p"), "div[@id = 'container']//p");
         assert_eq!(xpath("a , b"), "a | b");
         // Namespaces on the '>' and '+' combinators' right-hand side.
         assert_eq!(xpath("div > *|e"), "div/*[local-name() = 'e']");
         assert_eq!(xpath("e + |f"), "e/following-sibling::*[1][self::f]");
         assert_eq!(xpath("e + ns|f"), "e/following-sibling::*[1][self::ns:f]");
+        // `*|f` is already a `*` node test carrying a local-name()
+        // condition, so the [1] counts every sibling with no self:: test
+        // of its own.
         assert_eq!(
             xpath("e + *|f"),
-            "e/following-sibling::*[1][self::*][local-name() = 'f']"
+            "e/following-sibling::*[1][local-name() = 'f']"
         );
         // A compound stacks further simple selectors after the '+'
         // position test, in the order the CSS names them.
         assert_eq!(
             xpath("a + b.test"),
-            "a/following-sibling::*[1][self::b][@class and contains(concat(' ', normalize-space(@class), ' '), ' test ')]"
+            "a/following-sibling::*[1][self::b][contains(concat(' ', normalize-space(@class), ' '), ' test ')]"
         );
         assert_eq!(
             xpath("a + b#myid"),
@@ -150,23 +149,23 @@ mod tests {
         );
         assert_eq!(
             xpath("a + b.test[title]"),
-            "a/following-sibling::*[1][self::b][@class and contains(concat(' ', normalize-space(@class), ' '), ' test ') and @title]"
+            "a/following-sibling::*[1][self::b][contains(concat(' ', normalize-space(@class), ' '), ' test ') and @title]"
         );
         assert_eq!(
             xpath("a.link + b[id]"),
-            "a[@class and contains(concat(' ', normalize-space(@class), ' '), ' link ')]/following-sibling::*[1][self::b][@id]"
+            "a[contains(concat(' ', normalize-space(@class), ' '), ' link ')]/following-sibling::*[1][self::b][@id]"
         );
         assert_eq!(
             xpath("a[href] + b.test"),
-            "a[@href]/following-sibling::*[1][self::b][@class and contains(concat(' ', normalize-space(@class), ' '), ' test ')]"
+            "a[@href]/following-sibling::*[1][self::b][contains(concat(' ', normalize-space(@class), ' '), ' test ')]"
         );
         assert_eq!(
             xpath("div#main + p.intro[title]"),
-            "div[@id = 'main']/following-sibling::*[1][self::p][@class and contains(concat(' ', normalize-space(@class), ' '), ' intro ') and @title]"
+            "div[@id = 'main']/following-sibling::*[1][self::p][contains(concat(' ', normalize-space(@class), ' '), ' intro ') and @title]"
         );
         assert_eq!(
             xpath("h1 + *[rel=up]"),
-            "h1/following-sibling::*[1][self::*][@rel = 'up']"
+            "h1/following-sibling::*[1][@rel = 'up']"
         );
         // A leading combinator chain applies '+' after the preceding step.
         assert_eq!(
@@ -183,7 +182,7 @@ mod tests {
         );
         assert_eq!(
             xpath("article.post > h2.title + p.intro[data-info]"),
-            "article[@class and contains(concat(' ', normalize-space(@class), ' '), ' post ')]/h2[@class and contains(concat(' ', normalize-space(@class), ' '), ' title ')]/following-sibling::*[1][self::p][@class and contains(concat(' ', normalize-space(@class), ' '), ' intro ') and @data-info]"
+            "article[contains(concat(' ', normalize-space(@class), ' '), ' post ')]/h2[contains(concat(' ', normalize-space(@class), ' '), ' title ')]/following-sibling::*[1][self::p][contains(concat(' ', normalize-space(@class), ' '), ' intro ') and @data-info]"
         );
         // '+' combines with the of-type pseudo family on the right-hand
         // side, testing the sibling's own preceding-sibling count.
@@ -354,38 +353,35 @@ mod tests {
         assert_eq!(xpath("e[foo=\"Bar\" I]"), format!("e[{LOWER_FOO} = 'bar']"));
         assert_eq!(
             xpath("e[foo^=\"Bar\" i]"),
-            format!("e[{LOWER_FOO} and starts-with({LOWER_FOO}, 'bar')]")
+            format!("e[starts-with({LOWER_FOO}, 'bar')]")
         );
         assert_eq!(
             xpath("e[foo$=\"Bar\" i]"),
             format!(
-                "e[{LOWER_FOO} and substring({LOWER_FOO}, \
+                "e[substring({LOWER_FOO}, \
                  string-length({LOWER_FOO})-2) = 'bar']"
             )
         );
         assert_eq!(
             xpath("e[foo*=\"Bar\" i]"),
-            format!("e[{LOWER_FOO} and contains({LOWER_FOO}, 'bar')]")
+            format!("e[contains({LOWER_FOO}, 'bar')]")
         );
         assert_eq!(
             xpath("e[foo~=\"Bar\" i]"),
             format!(
-                "e[{LOWER_FOO} and contains(concat(' ', \
+                "e[contains(concat(' ', \
                  normalize-space({LOWER_FOO}), ' '), ' bar ')]"
             )
         );
         assert_eq!(
             xpath("e[foo|=\"Bar\" i]"),
             format!(
-                "e[{LOWER_FOO} and ({LOWER_FOO} = 'bar' or \
-                 starts-with({LOWER_FOO}, 'bar-'))]"
+                "e[{LOWER_FOO} = 'bar' or \
+                 starts-with({LOWER_FOO}, 'bar-')]"
             )
         );
         // 's' requests default case-sensitive matching on any operator.
-        assert_eq!(
-            xpath("e[foo^=\"Bar\" s]"),
-            "e[@foo and starts-with(@foo, 'Bar')]"
-        );
+        assert_eq!(xpath("e[foo^=\"Bar\" s]"), "e[starts-with(@foo, 'Bar')]");
         // ASCII-only lowering: non-ASCII characters are left alone.
         assert_eq!(
             xpath("e[foo=\"B\u{e4}r\" i]"),
@@ -433,7 +429,7 @@ mod tests {
         // Every operator folds, exactly as under the `i` flag.
         assert_eq!(
             html.css_to_xpath("[type^=Check]", "").unwrap(),
-            format!("*[{LOWER_TYPE} and starts-with({LOWER_TYPE}, 'check')]")
+            format!("*[starts-with({LOWER_TYPE}, 'check')]")
         );
 
         // Attributes outside HTML's list keep the case-sensitive default.
@@ -498,10 +494,20 @@ mod tests {
         // A value with only double quotes is wrapped in single quotes.
         assert_eq!(xpath("*[aval='\"']"), "*[@aval = '\"']");
         assert_eq!(xpath("*[aval='\"\"\"']"), "*[@aval = '\"\"\"']");
-        // A value with both falls back to concat(), one literal per char.
+        // A value with both falls back to concat(), split into maximal
+        // runs: apostrophe runs inside double quotes, everything between
+        // them inside single quotes.
         assert_eq!(
             xpath("*[aval='\"\\'\"']"),
             "*[@aval = concat('\"',\"'\",'\"')]"
+        );
+        assert_eq!(
+            xpath("*[aval='it\\'s \"q\"']"),
+            "*[@aval = concat('it',\"'\",'s \"q\"')]"
+        );
+        assert_eq!(
+            xpath("*[aval='a\"b\\'\\'c']"),
+            "*[@aval = concat('a\"b',\"''\",'c')]"
         );
     }
 
@@ -846,7 +852,7 @@ mod tests {
         );
         assert_eq!(
             xpath("div e:nth-last-of-type(1) .aclass"),
-            "div//e[count(following-sibling::e) = 0]//*[@class and contains(concat(' ', normalize-space(@class), ' '), ' aclass ')]"
+            "div//e[count(following-sibling::e) = 0]//*[contains(concat(' ', normalize-space(@class), ' '), ' aclass ')]"
         );
         // Servo collapses :first-child & co. into nth data; the general
         // an+b form covers them (see translate::nth).
@@ -906,6 +912,13 @@ mod tests {
         assert_eq!(xpath("e:nth-child(n+1)"), "e");
         assert_eq!(xpath("e:nth-child(n-5)"), "e");
         assert_eq!(xpath("e:nth-child(-n)"), "e[0]");
+        // a == 0 with b <= 0 is impossible too, and says so rather than
+        // asking for a negative sibling count.
+        assert_eq!(xpath("e:nth-child(0)"), "e[0]");
+        assert_eq!(xpath("e:nth-child(0n+0)"), "e[0]");
+        assert_eq!(xpath("e:nth-child(-3)"), "e[0]");
+        assert_eq!(xpath("e:nth-last-child(0)"), "e[0]");
+        assert_eq!(xpath("e:nth-of-type(0)"), "e[0]");
         assert_eq!(xpath("e:nth-child(-2n-1)"), "e[0]");
         assert_eq!(xpath("e:nth-child(-n+0)"), "e[0]");
         assert_eq!(
@@ -923,22 +936,22 @@ mod tests {
     fn nth_child_of() {
         assert_eq!(
             xpath("div:nth-child(2 of .foo)"),
-            "div[count(preceding-sibling::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]) = 1 and @class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]"
+            "div[count(preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')]) = 1 and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]"
         );
         // a=1, b<=1: only the current-element check remains.
         assert_eq!(
             xpath("li:nth-child(n of .item)"),
-            "li[@class and contains(concat(' ', normalize-space(@class), ' '), ' item ')]"
+            "li[contains(concat(' ', normalize-space(@class), ' '), ' item ')]"
         );
         // Impossible series keeps the current-element check after the 0.
         assert_eq!(
             xpath("li:nth-child(-n of .item)"),
-            "li[0 and @class and contains(concat(' ', normalize-space(@class), ' '), ' item ')]"
+            "li[0 and contains(concat(' ', normalize-space(@class), ' '), ' item ')]"
         );
         // An element argument folds into a self:: test.
         assert_eq!(
             xpath("div:nth-child(2 of div.foo)"),
-            "div[count(preceding-sibling::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]) = 1 and @class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]"
+            "div[count(preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]) = 1 and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]"
         );
         // A universal argument makes the list match everything, like a
         // plain :nth-child.
@@ -1072,19 +1085,19 @@ mod tests {
         assert_eq!(xpath("input:where([required])"), "input[@required]");
         assert_eq!(
             xpath("*:where(.highlight)"),
-            "*[@class and contains(concat(' ', normalize-space(@class), ' '), ' highlight ')]"
+            "*[contains(concat(' ', normalize-space(@class), ' '), ' highlight ')]"
         );
         assert_eq!(
             xpath("div:where(.foo, .bar)"),
-            "div[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') or @class and contains(concat(' ', normalize-space(@class), ' '), ' bar ')]"
+            "div[contains(concat(' ', normalize-space(@class), ' '), ' foo ') or contains(concat(' ', normalize-space(@class), ' '), ' bar ')]"
         );
         assert_eq!(
             xpath("p:where(.highlight, #special, [data-key])"),
-            "p[@class and contains(concat(' ', normalize-space(@class), ' '), ' highlight ') or @id = 'special' or @data-key]"
+            "p[contains(concat(' ', normalize-space(@class), ' '), ' highlight ') or @id = 'special' or @data-key]"
         );
         assert_eq!(
             xpath("*:where(div.content)"),
-            "*[@class and contains(concat(' ', normalize-space(@class), ' '), ' content ') and self::div]"
+            "*[contains(concat(' ', normalize-space(@class), ' '), ' content ') and self::div]"
         );
         assert_eq!(
             xpath("div:where(p):where(span)"),
@@ -1101,13 +1114,27 @@ mod tests {
         assert_eq!(xpath("div:has(p)"), "div[.//p]");
         assert_eq!(
             xpath("div:has(.foo)"),
-            "div[.//*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
+            "div[.//*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
         );
         assert_eq!(xpath("div:has(p, span)"), "div[.//p | .//span]");
         assert_eq!(xpath("div:has(p):has(span)"), "div[.//p and .//span]");
+        // `|` binds tighter than `and` in XPath 1.0, so the union needs
+        // no parentheses — but it reads as though it might, so a
+        // multi-argument `:has()` is parenthesized wherever it is
+        // conjoined with anything else.
+        assert_eq!(
+            xpath("div:has(p, span):has(a)"),
+            "div[(.//p | .//span) and .//a]"
+        );
+        assert_eq!(
+            xpath("div:has(p, span)[data-x]"),
+            "div[(.//p | .//span) and @data-x]"
+        );
+        // A lone one still needs none, inside brackets or inside not().
+        assert_eq!(xpath("div:not(:has(p, span))"), "div[not(.//p | .//span)]");
         assert_eq!(
             xpath("section:has(div.content)"),
-            "section[.//div[@class and contains(concat(' ', normalize-space(@class), ' '), ' content ')]]"
+            "section[.//div[contains(concat(' ', normalize-space(@class), ' '), ' content ')]]"
         );
         assert_eq!(xpath("div:has(*)"), "div[.//*]");
         assert_eq!(xpath("section:has(#main)"), "section[.//*[@id = 'main']]");
@@ -1123,11 +1150,11 @@ mod tests {
         );
         assert_eq!(
             xpath("e:has(> .foo)"),
-            "e[child::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
+            "e[child::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
         );
         assert_eq!(
             xpath("e:has(+ p.foo)"),
-            "e[following-sibling::*[1][@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::p]]"
+            "e[following-sibling::*[1][contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::p]]"
         );
         // Nested :not() (Selectors Level 4).
         assert_eq!(xpath(":not(:not(a))"), "*[not(not(self::a))]");
@@ -1148,7 +1175,7 @@ mod tests {
         );
         assert_eq!(
             xpath("e:has(svg|g.foo)"),
-            "e[.//svg:g[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
+            "e[.//svg:g[contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
         );
     }
 
@@ -1262,9 +1289,9 @@ mod tests {
         // Conditions on chain steps come before each step's name test.
         assert_eq!(
             xpath("e:is(a.x b.y)"),
-            "e[@class and contains(concat(' ', normalize-space(@class), ' '), ' y ') and \
+            "e[contains(concat(' ', normalize-space(@class), ' '), ' y ') and \
              self::b and \
-             ancestor::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' x ') \
+             ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' x ') \
              and self::a]]"
         );
         assert_eq!(
@@ -1344,9 +1371,8 @@ mod tests {
         );
         assert_eq!(
             xpath("e:has(a.x > b.y)"),
-            "e[.//a[@class and contains(concat(' ', normalize-space(@class), ' '), ' x ')]\
-             /b[@class and \
-             contains(concat(' ', normalize-space(@class), ' '), ' y ')]]"
+            "e[.//a[contains(concat(' ', normalize-space(@class), ' '), ' x ')]\
+             /b[contains(concat(' ', normalize-space(@class), ' '), ' y ')]]"
         );
         // Prefixed names stay path node tests, except under `+` where the
         // [1] position predicate needs the node test to stay `*`.
@@ -1395,7 +1421,7 @@ mod tests {
         assert_eq!(xpath("svg|g:scope"), "self::svg:g");
         assert_eq!(
             xpath(":scope.foo > a"),
-            "self::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]/a"
+            "self::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')]/a"
         );
         assert_eq!(
             xpath(":scope:first-child"),
@@ -1600,11 +1626,20 @@ mod tests {
     fn html_pseudo_overrides() {
         let html = Translator::new(Mode::Html);
         let h = |css: &str| html.css_to_xpath(css, "").unwrap();
+        // Every override identifies its elements by local name, so a
+        // compound that already names the element settles those tests at
+        // translation time: only the arm for that name is emitted, and a
+        // name outside the pseudo-class's element set leaves `0`.
+        //
         // :link is `a`/`area` with an @href; the `link` element has an
         // @href but is not one of the elements HTML matches here.
+        assert_eq!(h("a:link"), "a[@href]");
+        assert_eq!(h("area:link"), "area[@href]");
+        assert_eq!(h("link:link"), "link[0]");
+        assert_eq!(h("*|a:link"), "*[local-name() = 'a' and @href]");
         assert_eq!(
-            h("a:link"),
-            "a[@href and (local-name() = 'a' or local-name() = 'area')]"
+            h(":link"),
+            "*[@href and (local-name() = 'a' or local-name() = 'area')]"
         );
         // :any-link is :link plus :visited; with no visited state in a
         // static document the two coincide, so they share a translation.
@@ -1616,35 +1651,42 @@ mod tests {
         let t_lc = "translate(@type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";
         assert_eq!(
             h("input:checked"),
+            format!("input[@checked and ({t_lc} = 'checkbox' or {t_lc} = 'radio')]")
+        );
+        assert_eq!(h("option:checked"), "option[@selected]");
+        assert_eq!(h("div:checked"), "div[0]");
+        assert_eq!(
+            h(":checked"),
             format!(
-                "input[(@selected and local-name() = 'option') or \
+                "*[(@selected and local-name() = 'option') or \
                  (@checked and local-name() = 'input' and \
                  ({t_lc} = 'checkbox' or {t_lc} = 'radio'))]"
             )
         );
         // :required/:optional test the @required attribute over the
         // elements it applies to; input types where it has no effect
-        // match neither.
+        // match neither. The seven inert types are tested with one
+        // `contains()` against a `|`-delimited list rather than seven
+        // comparisons, each of which would repeat the whole fold; the
+        // pipe-free guard keeps that exact for a value like
+        // type="hidden|range", which is none of the keywords.
+        let inert = format!(
+            "contains('|hidden|range|color|submit|image|reset|button|', \
+             concat('|', {t_lc}, '|')) and not(contains({t_lc}, '|'))"
+        );
         assert_eq!(
             h("input:required"),
-            format!(
-                "input[@required and ((local-name() = 'input' and not(\
-                 {t_lc} = 'hidden' or {t_lc} = 'range' or {t_lc} = 'color' or \
-                 {t_lc} = 'submit' or {t_lc} = 'image' or {t_lc} = 'reset' or \
-                 {t_lc} = 'button')) or local-name() = 'select' or \
-                 local-name() = 'textarea')]"
-            )
+            format!("input[@required and not({inert})]")
         );
-        assert_eq!(
-            h("select:optional"),
-            format!(
-                "select[not(@required) and ((local-name() = 'input' and not(\
-                 {t_lc} = 'hidden' or {t_lc} = 'range' or {t_lc} = 'color' or \
-                 {t_lc} = 'submit' or {t_lc} = 'image' or {t_lc} = 'reset' or \
-                 {t_lc} = 'button')) or local-name() = 'select' or \
-                 local-name() = 'textarea')]"
-            )
+        assert_eq!(h("select:optional"), "select[not(@required)]");
+        assert_eq!(h("textarea:required"), "textarea[@required]");
+        assert_eq!(h("div:required"), "div[0]");
+        let applies = format!(
+            "((local-name() = 'input' and not({inert})) or \
+             local-name() = 'select' or local-name() = 'textarea')"
         );
+        assert_eq!(h(":required"), format!("*[@required and {applies}]"));
+        assert_eq!(h(":optional"), format!("*[not(@required) and {applies}]"));
         // :disabled and :enabled test the same element set — HTML's
         // button/input/select/textarea/optgroup/option/fieldset, with no
         // hyperlinks and none of the obsolete keygen/command — against
@@ -1669,36 +1711,31 @@ mod tests {
              (local-name() = 'option' and parent::*[local-name() = 'optgroup'][@disabled]) or \
              (not(local-name() = 'optgroup' or local-name() = 'option') and {fd})"
         );
+        assert_eq!(h(":disabled"), format!("*[{set} and ({disabled})]"));
+        assert_eq!(h(":enabled"), format!("*[{set} and not({disabled})]"));
+        // A named element keeps only the arm that can apply to it: the
+        // fieldset rule for a control, the disabled-parent-optgroup rule
+        // for an option, and neither for an optgroup itself.
+        assert_eq!(h("input:disabled"), format!("input[@disabled or {fd}]"));
+        assert_eq!(h("input:enabled"), format!("input[not(@disabled or {fd})]"));
+        let optgroup_disabled = "@disabled or parent::*[local-name() = 'optgroup'][@disabled]";
+        assert_eq!(h("option:disabled"), format!("option[{optgroup_disabled}]"));
         assert_eq!(
-            h("input:disabled"),
-            format!("input[{set} and ({disabled})]")
+            h("option:enabled"),
+            format!("option[not({optgroup_disabled})]")
         );
-        assert_eq!(
-            h("input:enabled"),
-            format!("input[{set} and not({disabled})]")
-        );
+        assert_eq!(h("optgroup:disabled"), "optgroup[@disabled]");
+        assert_eq!(h("optgroup:enabled"), "optgroup[not(@disabled)]");
         // Hyperlinks and the obsolete `keygen`/`command` are in neither
-        // set: the predicate is the same one whatever it hangs off, and
-        // it tests no name outside the set, so `a:enabled` (like
-        // `keygen:enabled`) can never match.
-        assert_eq!(h("a:enabled"), h("input:enabled").replace("input[", "a["));
-        for css in ["a:enabled", "a:disabled", "input:checked"] {
+        // set, so nothing is left of the predicate for them.
+        assert_eq!(h("a:enabled"), "a[0]");
+        assert_eq!(h("a:disabled"), "a[0]");
+        assert_eq!(h("keygen:enabled"), "keygen[0]");
+        for css in [":enabled", ":disabled", ":checked"] {
             assert!(!h(css).contains("keygen"), "{css}");
             assert!(!h(css).contains("command"), "{css}");
         }
-        assert!(!h("a:enabled").contains("@href"));
-        // The predicate tests element names itself, so it is the same
-        // whatever compound it hangs off: `optgroup:disabled` is the
-        // `@disabled` arm, and an `option` carrying its own `@disabled`
-        // inside an enabled optgroup is caught by that arm too.
-        assert_eq!(
-            h("optgroup:disabled"),
-            h("input:disabled").replace("input[", "optgroup[")
-        );
-        assert_eq!(
-            h("option:enabled"),
-            h("input:enabled").replace("input[", "option[")
-        );
+        assert!(!h(":enabled").contains("@href"));
         // Non-overridden dynamic pseudos still never match.
         assert_eq!(h("a:hover"), "a[0]");
         assert_eq!(h("a:visited"), "a[0]");
@@ -1729,6 +1766,9 @@ mod tests {
             "*|input:required",
             "*|select:optional",
             "*|a:link",
+            ":disabled",
+            ":enabled",
+            ":checked",
         ] {
             let out = x(css);
             assert!(!out.contains("name(.)"), "{css}: {out}");
@@ -1744,14 +1784,13 @@ mod tests {
         // The namespace-agnostic forms are the ones libxml2 needs to
         // reach a control inside a namespaced `<fieldset disabled>` and
         // an `<h:option selected>` under a bound prefix.
-        assert!(x("*|input:disabled").contains(
-            "count(ancestor::*[local-name() = 'fieldset'][@disabled]) > \
-             count(ancestor::*[local-name() = 'legend']\
-             [not(preceding-sibling::*[local-name() = 'legend'])]\
-             [parent::*[local-name() = 'fieldset'][@disabled]])"
-        ));
-        assert!(
-            x("h|option:checked").starts_with("h:option[(@selected and local-name() = 'option')")
+        assert!(x("*|input:disabled").contains(fd));
+        assert_eq!(x("h|option:checked"), "h:option[@selected]");
+        // A prefixed subject pins the local name the same way a bare one
+        // does, so the arms for other names go away there too.
+        assert_eq!(
+            x("h|input:enabled"),
+            format!("h:input[not(@disabled or {fd})]")
         );
         // Form-state pseudo-classes with no exact static translation
         // stay unknown in every mode, HTML included.

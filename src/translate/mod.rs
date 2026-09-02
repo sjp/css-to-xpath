@@ -269,6 +269,7 @@ impl Translator {
                 let cond = format!("local-name() = {}", xpath_expr::xpath_literal(&name));
                 let mut xpath = XPathExpr::new("*");
                 xpath.name_test = Some(format!("*[{cond}]"));
+                xpath.local_name = Some(name);
                 xpath.add_condition(&cond);
                 return Ok(xpath);
             }
@@ -294,6 +295,9 @@ impl Translator {
                 // The of-type nodetest must carry the namespace pin set
                 // by the condition below.
                 xpath.name_test = Some(format!("*[{cond} and namespace-uri() = '']"));
+                // name() on an element with no namespace is its local
+                // name, which the namespace-uri() pin below makes exact.
+                xpath.local_name = Some(name);
                 xpath.add_condition(&cond);
                 xpath.add_condition("namespace-uri() = ''");
                 return Ok(xpath);
@@ -315,6 +319,7 @@ impl Translator {
                 // The of-type nodetest must carry the local-name test set
                 // by the condition below.
                 xpath.name_test = Some(format!("{prefix}:*[{cond}]"));
+                xpath.local_name = Some(name);
                 xpath.add_condition(&cond);
                 return Ok(xpath);
             }
@@ -462,8 +467,15 @@ impl Translator {
                     }
                     conditions.push(test);
                 }
-                if !conditions.is_empty() {
-                    xpath.add_condition(&conditions.join(" | "));
+                // A `:has()` list of several arguments renders as a union,
+                // which binds tighter than `and` in XPath 1.0 and so needs
+                // no parentheses — but reads as though it might, so it is
+                // marked an or-group and parenthesized wherever an
+                // or-group would be.
+                match conditions.len() {
+                    0 => {}
+                    1 => xpath.add_condition(&conditions[0]),
+                    _ => xpath.add_or_condition(&conditions.join(" | ")),
                 }
                 Ok(())
             }
@@ -630,10 +642,14 @@ impl Translator {
                 left.join("/following-sibling::", right);
                 // The node test moves into a self:: predicate so the [1]
                 // position test counts every sibling, not only same-name
-                // ones: *[1][self::element][existing conditions].
+                // ones: *[1][self::element][existing conditions]. A `*`
+                // node test already counts every sibling, so it needs no
+                // predicate — `self::*` would test nothing.
                 let target_element = std::mem::replace(&mut left.element, "*".to_owned());
                 left.add_predicate("1");
-                left.add_predicate(&format!("self::{target_element}"));
+                if target_element != "*" {
+                    left.add_predicate(&format!("self::{target_element}"));
+                }
             }
             // PseudoElement / SlotAssignment / Part combinators can never be
             // produced: the corresponding parser hooks are disabled.

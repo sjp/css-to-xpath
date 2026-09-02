@@ -21,7 +21,7 @@
     <book id="b2" class="paperback hardback">
       <title id="ti2">Beta</title>
     </book>
-    <magazine id="mg1">
+    <magazine id="mg1" data-note="it&apos;s &quot;q&quot;">
       <title id="ti3">Gamma</title>
     </magazine>
     <book id="b3" xml:lang="fr">

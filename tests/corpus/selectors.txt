@@ -472,3 +472,43 @@ a
 div.warning > a
 li:nth-child(odd)
 div > p
+*[aval='it\'s "q"']
+*[aval='a"b\'\'c']
+e:nth-child(0)
+e:nth-child(0n+0)
+e:nth-child(-3)
+e:nth-last-child(0)
+e:nth-of-type(0)
+div:has(p, span):has(a)
+div:has(p, span)[data-x]
+div:not(:has(p, span))
+:link
+area:link
+link:link
+*|a:link
+p:link
+:checked
+option:checked
+div:checked
+p:checked
+:required
+:optional
+textarea:required
+div:required
+input:optional
+p:optional
+:disabled
+:enabled
+option:disabled
+option:enabled
+optgroup:disabled
+optgroup:enabled
+keygen:enabled
+a:disabled
+h|input:enabled
+select:enabled
+fieldset:disabled
+shelf:has(magazine, svg|rect)
+shelf:has(magazine, svg|rect):has(> book)
+shelf:has(magazine, svg|rect)[data-code^="cd"]
+book + *

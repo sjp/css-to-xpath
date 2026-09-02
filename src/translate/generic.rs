@@ -11,6 +11,16 @@ impl Translator {
     /// case under every translator. Empty values are fine —
     /// `xpath_literal("")` is `''` — though `~=`/`^=`/`$=`/`*=` guard
     /// them into never-matching `0` conditions.
+    ///
+    /// None of the substring operators tests that the attribute exists
+    /// first: a missing attribute is the empty node-set, which every one
+    /// of these turns into a false condition on its own. `starts-with`,
+    /// `substring` and `contains` take its string value, `''`, and every
+    /// value they are compared against here is non-empty; `=` on a
+    /// node-set is existential, so an empty one is never equal to
+    /// anything. Adding `{name} and` would only repeat the attribute
+    /// expression — which for `[attr=value i]` is a whole `translate()`
+    /// call.
     pub(crate) fn attrib_operator(
         &self,
         xpath: &mut XPathExpr,
@@ -43,7 +53,7 @@ impl Translator {
                 .any(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{c}'));
         if matchable {
             xpath.add_condition(&format!(
-                "{name} and contains(concat(' ', normalize-space({name}), ' '), {})",
+                "contains(concat(' ', normalize-space({name}), ' '), {})",
                 xpath_literal(&format!(" {value} "))
             ));
         } else {
@@ -51,10 +61,11 @@ impl Translator {
         }
     }
 
-    /// `[attr|=value]`.
+    /// `[attr|=value]`. An or-group, so it is parenthesized when it is
+    /// conjoined with the rest of a compound.
     pub(crate) fn attrib_dashmatch(&self, xpath: &mut XPathExpr, name: &str, value: &str) {
-        xpath.add_condition(&format!(
-            "{name} and ({name} = {} or starts-with({name}, {}))",
+        xpath.add_or_condition(&format!(
+            "{name} = {} or starts-with({name}, {})",
             xpath_literal(value),
             xpath_literal(&format!("{value}-"))
         ));
@@ -63,10 +74,7 @@ impl Translator {
     /// `[attr^=value]`.
     pub(crate) fn attrib_prefixmatch(&self, xpath: &mut XPathExpr, name: &str, value: &str) {
         if !value.is_empty() {
-            xpath.add_condition(&format!(
-                "{name} and starts-with({name}, {})",
-                xpath_literal(value)
-            ));
+            xpath.add_condition(&format!("starts-with({name}, {})", xpath_literal(value)));
         } else {
             xpath.add_condition("0");
         }
@@ -79,7 +87,7 @@ impl Translator {
         if !value.is_empty() {
             let offset = value.chars().count() - 1;
             xpath.add_condition(&format!(
-                "{name} and substring({name}, string-length({name})-{offset}) = {}",
+                "substring({name}, string-length({name})-{offset}) = {}",
                 xpath_literal(value)
             ));
         } else {
@@ -90,10 +98,7 @@ impl Translator {
     /// `[attr*=value]`.
     pub(crate) fn attrib_substringmatch(&self, xpath: &mut XPathExpr, name: &str, value: &str) {
         if !value.is_empty() {
-            xpath.add_condition(&format!(
-                "{name} and contains({name}, {})",
-                xpath_literal(value)
-            ));
+            xpath.add_condition(&format!("contains({name}, {})", xpath_literal(value)));
         } else {
             xpath.add_condition("0");
         }

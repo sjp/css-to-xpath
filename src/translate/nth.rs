@@ -181,8 +181,10 @@ impl Translator {
         }
         // early-exit condition 2:
         // ~~~~~~~~~~~~~~~~~~~~~~~
-        // an+b-1 siblings with a<0 and (b-1)<0 is not possible
-        if a < 0 && b_min_1 < 0 {
+        // an+b-1 siblings with (b-1)<0 needs a>0 to reach zero, so for
+        // a<=0 nothing can match. Writing it as `0` rather than letting
+        // the a==0 branch below emit `count(...) = -1` says so plainly.
+        if a <= 0 && b_min_1 < 0 {
             xpath.add_condition("0");
             if let Some(check) = current_element_check {
                 xpath.push_condition(check);

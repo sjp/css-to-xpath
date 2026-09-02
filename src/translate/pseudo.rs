@@ -10,7 +10,7 @@
 use crate::parser::PseudoClass;
 
 use super::error::Error;
-use super::xpath_expr::{XPathExpr, ascii_lower, xpath_literal};
+use super::xpath_expr::{Condition, XPathExpr, ascii_lower, xpath_literal};
 use super::{Kind, Translator};
 
 /// Where a translator reads an element's language from, for `:lang()`.
@@ -108,19 +108,24 @@ const FIELDSET_DISABLED: &str = "count(ancestor::*[local-name() = 'fieldset'][@d
      [not(preceding-sibling::*[local-name() = 'legend'])]\
      [parent::*[local-name() = 'fieldset'][@disabled]])";
 
-/// The elements HTML's `:enabled` and `:disabled` apply to: `button`,
-/// `input`, `select`, `textarea`, `optgroup`, `option` and `fieldset`.
+/// The elements HTML's `:enabled` and `:disabled` apply to.
 /// Form-associated custom elements are in the spec's list too, but
 /// nothing in static markup identifies one, so they are left out.
 /// Hyperlinks are not in the list — `a[href]` matches `:link`, never
 /// `:enabled` — and neither are the obsolete `keygen` and `command`.
-const DISABLEABLE: &str = "(local-name() = 'button' or \
-     local-name() = 'input' or \
-     local-name() = 'select' or \
-     local-name() = 'textarea' or \
-     local-name() = 'optgroup' or \
-     local-name() = 'option' or \
-     local-name() = 'fieldset')";
+const DISABLEABLE: [&str; 7] = [
+    "button", "input", "select", "textarea", "optgroup", "option", "fieldset",
+];
+
+/// [`DISABLEABLE`] as a condition, for a subject whose local name the
+/// compound does not pin.
+fn disableable() -> String {
+    let names: Vec<String> = DISABLEABLE
+        .iter()
+        .map(|name| format!("local-name() = '{name}'"))
+        .collect();
+    format!("({})", names.join(" or "))
+}
 
 /// HTML's "actually disabled", to be read together with [`DISABLEABLE`]:
 /// `:disabled` is that set and this condition, `:enabled` is that set and
@@ -141,24 +146,38 @@ fn actually_disabled() -> String {
     )
 }
 
+/// The `input` types on which `required` has no effect, as a
+/// `|`-delimited haystack: `contains()` against it tests all seven with
+/// one mention of `@type`, where seven `=` comparisons would repeat the
+/// whole `translate()` fold (see [`type_lc`]) seven times.
+const REQUIRED_INERT_TYPES: &str = "|hidden|range|color|submit|image|reset|button|";
+
+/// Whether `@type` names one of [`REQUIRED_INERT_TYPES`].
+///
+/// `contains(haystack, concat('|', type, '|'))` on its own would also
+/// accept a value spelling out several keywords in a row
+/// (`type="hidden|range"`), so the pipe-free guard keeps the test exact:
+/// a value containing `|` is none of the keywords. The comparison folds
+/// case because `type` is an HTML enumerated attribute.
+fn required_is_inert() -> String {
+    let type_lc = type_lc();
+    format!(
+        "contains('{REQUIRED_INERT_TYPES}', concat('|', {type_lc}, '|')) \
+         and not(contains({type_lc}, '|'))"
+    )
+}
+
 /// The elements the `required` attribute applies to, for `:required` and
 /// `:optional` (HTML spec): `select`, `textarea`, and `input` except the
 /// types on which `required` has no effect — those match neither
-/// pseudo-class, whatever attributes they carry. The type keywords are
-/// matched case-insensitively (see [`type_lc`]).
+/// pseudo-class, whatever attributes they carry. For a subject whose
+/// local name the compound does not pin.
 fn required_applies() -> String {
-    let type_lc = type_lc();
     format!(
-        "((local-name() = 'input' and not(\
-         {type_lc} = 'hidden' or \
-         {type_lc} = 'range' or \
-         {type_lc} = 'color' or \
-         {type_lc} = 'submit' or \
-         {type_lc} = 'image' or \
-         {type_lc} = 'reset' or \
-         {type_lc} = 'button')) or \
+        "((local-name() = 'input' and not({})) or \
          local-name() = 'select' or \
-         local-name() = 'textarea')"
+         local-name() = 'textarea')",
+        required_is_inert()
     )
 }
 
@@ -168,6 +187,17 @@ impl Translator {
         xpath: &mut XPathExpr,
         pc: &PseudoClass,
     ) -> Result<(), Error> {
+        // The HTML overrides name elements through `local-name()`, so
+        // when the compound already pins the subject's local name every
+        // disjunct written for another name is decided here rather than
+        // by the XPath engine: only the arm that can match is emitted,
+        // and a name outside the pseudo-class's element set collapses to
+        // `0`. `None` — a wildcard subject — keeps the full expression.
+        // The element part of a compound is always translated before its
+        // conditions, so the name is already known by the time any
+        // pseudo-class is applied.
+        let name = xpath.local_name.clone();
+        let name = name.as_deref();
         match (self.kind, pc) {
             (_, PseudoClass::Dir(_)) => {
                 // :dir() matches by *resolved* directionality, which needs
@@ -188,12 +218,7 @@ impl Translator {
             }
             // HTML overrides
             (Kind::Html, PseudoClass::Checked) => {
-                let type_lc = type_lc();
-                xpath.add_or_condition(&format!(
-                    "(@selected and local-name() = 'option') or \
-                     (@checked and local-name() = 'input' \
-                     and ({type_lc} = 'checkbox' or {type_lc} = 'radio'))"
-                ));
+                xpath.push_condition(checked_condition(name));
             }
             // :any-link is :link ∪ :visited. A static document has no
             // visited state, so every link counts as unvisited and the
@@ -203,21 +228,25 @@ impl Translator {
             // `href` but is not one of the elements HTML requires to
             // match :link/:visited, so it is not in the set.
             (Kind::Html, PseudoClass::Link) | (Kind::Html, PseudoClass::AnyLink) => {
-                xpath.add_condition("@href and (local-name() = 'a' or local-name() = 'area')");
+                xpath.add_condition(&match name {
+                    Some("a" | "area") => "@href".to_owned(),
+                    Some(_) => "0".to_owned(),
+                    None => "@href and (local-name() = 'a' or local-name() = 'area')".to_owned(),
+                });
             }
             (Kind::Html, PseudoClass::Required) => {
-                xpath.add_condition(&format!("@required and {}", required_applies()));
+                xpath.add_condition(&required_condition(name, "@required"));
             }
             (Kind::Html, PseudoClass::Optional) => {
-                xpath.add_condition(&format!("not(@required) and {}", required_applies()));
+                xpath.add_condition(&required_condition(name, "not(@required)"));
             }
             // `:disabled` and `:enabled` are one expression read two
             // ways, so they always partition the element set.
             (Kind::Html, PseudoClass::Disabled) => {
-                xpath.add_condition(&format!("{DISABLEABLE} and ({})", actually_disabled()));
+                xpath.push_condition(disabled_condition(name, /* want_disabled = */ true));
             }
             (Kind::Html, PseudoClass::Enabled) => {
-                xpath.add_condition(&format!("{DISABLEABLE} and not({})", actually_disabled()));
+                xpath.push_condition(disabled_condition(name, /* want_disabled = */ false));
             }
             // Everything else never matches.
             _ => {
@@ -272,6 +301,90 @@ impl Translator {
         }
         add_lang_conditions(xpath, conditions);
         Ok(())
+    }
+}
+
+/// `:checked` — a selected `option`, or a checked checkbox/radio `input`.
+fn checked_condition(name: Option<&str>) -> Condition {
+    let type_lc = type_lc();
+    match name {
+        Some("option") => plain("@selected"),
+        Some("input") => plain(&format!(
+            "@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')"
+        )),
+        Some(_) => plain("0"),
+        None => or_group(&format!(
+            "(@selected and local-name() = 'option') or \
+             (@checked and local-name() = 'input' \
+             and ({type_lc} = 'checkbox' or {type_lc} = 'radio'))"
+        )),
+    }
+}
+
+/// `:required` and `:optional`, which differ only in `attr` — the test on
+/// the `required` attribute itself — and share the element set.
+fn required_condition(name: Option<&str>, attr: &str) -> String {
+    match name {
+        Some("select" | "textarea") => attr.to_owned(),
+        Some("input") => format!("{attr} and not({})", required_is_inert()),
+        Some(_) => "0".to_owned(),
+        None => format!("{attr} and {}", required_applies()),
+    }
+}
+
+/// `:disabled` (`want_disabled`) and `:enabled`, which are the same
+/// element set and the same "actually disabled" condition, negated.
+///
+/// A pinned local name settles both halves: outside [`DISABLEABLE`]
+/// neither pseudo-class matches, and inside it the three arms of
+/// [`actually_disabled`] reduce to the one written for that name — the
+/// disabled-parent-`optgroup` rule for an `option`, the
+/// disabled-`fieldset`-ancestor rule for everything the spec applies it
+/// to, and neither for an `optgroup` itself.
+fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
+    let Some(name) = name else {
+        let (set, actually) = (disableable(), actually_disabled());
+        return plain(&if want_disabled {
+            format!("{set} and ({actually})")
+        } else {
+            format!("{set} and not({actually})")
+        });
+    };
+    if !DISABLEABLE.contains(&name) {
+        return plain("0");
+    }
+    let (actually, or_group) = match name {
+        "optgroup" => ("@disabled".to_owned(), false),
+        "option" => (
+            "@disabled or parent::*[local-name() = 'optgroup'][@disabled]".to_owned(),
+            true,
+        ),
+        _ => (format!("@disabled or {FIELDSET_DISABLED}"), true),
+    };
+    if want_disabled {
+        Condition {
+            expr: actually,
+            or_group,
+        }
+    } else {
+        // `not(...)` supplies its own grouping, whatever is inside it.
+        plain(&format!("not({actually})"))
+    }
+}
+
+/// A condition with no top-level `or`.
+fn plain(expr: &str) -> Condition {
+    Condition {
+        expr: expr.to_owned(),
+        or_group: false,
+    }
+}
+
+/// A condition whose expression has a top-level `or`.
+fn or_group(expr: &str) -> Condition {
+    Condition {
+        expr: expr.to_owned(),
+        or_group: true,
     }
 }
 

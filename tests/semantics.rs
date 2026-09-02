@@ -67,6 +67,17 @@ fn generic_type_class_and_attribute_selectors() {
             ("[data-code$=\"ef\"]", &["sh2"]),
             ("[data-code*=\"d-e\"]", &["sh2"]),
             ("[data-code=\"ab-cd\"]", &["sh1"]),
+            // An element without the attribute is never matched by a
+            // substring operator, which is why none of them tests for
+            // the attribute's existence first.
+            ("[title^=\"Fic\"]", &["sh1"]),
+            ("[title$=\"ion\"]", &["sh1"]),
+            ("[title*=\"icti\"]", &["sh1"]),
+            ("[title~=\"Fiction\"]", &["sh1"]),
+            ("[title|=\"Fiction\"]", &["sh1"]),
+            // A value carrying both quote kinds goes through concat().
+            ("[data-note=\"it's \\\"q\\\"\"]", &["mg1"]),
+            ("[data-note*=\"'s \\\"q\\\"\"]", &["mg1"]),
             ("shelf[class=\"nonfiction\"]", &["sh2"]),
             ("title, blank", &["ti1", "bl1", "ti2", "ti3", "ti4", "ti5"]),
         ],
@@ -87,6 +98,10 @@ fn generic_combinators() {
             ("magazine + book", &["b3"]),
             ("book + magazine", &["mg1"]),
             ("shelf > *", &["b1", "b2", "mg1", "b3", "sv1", "b4"]),
+            // `+ *` needs no self:: test, so check it still means "the
+            // very next sibling, whatever its name".
+            ("book + *", &["b2", "mg1"]),
+            ("magazine + *", &["b3"]),
         ],
     );
 }
@@ -127,6 +142,10 @@ fn generic_structural_pseudos() {
             ("magazine:only-of-type", &["mg1"]),
             ("blank:empty", &["bl1"]),
             ("book:nth-child(2)", &["b2", "b4"]),
+            // An+B with no solution: `0`, not a negative sibling count.
+            ("book:nth-child(0)", &[]),
+            ("book:nth-last-child(0)", &[]),
+            ("book:nth-of-type(0)", &[]),
             ("title:nth-child(1)", &["ti1", "ti2", "ti3", "ti4", "ti5"]),
             ("shelf > *:nth-child(odd)", &["b1", "mg1", "sv1"]),
             ("book:nth-of-type(2)", &["b2"]),
@@ -160,6 +179,11 @@ fn generic_logical_pseudos() {
             (":is(magazine, blank)", &["bl1", "mg1"]),
             ("book:nth-child(2 of book)", &["b2"]),
             ("book:nth-child(-n+2 of .hardback)", &["b1", "b2"]),
+            // A multi-argument `:has()` renders as a union, which is
+            // parenthesized once anything else is AND-ed onto it.
+            ("shelf:has(magazine, svg|rect)", &["sh1", "sh2"]),
+            ("shelf:has(magazine, svg|rect):has(> book)", &["sh1", "sh2"]),
+            ("shelf:has(magazine, svg|rect)[data-code^=\"cd\"]", &["sh2"]),
         ],
     );
 }
@@ -240,6 +264,23 @@ fn xhtml_form_pseudos() {
             ("xhtml|fieldset:disabled", &["fs1"]),
             ("xhtml|option:checked", &["o1"]),
             ("xhtml|input:enabled", &["i1", "i4", "i5", "i6", "i7"]),
+            // A named subject prunes the overrides down to the arm for
+            // that name — including the optgroup rules, which differ for
+            // `option` and for `optgroup` itself.
+            ("xhtml|option:disabled", &["o1", "o2"]),
+            ("xhtml|optgroup:disabled", &["og1"]),
+            ("xhtml|optgroup:enabled", &["og2"]),
+            ("xhtml|input:disabled", &["i2", "i3"]),
+            ("xhtml|button:disabled", &["bt1"]),
+            ("xhtml|input:required", &["i6"]),
+            ("xhtml|textarea:required", &["ta1"]),
+            // `required` has no effect on a hidden input, so i7 is
+            // neither :required nor :optional.
+            ("xhtml|input:optional", &["i1", "i2", "i3", "i4", "i5"]),
+            ("xhtml|a:link", &["a1"]),
+            ("xhtml|p:link", &[]),
+            ("xhtml|p:checked", &[]),
+            ("xhtml|a:enabled", &[]),
         ],
     );
 }
@@ -287,7 +328,7 @@ fn html_lowercases_names_but_not_class_values() {
         &html_fixture(),
         Mode::Html,
         &[
-            ("INPUT", &["i1", "i2", "i3", "i4", "i5"]),
+            ("INPUT", &["i1", "i2", "i3", "i4", "i5", "i6"]),
             ("A", &["a1", "a2"]),
             ("body > p", &["p1", "p2"]),
             ("#doc", &["doc"]),
@@ -327,9 +368,35 @@ fn html_form_and_link_pseudos() {
         &[
             (":checked", &["i3", "i5", "o1"]),
             (":disabled", &["fs1", "i2"]),
-            (":enabled", &["i1", "i3", "i4", "i5", "se1", "o1", "o2"]),
+            (
+                ":enabled",
+                &["i1", "i3", "i4", "i5", "i6", "se1", "o1", "o2"],
+            ),
             (":link", &["a1"]),
             (":any-link", &["a1"]),
+            // Naming the element lets the translation drop the arms
+            // written for the other names; it must still select the same
+            // elements as the wildcard form restricted to that name.
+            ("input:checked", &["i3", "i5"]),
+            ("option:checked", &["o1"]),
+            ("p:checked", &[]),
+            ("input:disabled", &["i2"]),
+            ("fieldset:disabled", &["fs1"]),
+            ("option:enabled", &["o1", "o2"]),
+            ("select:enabled", &["se1"]),
+            ("a:link", &["a1"]),
+            ("p:link", &[]),
+            // `a` is in neither the :enabled nor the :disabled set.
+            ("a:enabled", &[]),
+            ("a:disabled", &[]),
+            // `required` applies to a text input but not a checkbox, and
+            // to no element outside input/select/textarea.
+            ("input:optional", &["i1", "i2", "i3", "i4", "i5"]),
+            // i6's `type` is not one of the seven the `required`
+            // attribute is inert on, even though it contains two of
+            // them separated by the delimiter the test uses.
+            ("input:required", &["i6"]),
+            ("p:optional", &[]),
         ],
     );
 }
@@ -381,6 +448,25 @@ fn disabled_and_enabled_partition_the_form_element_set() {
                 !enabled.contains(id),
                 "{id} is both :disabled and :enabled in {mode:?} mode"
             );
+        }
+
+        // Naming the subject lets the translation prune the overrides to
+        // the arms that can apply to that name; the result must agree
+        // with the wildcard form filtered to elements of that name.
+        for name in NAMES {
+            let of_name = fixture.select(&format!("{prefix}{name}"), mode);
+            for pseudo in [":disabled", ":enabled"] {
+                let named = fixture.select(&format!("{prefix}{name}{pseudo}"), mode);
+                let wildcard: Vec<String> = fixture
+                    .select(pseudo, mode)
+                    .into_iter()
+                    .filter(|id| of_name.contains(id))
+                    .collect();
+                assert_eq!(
+                    named, wildcard,
+                    "in {mode:?} mode, {prefix}{name}{pseudo} disagrees with {pseudo}"
+                );
+            }
         }
 
         let mut union = [disabled, enabled].concat();

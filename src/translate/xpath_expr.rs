@@ -35,24 +35,34 @@ pub fn ascii_lower(subject: &str) -> String {
 
 /// Quote a string as an XPath literal.
 ///
-/// Note: each character is quoted individually in the `concat(...)`
-/// branch — a quirk preserved because the exact output is pinned by tests.
+/// XPath 1.0 literals have no escape syntax, so a string containing both
+/// quote kinds cannot be written as one literal and has to be
+/// `concat()`ed from several. Splitting it into *maximal* runs — each
+/// run of apostrophes quoted with `"`, everything between them quoted
+/// with `'` — keeps that fallback proportional to the number of
+/// apostrophes rather than to the length of the string, which matters
+/// for the case that reaches it in practice: JSON in a `data-*`
+/// attribute value.
 pub fn xpath_literal(literal: &str) -> String {
     if !literal.contains('\'') {
         format!("'{literal}'")
     } else if !literal.contains('"') {
         format!("\"{literal}\"")
     } else {
-        let parts: Vec<String> = literal
-            .chars()
-            .map(|c| {
-                if c == '\'' {
-                    format!("\"{c}\"")
-                } else {
-                    format!("'{c}'")
-                }
-            })
-            .collect();
+        let mut parts: Vec<String> = Vec::new();
+        let mut rest = literal;
+        while !rest.is_empty() {
+            // A run of apostrophes goes inside double quotes, and the
+            // run up to the next apostrophe inside single ones.
+            let (len, quote) = if rest.starts_with('\'') {
+                (rest.len() - rest.trim_start_matches('\'').len(), '"')
+            } else {
+                (rest.find('\'').unwrap_or(rest.len()), '\'')
+            };
+            let (run, tail) = rest.split_at(len);
+            parts.push(format!("{quote}{run}{quote}"));
+            rest = tail;
+        }
         format!("concat({})", parts.join(","))
     }
 }
@@ -98,16 +108,34 @@ pub struct XPathExpr {
     /// distinguish such elements from the universal selector and count
     /// their siblings correctly.
     pub name_test: Option<String>,
+    /// The subject's local name, when the compound pins it to exactly
+    /// one — whether by a plain node test (`input`, `h:input`) or by the
+    /// condition a name needing quoting folds into. `None` for a
+    /// wildcard subject (`*`, `ns|*`), which matches any local name.
+    ///
+    /// The HTML pseudo-class overrides identify elements by
+    /// `local-name()`, so a pinned name decides every one of those tests
+    /// at translation time and leaves only the arm that can match.
+    pub local_name: Option<String>,
 }
 
 impl XPathExpr {
+    /// A new expression on `element`, which must be a usable XPath node
+    /// test. The local name is read straight off it; the callers that
+    /// fold a name into a condition instead set `local_name` themselves.
     pub fn new(element: &str) -> Self {
+        let local_name = match element {
+            "*" => None,
+            _ if element.ends_with(":*") => None,
+            _ => Some(element.rsplit(':').next().unwrap_or(element).to_owned()),
+        };
         XPathExpr {
             path: String::new(),
             element: element.to_owned(),
             conditions: Vec::new(),
             predicates: Vec::new(),
             name_test: None,
+            local_name,
         }
     }
 
@@ -246,6 +274,7 @@ impl XPathExpr {
         self.conditions = other.conditions.clone();
         self.predicates = other.predicates.clone();
         self.name_test = other.name_test.clone();
+        self.local_name = other.local_name.clone();
     }
 }
 
@@ -268,7 +297,11 @@ mod tests {
     fn literals() {
         assert_eq!(xpath_literal("foo"), "'foo'");
         assert_eq!(xpath_literal("f'oo"), "\"f'oo\"");
-        assert_eq!(xpath_literal("f'o\"o"), "concat('f',\"'\",'o','\"','o')");
+        // both quote kinds: maximal runs, not one character per argument
+        assert_eq!(xpath_literal("f'o\"o"), "concat('f',\"'\",'o\"o')");
+        assert_eq!(xpath_literal("it's \"q\""), "concat('it',\"'\",'s \"q\"')");
+        // a leading and a doubled apostrophe
+        assert_eq!(xpath_literal("''a\"b"), "concat(\"''\",'a\"b')");
     }
 
     #[test]
