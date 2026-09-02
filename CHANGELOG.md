@@ -88,6 +88,24 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
 
 - `Error::into_message`, which consumes the error. Use `Error::message`.
 
+### Fixed
+
+- The README listed `:dir()` under "Not supported", claiming it errors. It has
+  always parsed and translated to a never-matching `[0]`, like `:hover` and
+  `:visited`, because resolved directionality needs the bidi algorithm; the
+  README and the `Mode` docs now say so, and record that the argument is not
+  interpreted (`:dir(rtl)` and `:dir(foo)` translate alike). No behaviour
+  changed.
+- The README's "Testing" section described the string-pinning tests as unit
+  tests under `src/`, which they stopped being when they moved into the
+  per-family suites under `tests/`; it now names those suites and the `Cases`
+  checker that drives them, and quotes the fuzz target's actual 1 MiB stack
+  rather than the 2 MiB it used before the nesting limit was resized.
+- The README did not mention that css-syntax-3 auto-closes an open block,
+  function or string at end of input, so a truncated selector translates as
+  its closed form (`a[b` is `a[@b]`) rather than erroring. "Error handling"
+  now says so. No behaviour changed.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

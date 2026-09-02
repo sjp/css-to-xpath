@@ -360,12 +360,28 @@ dependency's internal error — and `offset` the byte position the caret
 points at. `Error::Unsupported { construct }` is a valid selector this
 crate declines to approximate. Both are `#[non_exhaustive]`.
 
+One class of malformed input is *not* an error: css-syntax-3 closes an
+open block, function or string implicitly at end of input, so a truncated
+selector translates as though it had been closed. `a[b` is `a[@b]`,
+`a[b="x` is `a[@b = 'x']`, `:is(a` is `*[self::a]`, and `a /* comment`
+is `a`. Nothing here departs from the spec, but a caller whose selector
+can arrive truncated — a cut-off config value, a length-limited form
+field — gets a plausible XPath rather than a complaint, and should check
+the input's length itself if that matters.
+
 ## Testing
 
 Four layers, all run by `cargo test`:
 
-- **Unit tests** (`src/`) pin the exact XPath string each selector
-  translates to — the output contract.
+- **Output pinning** (`tests/`) pins the exact XPath string each
+  selector translates to — the output contract — through the public API
+  only, in per-family suites: `selectors.rs`, `names.rs`,
+  `attributes.rs`, `nth.rs`, `functional_pseudos.rs`, `scope.rs`,
+  `lang.rs`, `html_mode.rs`, `limits.rs`, `errors.rs` and `api.rs`. The
+  `Cases` checker in `tests/cases/mod.rs` drives them: it names the
+  selector behind a mismatch and reports every mismatch in a family
+  instead of aborting at the first. The unit tests left in `src/` cover
+  internal helpers the public API does not reach directly.
 - **Syntactic validity** (`tests/xpath_validity.rs`) re-translates every
   selector in the shared corpus (`tests/corpus/selectors.txt`) in all
   three modes, with and without a prefix, and parses the result with
@@ -392,7 +408,7 @@ toolchain:
 cargo +nightly fuzz run translate -- -max_total_time=60 -max_len=4096
 ```
 
-The target runs all three modes on a thread with the 2 MiB stack the
+The target runs all three modes on a thread with the 1 MiB stack the
 nesting limit is sized for, and asserts that no input panics and that
 output length stays proportionate to input. CI runs a two-minute pass on
 every change; `cargo-mutants` runs weekly.
