@@ -1508,7 +1508,7 @@ mod tests {
         // @href but is not one of the elements HTML matches here.
         assert_eq!(
             h("a:link"),
-            "a[@href and (name(.) = 'a' or name(.) = 'area')]"
+            "a[@href and (local-name() = 'a' or local-name() = 'area')]"
         );
         // :any-link is :link plus :visited; with no visited state in a
         // static document the two coincide, so they share a translation.
@@ -1521,8 +1521,8 @@ mod tests {
         assert_eq!(
             h("input:checked"),
             format!(
-                "input[(@selected and name(.) = 'option') or \
-                 (@checked and name(.) = 'input' and \
+                "input[(@selected and local-name() = 'option') or \
+                 (@checked and local-name() = 'input' and \
                  ({t_lc} = 'checkbox' or {t_lc} = 'radio'))]"
             )
         );
@@ -1532,19 +1532,21 @@ mod tests {
         assert_eq!(
             h("input:required"),
             format!(
-                "input[@required and ((name(.) = 'input' and not(\
+                "input[@required and ((local-name() = 'input' and not(\
                  {t_lc} = 'hidden' or {t_lc} = 'range' or {t_lc} = 'color' or \
                  {t_lc} = 'submit' or {t_lc} = 'image' or {t_lc} = 'reset' or \
-                 {t_lc} = 'button')) or name(.) = 'select' or name(.) = 'textarea')]"
+                 {t_lc} = 'button')) or local-name() = 'select' or \
+                 local-name() = 'textarea')]"
             )
         );
         assert_eq!(
             h("select:optional"),
             format!(
-                "select[not(@required) and ((name(.) = 'input' and not(\
+                "select[not(@required) and ((local-name() = 'input' and not(\
                  {t_lc} = 'hidden' or {t_lc} = 'range' or {t_lc} = 'color' or \
                  {t_lc} = 'submit' or {t_lc} = 'image' or {t_lc} = 'reset' or \
-                 {t_lc} = 'button')) or name(.) = 'select' or name(.) = 'textarea')]"
+                 {t_lc} = 'button')) or local-name() = 'select' or \
+                 local-name() = 'textarea')]"
             )
         );
         // :disabled and :enabled test the same element set — HTML's
@@ -1558,17 +1560,18 @@ mod tests {
         // disabled unless it sits in that fieldset's first legend,
         // expressed by counting disabled-fieldset ancestors against
         // protecting first-legends.
-        let set = "(name(.) = 'button' or name(.) = 'input' or \
-                    name(.) = 'select' or name(.) = 'textarea' or \
-                    name(.) = 'optgroup' or name(.) = 'option' or \
-                    name(.) = 'fieldset')";
-        let fd = "count(ancestor::fieldset[@disabled]) > \
-                  count(ancestor::legend[not(preceding-sibling::legend)]\
-                  [parent::fieldset[@disabled]])";
+        let set = "(local-name() = 'button' or local-name() = 'input' or \
+                    local-name() = 'select' or local-name() = 'textarea' or \
+                    local-name() = 'optgroup' or local-name() = 'option' or \
+                    local-name() = 'fieldset')";
+        let fd = "count(ancestor::*[local-name() = 'fieldset'][@disabled]) > \
+                  count(ancestor::*[local-name() = 'legend']\
+                  [not(preceding-sibling::*[local-name() = 'legend'])]\
+                  [parent::*[local-name() = 'fieldset'][@disabled]])";
         let disabled = format!(
             "@disabled or \
-             (name(.) = 'option' and parent::optgroup[@disabled]) or \
-             (not(name(.) = 'optgroup' or name(.) = 'option') and {fd})"
+             (local-name() = 'option' and parent::*[local-name() = 'optgroup'][@disabled]) or \
+             (not(local-name() = 'optgroup' or local-name() = 'option') and {fd})"
         );
         assert_eq!(
             h("input:disabled"),
@@ -1615,6 +1618,45 @@ mod tests {
         assert_eq!(x("select:optional"), h("select:optional"));
         assert_eq!(x("input:disabled"), h("input:disabled"));
         assert_eq!(x("input:enabled"), h("input:enabled"));
+        // Every element name inside an override is matched by
+        // local-name(), so the overrides see an XHTML document's
+        // namespaced elements: a bare node test (`ancestor::fieldset`)
+        // would match nothing under a default namespace, and a
+        // qualified-name comparison (`name(.) = 'input'`) nothing under
+        // a bound prefix (`<h:input>`) — and the user cannot influence
+        // either, since these fragments are not the subject they wrote.
+        for css in [
+            "*|input:disabled",
+            "*|input:enabled",
+            "*|option:checked",
+            "h|option:checked",
+            "*|input:required",
+            "*|select:optional",
+            "*|a:link",
+        ] {
+            let out = x(css);
+            assert!(!out.contains("name(.)"), "{css}: {out}");
+            for name in [
+                "button", "input", "select", "textarea", "optgroup", "option", "fieldset",
+                "legend", "a", "area",
+            ] {
+                for axis in ["ancestor::", "parent::", "preceding-sibling::", "self::"] {
+                    assert!(!out.contains(&format!("{axis}{name}")), "{css}: {out}");
+                }
+            }
+        }
+        // The namespace-agnostic forms are the ones libxml2 needs to
+        // reach a control inside a namespaced `<fieldset disabled>` and
+        // an `<h:option selected>` under a bound prefix.
+        assert!(x("*|input:disabled").contains(
+            "count(ancestor::*[local-name() = 'fieldset'][@disabled]) > \
+             count(ancestor::*[local-name() = 'legend']\
+             [not(preceding-sibling::*[local-name() = 'legend'])]\
+             [parent::*[local-name() = 'fieldset'][@disabled]])"
+        ));
+        assert!(
+            x("h|option:checked").starts_with("h:option[(@selected and local-name() = 'option')")
+        );
         // Form-state pseudo-classes with no exact static translation
         // stay unknown in every mode, HTML included.
         assert!(html.css_to_xpath("input:read-only", "").is_err());

@@ -79,6 +79,11 @@ assert_eq!(
   but preserves case (XHTML is XML, so names are case-sensitive) and
   reads `xml:lang` as well as `lang` for `:lang()`, preferring `xml:lang`
   when both are on the nearest ancestor (HTML's language determination).
+  The element names *inside* these pseudo-classes — the `fieldset`
+  ancestor, the parent `optgroup`, the `a`/`area` of `:link` — are matched
+  by local name, so they see XHTML's namespaced elements and work with
+  `*|input` and `h|input` subjects alike. Only the names you write follow
+  the namespace rule below.
 
 Pseudo-classes with no static equivalent (`:hover`, `:visited`,
 `:focus`, …) always translate to an unmatchable `[0]` rather than

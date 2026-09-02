@@ -80,6 +80,20 @@ impl LangSource {
 const TYPE_LC: &str = "translate(@type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
                        'abcdefghijklmnopqrstuvwxyz')";
 
+/// Every element name in the HTML overrides is matched by `local-name()`,
+/// never by a qualified name or a bare node test. The overrides are the one
+/// part of a translation the caller cannot spell themselves, and the
+/// document they run against may put HTML's elements in a namespace: in
+/// XHTML they are in `http://www.w3.org/1999/xhtml`, so `ancestor::fieldset`
+/// matches nothing, and under a bound prefix (`<h:input>`) a qualified-name
+/// comparison against `'input'` fails too. Matching by local name makes the
+/// fragments work for `*|input` and `h|input` subjects alike, and leaves
+/// `Mode::Html` unchanged in meaning — libxml2's HTML parser produces no
+/// namespaces, so there `local-name()` and the qualified name always agree.
+/// The crate's namespace rule for *written* names (an unprefixed name is
+/// the null namespace) is unaffected: that governs the subject the user
+/// writes, which is still translated as documented.
+///
 /// A form control is disabled by a `fieldset[disabled]` ancestor unless it
 /// sits inside that fieldset's first `legend` child (HTML's "actually
 /// disabled" carve-out keeps a disabled group's caption usable). Each such
@@ -87,9 +101,10 @@ const TYPE_LC: &str = "translate(@type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
 /// (distinct legends have distinct parents), so the control is
 /// fieldset-disabled iff it has more disabled-fieldset ancestors than
 /// protecting legends — which counts nested disabled fieldsets correctly.
-const FIELDSET_DISABLED: &str = "count(ancestor::fieldset[@disabled]) > \
-     count(ancestor::legend[not(preceding-sibling::legend)]\
-     [parent::fieldset[@disabled]])";
+const FIELDSET_DISABLED: &str = "count(ancestor::*[local-name() = 'fieldset'][@disabled]) > \
+     count(ancestor::*[local-name() = 'legend']\
+     [not(preceding-sibling::*[local-name() = 'legend'])]\
+     [parent::*[local-name() = 'fieldset'][@disabled]])";
 
 /// The elements HTML's `:enabled` and `:disabled` apply to: `button`,
 /// `input`, `select`, `textarea`, `optgroup`, `option` and `fieldset`.
@@ -97,13 +112,13 @@ const FIELDSET_DISABLED: &str = "count(ancestor::fieldset[@disabled]) > \
 /// nothing in static markup identifies one, so they are left out.
 /// Hyperlinks are not in the list — `a[href]` matches `:link`, never
 /// `:enabled` — and neither are the obsolete `keygen` and `command`.
-const DISABLEABLE: &str = "(name(.) = 'button' or \
-     name(.) = 'input' or \
-     name(.) = 'select' or \
-     name(.) = 'textarea' or \
-     name(.) = 'optgroup' or \
-     name(.) = 'option' or \
-     name(.) = 'fieldset')";
+const DISABLEABLE: &str = "(local-name() = 'button' or \
+     local-name() = 'input' or \
+     local-name() = 'select' or \
+     local-name() = 'textarea' or \
+     local-name() = 'optgroup' or \
+     local-name() = 'option' or \
+     local-name() = 'fieldset')";
 
 /// HTML's "actually disabled", to be read together with [`DISABLEABLE`]:
 /// `:disabled` is that set and this condition, `:enabled` is that set and
@@ -118,8 +133,9 @@ const DISABLEABLE: &str = "(name(.) = 'button' or \
 fn actually_disabled() -> String {
     format!(
         "@disabled or \
-         (name(.) = 'option' and parent::optgroup[@disabled]) or \
-         (not(name(.) = 'optgroup' or name(.) = 'option') and {FIELDSET_DISABLED})"
+         (local-name() = 'option' and parent::*[local-name() = 'optgroup'][@disabled]) or \
+         (not(local-name() = 'optgroup' or local-name() = 'option') \
+          and {FIELDSET_DISABLED})"
     )
 }
 
@@ -130,7 +146,7 @@ fn actually_disabled() -> String {
 /// matched case-insensitively (see [`TYPE_LC`]).
 fn required_applies() -> String {
     format!(
-        "((name(.) = 'input' and not(\
+        "((local-name() = 'input' and not(\
          {TYPE_LC} = 'hidden' or \
          {TYPE_LC} = 'range' or \
          {TYPE_LC} = 'color' or \
@@ -138,8 +154,8 @@ fn required_applies() -> String {
          {TYPE_LC} = 'image' or \
          {TYPE_LC} = 'reset' or \
          {TYPE_LC} = 'button')) or \
-         name(.) = 'select' or \
-         name(.) = 'textarea')"
+         local-name() = 'select' or \
+         local-name() = 'textarea')"
     )
 }
 
@@ -170,8 +186,8 @@ impl Translator {
             // HTML overrides
             (Kind::Html, PseudoClass::Checked) => {
                 xpath.add_or_condition(&format!(
-                    "(@selected and name(.) = 'option') or \
-                     (@checked and name(.) = 'input' \
+                    "(@selected and local-name() = 'option') or \
+                     (@checked and local-name() = 'input' \
                      and ({TYPE_LC} = 'checkbox' or {TYPE_LC} = 'radio'))"
                 ));
             }
@@ -183,7 +199,7 @@ impl Translator {
             // `href` but is not one of the elements HTML requires to
             // match :link/:visited, so it is not in the set.
             (Kind::Html, PseudoClass::Link) | (Kind::Html, PseudoClass::AnyLink) => {
-                xpath.add_condition("@href and (name(.) = 'a' or name(.) = 'area')");
+                xpath.add_condition("@href and (local-name() = 'a' or local-name() = 'area')");
             }
             (Kind::Html, PseudoClass::Required) => {
                 xpath.add_condition(&format!("@required and {}", required_applies()));
