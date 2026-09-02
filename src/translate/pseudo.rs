@@ -114,6 +114,11 @@ impl Translator {
             (Kind::Html, PseudoClass::Optional) => {
                 xpath.add_condition(&format!("not(@required) and {}", required_applies()));
             }
+            // HTML's "actually disabled" also covers an `option` whose
+            // parent `optgroup` is disabled, so `:disabled` and `:enabled`
+            // partition options. The spec's rule is the parent, not any
+            // ancestor — both arms use `parent::` so they stay exact
+            // complements even in markup that nests optgroups.
             (Kind::Html, PseudoClass::Disabled) => {
                 xpath.add_or_condition(&format!(
                     "( @disabled and ( \
@@ -125,7 +130,9 @@ impl Translator {
                      name(.) = 'fieldset' or \
                      name(.) = 'optgroup' or \
                      name(.) = 'option' \
-                     ) ) or ( ( \
+                     ) ) or ( \
+                     name(.) = 'option' and parent::optgroup[@disabled] \
+                     ) or ( ( \
                      (name(.) = 'input' and not({TYPE_LC} = 'hidden')) or \
                      name(.) = 'button' or \
                      name(.) = 'select' or \
@@ -149,7 +156,7 @@ impl Translator {
                      or name(.) = 'keygen') \
                      and not (@disabled or {FIELDSET_DISABLED})) \
                      or (name(.) = 'option' and not(@disabled or \
-                     ancestor::optgroup[@disabled]))"
+                     parent::optgroup[@disabled]))"
                 ));
             }
             // Everything else never matches.

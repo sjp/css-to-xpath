@@ -1362,9 +1362,12 @@ mod tests {
             )
         );
         // :disabled/:enabled fold @type case and apply HTML's
-        // "actually disabled" carve-out: a control inside a disabled
-        // fieldset's first legend is NOT disabled. Expressed by counting —
-        // more disabled-fieldset ancestors than protecting first-legends.
+        // "actually disabled" rules: an option under a disabled optgroup
+        // is disabled (both arms test parent::optgroup, so the two
+        // pseudo-classes partition options), and the fieldset carve-out —
+        // a control inside a disabled fieldset's first legend is NOT
+        // disabled, expressed by counting: more disabled-fieldset
+        // ancestors than protecting first-legends.
         let fd = "count(ancestor::fieldset[@disabled]) > \
                   count(ancestor::legend[not(preceding-sibling::legend)]\
                   [parent::fieldset[@disabled]])";
@@ -1377,7 +1380,9 @@ mod tests {
                  name(.) = 'textarea' or name(.) = 'command' or \
                  name(.) = 'fieldset' or name(.) = 'optgroup' or \
                  name(.) = 'option' \
-                 ) ) or ( ( \
+                 ) ) or ( \
+                 name(.) = 'option' and parent::optgroup[@disabled] \
+                 ) or ( ( \
                  (name(.) = 'input' and not({t_lc} = 'hidden')) or \
                  name(.) = 'button' or name(.) = 'select' or \
                  name(.) = 'textarea' \
@@ -1398,8 +1403,20 @@ mod tests {
                  or name(.) = 'textarea' or name(.) = 'keygen') \
                  and not (@disabled or {fd})) \
                  or (name(.) = 'option' and not(@disabled or \
-                 ancestor::optgroup[@disabled]))]"
+                 parent::optgroup[@disabled]))]"
             )
+        );
+        // The predicate tests element names itself, so it is the same
+        // whatever compound it hangs off: `optgroup:disabled` is the
+        // `@disabled` arm, and an `option` carrying its own `@disabled`
+        // inside an enabled optgroup is caught by that arm too.
+        assert_eq!(
+            h("optgroup:disabled"),
+            h("input:disabled").replace("input[", "optgroup[")
+        );
+        assert_eq!(
+            h("option:enabled"),
+            h("input:enabled").replace("input[", "option[")
         );
         // Non-overridden dynamic pseudos still never match.
         assert_eq!(h("a:hover"), "a[0]");
