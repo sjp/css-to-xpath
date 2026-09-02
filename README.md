@@ -59,10 +59,22 @@ assert_eq!(
   HTML-specific pseudo-classes.
 - **`Mode::Html`** — lowercases element and attribute names (as HTML parsing
   does) and gives dynamic-seeming pseudo-classes their static HTML
-  meaning where one exists: `:link`/`:any-link` (has `href`),
-  `:checked`, `:disabled`/`:enabled` (including the fieldset/legend
-  "actually disabled" carve-out), `:required`/`:optional`, and
-  `:lang()` (nearest `@lang` ancestor, case-folded prefix match).
+  meaning where one exists. Each is limited to the elements HTML
+  defines it over, so nothing else matches:
+  - `:link`/`:any-link` — an `a` or `area` with an `href`.
+  - `:checked` — a checked `input` of type `checkbox` or `radio`, or a
+    selected `option`.
+  - `:disabled`/`:enabled` — the two halves of HTML's "actually
+    disabled" over `button`, `input`, `select`, `textarea`, `optgroup`,
+    `option` and `fieldset`: the `disabled` attribute, an `option`
+    under a disabled `optgroup`, and a disabled `fieldset` ancestor —
+    with the carve-out that the fieldset's first `legend` keeps its
+    contents enabled. The two partition that element set. (HTML also
+    lists form-associated custom elements, which no static translation
+    can recognise.)
+  - `:required`/`:optional` — the `required` attribute over `select`,
+    `textarea` and the `input` types it applies to.
+  - `:lang()` — nearest `@lang` ancestor, case-folded prefix match.
 - **`Mode::Xhtml`** — the same HTML pseudo-class semantics as `Mode::Html`,
   but preserves case (XHTML is XML, so names are case-sensitive) and
   reads `xml:lang` as well as `lang` for `:lang()`, preferring `xml:lang`

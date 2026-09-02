@@ -1380,9 +1380,11 @@ mod tests {
     fn html_pseudo_overrides() {
         let html = Translator::new(Mode::Html);
         let h = |css: &str| html.css_to_xpath(css, "").unwrap();
+        // :link is `a`/`area` with an @href; the `link` element has an
+        // @href but is not one of the elements HTML matches here.
         assert_eq!(
             h("a:link"),
-            "a[@href and (name(.) = 'a' or name(.) = 'link' or name(.) = 'area')]"
+            "a[@href and (name(.) = 'a' or name(.) = 'area')]"
         );
         // :any-link is :link plus :visited; with no visited state in a
         // static document the two coincide, so they share a translation.
@@ -1395,8 +1397,8 @@ mod tests {
         assert_eq!(
             h("input:checked"),
             format!(
-                "input[(@selected and name(.) = 'option') or (@checked and \
-                 (name(.) = 'input' or name(.) = 'command')and \
+                "input[(@selected and name(.) = 'option') or \
+                 (@checked and name(.) = 'input' and \
                  ({t_lc} = 'checkbox' or {t_lc} = 'radio'))]"
             )
         );
@@ -1421,51 +1423,47 @@ mod tests {
                  {t_lc} = 'button')) or name(.) = 'select' or name(.) = 'textarea')]"
             )
         );
-        // :disabled/:enabled fold @type case and apply HTML's
-        // "actually disabled" rules: an option under a disabled optgroup
-        // is disabled (both arms test parent::optgroup, so the two
-        // pseudo-classes partition options), and the fieldset carve-out —
-        // a control inside a disabled fieldset's first legend is NOT
-        // disabled, expressed by counting: more disabled-fieldset
-        // ancestors than protecting first-legends.
+        // :disabled and :enabled test the same element set — HTML's
+        // button/input/select/textarea/optgroup/option/fieldset, with no
+        // hyperlinks and none of the obsolete keygen/command — against
+        // the same "actually disabled" condition, negated for :enabled,
+        // so the two always partition that set. The condition covers
+        // @disabled, an option under a disabled optgroup (the parent,
+        // per the spec, not any ancestor), and the fieldset carve-out:
+        // a control or nested fieldset inside a disabled fieldset is
+        // disabled unless it sits in that fieldset's first legend,
+        // expressed by counting disabled-fieldset ancestors against
+        // protecting first-legends.
+        let set = "(name(.) = 'button' or name(.) = 'input' or \
+                    name(.) = 'select' or name(.) = 'textarea' or \
+                    name(.) = 'optgroup' or name(.) = 'option' or \
+                    name(.) = 'fieldset')";
         let fd = "count(ancestor::fieldset[@disabled]) > \
                   count(ancestor::legend[not(preceding-sibling::legend)]\
                   [parent::fieldset[@disabled]])";
+        let disabled = format!(
+            "@disabled or \
+             (name(.) = 'option' and parent::optgroup[@disabled]) or \
+             (not(name(.) = 'optgroup' or name(.) = 'option') and {fd})"
+        );
         assert_eq!(
             h("input:disabled"),
-            format!(
-                "input[( @disabled and ( \
-                 (name(.) = 'input' and not({t_lc} = 'hidden')) or \
-                 name(.) = 'button' or name(.) = 'select' or \
-                 name(.) = 'textarea' or name(.) = 'command' or \
-                 name(.) = 'fieldset' or name(.) = 'optgroup' or \
-                 name(.) = 'option' \
-                 ) ) or ( \
-                 name(.) = 'option' and parent::optgroup[@disabled] \
-                 ) or ( ( \
-                 (name(.) = 'input' and not({t_lc} = 'hidden')) or \
-                 name(.) = 'button' or name(.) = 'select' or \
-                 name(.) = 'textarea' \
-                 ) \
-                 and {fd} \
-                 )]"
-            )
+            format!("input[{set} and ({disabled})]")
         );
         assert_eq!(
             h("input:enabled"),
-            format!(
-                "input[(@href and (name(.) = 'a' or name(.) = 'link' or \
-                 name(.) = 'area')) or \
-                 ((name(.) = 'command' or name(.) = 'fieldset' or \
-                 name(.) = 'optgroup') and not(@disabled)) or \
-                 (((name(.) = 'input' and not({t_lc} = 'hidden')) \
-                 or name(.) = 'button' or name(.) = 'select' \
-                 or name(.) = 'textarea' or name(.) = 'keygen') \
-                 and not (@disabled or {fd})) \
-                 or (name(.) = 'option' and not(@disabled or \
-                 parent::optgroup[@disabled]))]"
-            )
+            format!("input[{set} and not({disabled})]")
         );
+        // Hyperlinks and the obsolete `keygen`/`command` are in neither
+        // set: the predicate is the same one whatever it hangs off, and
+        // it tests no name outside the set, so `a:enabled` (like
+        // `keygen:enabled`) can never match.
+        assert_eq!(h("a:enabled"), h("input:enabled").replace("input[", "a["));
+        for css in ["a:enabled", "a:disabled", "input:checked"] {
+            assert!(!h(css).contains("keygen"), "{css}");
+            assert!(!h(css).contains("command"), "{css}");
+        }
+        assert!(!h("a:enabled").contains("@href"));
         // The predicate tests element names itself, so it is the same
         // whatever compound it hangs off: `optgroup:disabled` is the
         // `@disabled` arm, and an `option` carrying its own `@disabled`

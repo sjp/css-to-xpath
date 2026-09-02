@@ -91,6 +91,38 @@ const FIELDSET_DISABLED: &str = "count(ancestor::fieldset[@disabled]) > \
      count(ancestor::legend[not(preceding-sibling::legend)]\
      [parent::fieldset[@disabled]])";
 
+/// The elements HTML's `:enabled` and `:disabled` apply to: `button`,
+/// `input`, `select`, `textarea`, `optgroup`, `option` and `fieldset`.
+/// Form-associated custom elements are in the spec's list too, but
+/// nothing in static markup identifies one, so they are left out.
+/// Hyperlinks are not in the list — `a[href]` matches `:link`, never
+/// `:enabled` — and neither are the obsolete `keygen` and `command`.
+const DISABLEABLE: &str = "(name(.) = 'button' or \
+     name(.) = 'input' or \
+     name(.) = 'select' or \
+     name(.) = 'textarea' or \
+     name(.) = 'optgroup' or \
+     name(.) = 'option' or \
+     name(.) = 'fieldset')";
+
+/// HTML's "actually disabled", to be read together with [`DISABLEABLE`]:
+/// `:disabled` is that set and this condition, `:enabled` is that set and
+/// not this condition, so the two stay exact complements.
+///
+/// An element is actually disabled if it carries `@disabled`; an `option`
+/// is disabled by a disabled parent `optgroup` as well (the spec walks up
+/// to the nearest `optgroup`, which in conforming markup is the parent);
+/// and a control — or a nested `fieldset`, which is itself a disabled
+/// fieldset — is disabled by a disabled `fieldset` ancestor. The fieldset
+/// rule is the one that reaches neither `optgroup` nor `option`.
+fn actually_disabled() -> String {
+    format!(
+        "@disabled or \
+         (name(.) = 'option' and parent::optgroup[@disabled]) or \
+         (not(name(.) = 'optgroup' or name(.) = 'option') and {FIELDSET_DISABLED})"
+    )
+}
+
 /// The elements the `required` attribute applies to, for `:required` and
 /// `:optional` (HTML spec): `select`, `textarea`, and `input` except the
 /// types on which `required` has no effect — those match neither
@@ -139,21 +171,19 @@ impl Translator {
             (Kind::Html, PseudoClass::Checked) => {
                 xpath.add_or_condition(&format!(
                     "(@selected and name(.) = 'option') or \
-                     (@checked \
-                     and (name(.) = 'input' or name(.) = 'command')\
+                     (@checked and name(.) = 'input' \
                      and ({TYPE_LC} = 'checkbox' or {TYPE_LC} = 'radio'))"
                 ));
             }
             // :any-link is :link ∪ :visited. A static document has no
             // visited state, so every link counts as unvisited and the
             // two pseudo-classes coincide — :any-link shares :link's
-            // translation verbatim (keeping `link` in the element set
-            // for consistency, although HTML's :any-link strictly covers
-            // only `a` and `area`).
+            // translation verbatim. HTML matches both on an `a` or
+            // `area` with an `href`; the `link` element carries an
+            // `href` but is not one of the elements HTML requires to
+            // match :link/:visited, so it is not in the set.
             (Kind::Html, PseudoClass::Link) | (Kind::Html, PseudoClass::AnyLink) => {
-                xpath.add_condition(
-                    "@href and (name(.) = 'a' or name(.) = 'link' or name(.) = 'area')",
-                );
+                xpath.add_condition("@href and (name(.) = 'a' or name(.) = 'area')");
             }
             (Kind::Html, PseudoClass::Required) => {
                 xpath.add_condition(&format!("@required and {}", required_applies()));
@@ -161,50 +191,13 @@ impl Translator {
             (Kind::Html, PseudoClass::Optional) => {
                 xpath.add_condition(&format!("not(@required) and {}", required_applies()));
             }
-            // HTML's "actually disabled" also covers an `option` whose
-            // parent `optgroup` is disabled, so `:disabled` and `:enabled`
-            // partition options. The spec's rule is the parent, not any
-            // ancestor — both arms use `parent::` so they stay exact
-            // complements even in markup that nests optgroups.
+            // `:disabled` and `:enabled` are one expression read two
+            // ways, so they always partition the element set.
             (Kind::Html, PseudoClass::Disabled) => {
-                xpath.add_or_condition(&format!(
-                    "( @disabled and ( \
-                     (name(.) = 'input' and not({TYPE_LC} = 'hidden')) or \
-                     name(.) = 'button' or \
-                     name(.) = 'select' or \
-                     name(.) = 'textarea' or \
-                     name(.) = 'command' or \
-                     name(.) = 'fieldset' or \
-                     name(.) = 'optgroup' or \
-                     name(.) = 'option' \
-                     ) ) or ( \
-                     name(.) = 'option' and parent::optgroup[@disabled] \
-                     ) or ( ( \
-                     (name(.) = 'input' and not({TYPE_LC} = 'hidden')) or \
-                     name(.) = 'button' or \
-                     name(.) = 'select' or \
-                     name(.) = 'textarea' \
-                     ) \
-                     and {FIELDSET_DISABLED} \
-                     )"
-                ));
+                xpath.add_condition(&format!("{DISABLEABLE} and ({})", actually_disabled()));
             }
             (Kind::Html, PseudoClass::Enabled) => {
-                xpath.add_or_condition(&format!(
-                    "(@href and (name(.) = 'a' or name(.) = 'link' or name(.) = 'area')) \
-                     or \
-                     ((name(.) = 'command' or name(.) = 'fieldset' or name(.) = 'optgroup') \
-                     and not(@disabled)) \
-                     or \
-                     (((name(.) = 'input' and not({TYPE_LC} = 'hidden')) \
-                     or name(.) = 'button' \
-                     or name(.) = 'select' \
-                     or name(.) = 'textarea' \
-                     or name(.) = 'keygen') \
-                     and not (@disabled or {FIELDSET_DISABLED})) \
-                     or (name(.) = 'option' and not(@disabled or \
-                     parent::optgroup[@disabled]))"
-                ));
+                xpath.add_condition(&format!("{DISABLEABLE} and not({})", actually_disabled()));
             }
             // Everything else never matches.
             _ => {
