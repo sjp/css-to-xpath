@@ -140,6 +140,52 @@ assert_eq!(
   it need it registered.
 - The `Mode::Html`/`Mode::Xhtml` form and link pseudo-classes listed above.
 
+## Namespaces
+
+A CSS namespace prefix is passed straight through to the XPath, so
+`svg|g` becomes `svg:g` and the *caller's* namespace map decides what
+`svg` binds to — this crate never sees namespace URLs, and a prefix that
+is not a valid XPath name is an error rather than a guess.
+
+An *unprefixed* type name becomes an unprefixed XPath name test, which
+matches the null namespace only. That is the rule everywhere the name can
+appear — at the top level, on the right of a combinator, and inside
+`:is()`, `:where()`, `:not()`, `:has()` and `An+B of S`, where it becomes
+the equivalent `self::` test:
+
+```rust,no_run
+use css_to_xpath::{css_to_xpath, Mode};
+
+assert_eq!(css_to_xpath("body > p", "", Mode::Generic).unwrap(), "body/p");
+assert_eq!(
+    css_to_xpath(":is(body > p)", "", Mode::Generic).unwrap(),
+    "*[self::p and parent::*[self::body]]"
+);
+```
+
+So in a document with a *default* namespace — XHTML, SVG, Atom, … — a
+bare `p` matches nothing, exactly as it would in an XPath expression
+written by hand. Ask for the name in any namespace with `*|e`, which
+translates to a `local-name()` test and is likewise the same wherever it
+is written:
+
+```rust,no_run
+use css_to_xpath::{css_to_xpath, Mode};
+
+assert_eq!(
+    css_to_xpath("*|body > *|p", "", Mode::Generic).unwrap(),
+    "*[local-name() = 'body']/*[local-name() = 'p']"
+);
+```
+
+The other forms follow from the same rule: `|e` is "no namespace", which
+is what a bare `e` already means, and a name needing quoting cannot be a
+node test at all, so it folds into `name() = '…' and namespace-uri() = ''`
+— the qualified-name comparison alone would also match the name in a
+default namespace. Attribute names work the same way, except that an
+unprefixed one has no namespace by definition, so `[foo]` and `[|foo]`
+are the same test and `[*|foo]` is the any-namespace one.
+
 ## Not supported
 
 These error rather than approximate, since XPath 1.0 has no way to

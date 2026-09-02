@@ -235,23 +235,30 @@ impl Translator {
                 xpath.add_condition(&cond);
                 return Ok(xpath);
             }
-            NsConstraint::ExplicitNone if name == "*" || !safe => {
-                // A safe '|e' is just an unprefixed XPath name test, which
-                // matches exactly the null namespace. '|*' and names
-                // needing quoting check namespace-uri() explicitly: a
-                // quoted name() test alone would also match the name in a
-                // default namespace.
-                let mut xpath = XPathExpr::new(&name);
-                xpath.add_name_test();
+            NsConstraint::ExplicitNone if name == "*" => {
+                // '|*': every element with no namespace. A bare '*' is
+                // every element whatever its namespace, so the constraint
+                // has to be written out.
+                let mut xpath = XPathExpr::new("*");
                 xpath.add_condition("namespace-uri() = ''");
-                if name != "*" {
-                    // The of-type nodetest must carry the namespace pin
-                    // set by the condition above
-                    xpath.name_test = Some(format!(
-                        "*[name() = {} and namespace-uri() = '']",
-                        xpath_expr::xpath_literal(&name)
-                    ));
-                }
+                return Ok(xpath);
+            }
+            NsConstraint::None | NsConstraint::ExplicitNone if !safe => {
+                // A safe 'e' or '|e' is just an unprefixed XPath name
+                // test, which matches exactly the null namespace. A name
+                // needing quoting cannot be a name test at all, so it
+                // folds into a name() comparison — and name() returns the
+                // *qualified* name, which for an element in a default
+                // namespace is the bare local name. Pin namespace-uri()
+                // alongside it so a quoted name matches exactly what a
+                // safe one does.
+                let cond = format!("name() = {}", xpath_expr::xpath_literal(&name));
+                let mut xpath = XPathExpr::new("*");
+                // The of-type nodetest must carry the namespace pin set
+                // by the condition below.
+                xpath.name_test = Some(format!("*[{cond} and namespace-uri() = '']"));
+                xpath.add_condition(&cond);
+                xpath.add_condition("namespace-uri() = ''");
                 return Ok(xpath);
             }
             // Namespace prefixes are case-sensitive.
@@ -277,14 +284,12 @@ impl Translator {
             NsConstraint::Prefix(prefix) => {
                 name = format!("{prefix}:{name}");
             }
-            // '*|*' and '|e' translate to an unqualified name test.
+            // 'e', '|e' and '*|*' translate to an unqualified name test.
             _ => {}
         }
-        let mut xpath = XPathExpr::new(&name);
-        if !safe {
-            xpath.add_name_test();
-        }
-        Ok(xpath)
+        // Every name needing quoting was handled above, so what is left
+        // is a plain node test: '*', 'e', 'ns:e' or 'ns:*'.
+        Ok(XPathExpr::new(&name))
     }
 
     /// Dispatch over the non-element components of a compound — the
@@ -402,18 +407,14 @@ impl Translator {
                             }
                         };
                         let mut sub = self.compound_to_xpath(&seqs[i].0, of_depth)?;
-                        // A prefixed name stays in the node test
-                        // (`.//svg:g`) so it resolves through the
-                        // namespace map, except under `+` where the [1]
-                        // position predicate needs the node test to
-                        // stay `*`.
-                        if !sub.element.contains(':') {
-                            sub.add_name_test();
-                        } else if matches!(combinator, Some(Combinator::NextSibling)) {
-                            let element = std::mem::replace(&mut sub.element, "*".to_owned());
-                            sub.add_condition(&format!("self::{element}"));
-                        }
+                        // The name stays in the node test (`.//p`,
+                        // `.//svg:g`) so it means exactly what it means at
+                        // the top level and a prefix resolves through the
+                        // namespace map — except under `+`, where the [1]
+                        // position predicate has to count every sibling,
+                        // so the node test must stay `*`.
                         if matches!(combinator, Some(Combinator::NextSibling)) {
+                            sub.take_element_into_self_test();
                             // Only the immediately following sibling:
                             // constrain position before applying the match
                             // conditions.
@@ -591,10 +592,11 @@ impl Translator {
     }
 
     /// The condition imposed on the candidate element by the whole
-    /// argument chain. The compound's element becomes a condition — a
-    /// `self::` node test for prefixed names (so the prefix resolves
-    /// through the namespace map, like a top-level `svg|g`), a `name()`
-    /// comparison otherwise. A complex argument applies its rightmost
+    /// argument chain. The compound's element becomes a `self::` node
+    /// test, which tests exactly what the name would have tested as the
+    /// node test of a top-level selector: `:is(p)` constrains the same
+    /// elements as `p`, and a prefix still resolves through the caller's
+    /// namespace map. A complex argument applies its rightmost
     /// compound to the candidate, with everything to its left becoming an
     /// existence test through reversed axes:
     /// `:is(a > b ~ c)` matches a `c` with a preceding sibling `b` whose
@@ -620,12 +622,7 @@ impl Translator {
         let mut axes: Vec<&str> = Vec::with_capacity(seqs.len().saturating_sub(1));
         for (idx, (compound, combinator)) in seqs.iter().enumerate() {
             let mut sub = self.compound_to_xpath(compound, of_depth)?;
-            if sub.element.contains(':') {
-                let element = std::mem::replace(&mut sub.element, "*".to_owned());
-                sub.add_condition(&format!("self::{element}"));
-            } else {
-                sub.add_name_test();
-            }
+            sub.take_element_into_self_test();
             subs.push(sub);
             if idx + 1 < seqs.len() {
                 axes.push(match combinator {

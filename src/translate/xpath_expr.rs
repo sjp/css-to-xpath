@@ -168,14 +168,24 @@ impl XPathExpr {
         self.conditions.push(condition);
     }
 
-    pub fn add_name_test(&mut self) {
+    /// Move the element name out of the node test and into a `self::`
+    /// condition, leaving the node test `*`. Used where a compound has to
+    /// become a predicate on a candidate element (a functional
+    /// pseudo-class argument) or where a position predicate must count
+    /// every sibling (`+`). `self::e` tests exactly what the name tested
+    /// as a node test, so a bare name still matches only the null
+    /// namespace and a prefixed one still resolves through the caller's
+    /// namespace map.
+    pub fn take_element_into_self_test(&mut self) {
         if self.element == "*" {
             return;
         }
-        let cond = format!("name() = {}", xpath_literal(&self.element));
-        self.name_test = Some(format!("*[{cond}]"));
-        self.add_condition(&cond);
-        self.element = "*".to_owned();
+        let element = std::mem::replace(&mut self.element, "*".to_owned());
+        self.add_condition(&format!("self::{element}"));
+        // The name was a usable node test, so it stays the of-type
+        // nodetest — unless one was already pinned alongside it, as for a
+        // prefixed wildcard carrying a local-name() test.
+        self.name_test.get_or_insert(element);
     }
 
     /// The node test selecting siblings of the same type, for the of-type

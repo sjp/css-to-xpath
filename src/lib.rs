@@ -195,13 +195,26 @@ mod tests {
 
     #[test]
     fn unsafe_names_and_escapes() {
-        assert_eq!(xpath("di\\[v"), "*[name() = 'di[v']");
+        // A name that cannot be an XPath name test folds into a name()
+        // comparison, pinned to the null namespace so that it means what
+        // a name that can be one means; see
+        // `unprefixed_names_mean_the_null_namespace_everywhere`.
+        assert_eq!(
+            xpath("di\\[v"),
+            "*[name() = 'di[v' and namespace-uri() = '']"
+        );
         assert_eq!(xpath("[h\\]ref]"), "*[attribute::*[name() = 'h]ref']]");
-        assert_eq!(xpath("di\u{a0}v"), "*[name() = 'di\u{a0}v']");
+        assert_eq!(
+            xpath("di\u{a0}v"),
+            "*[name() = 'di\u{a0}v' and namespace-uri() = '']"
+        );
         // Unicode escapes are decoded to the characters they represent,
         // in idents, hashes, and strings alike.
         assert_eq!(xpath("#\\31 23"), "*[@id = '123']");
-        assert_eq!(xpath("\\31 23"), "*[name() = '123']");
+        assert_eq!(
+            xpath("\\31 23"),
+            "*[name() = '123' and namespace-uri() = '']"
+        );
         assert_eq!(xpath("[\\31 23]"), "*[attribute::*[name() = '123']]");
         assert_eq!(xpath("e[foo='\\31 23']"), "e[@foo = '123']");
         assert_eq!(xpath("e[foo='x\\79 z']"), "e[@foo = 'xyz']");
@@ -215,8 +228,9 @@ mod tests {
         // '*|' bypasses the safe-name fallback: quoting handles it.
         assert_eq!(xpath("*|di\\[v"), "*[local-name() = 'di[v']");
         assert_eq!(xpath("[*|h\\]ref]"), "*[@*[local-name() = 'h]ref']]");
-        // '|' with a name needing quoting keeps the no-namespace
-        // constraint alongside the name() test.
+        // '|e' with a name needing quoting is the same translation: the
+        // explicit no-namespace constraint is what an unprefixed name
+        // already carries.
         assert_eq!(
             xpath("|di\\[v"),
             "*[name() = 'di[v' and namespace-uri() = '']"
@@ -256,6 +270,75 @@ mod tests {
         );
         // A prefix that itself needs quoting errors; see
         // `unsupported_errors`.
+    }
+
+    /// One policy for unprefixed type names wherever they appear: a name
+    /// written without a prefix means the null namespace, and `*|e` is
+    /// the escape hatch for "this name in any namespace". Inside a
+    /// functional pseudo-class argument that means a `self::` test, never
+    /// a bare `name()` comparison: `name()` returns the *qualified* name,
+    /// so it also matches the name in a *default* namespace (XHTML, SVG,
+    /// Atom, ...), and `:is(p)` would then select what `p` does not.
+    #[test]
+    fn unprefixed_names_mean_the_null_namespace_everywhere() {
+        // Top level, and the right-hand side of every combinator.
+        assert_eq!(xpath("p"), "p");
+        assert_eq!(xpath("|p"), "p");
+        assert_eq!(xpath("body > p"), "body/p");
+        assert_eq!(xpath("p ~ p"), "p/following-sibling::p");
+        assert_eq!(xpath("p + p"), "p/following-sibling::*[1][self::p]");
+        // The same name inside an argument, as a `self::` test.
+        assert_eq!(xpath(":is(p)"), "*[self::p]");
+        assert_eq!(xpath(":where(p)"), "*[self::p]");
+        assert_eq!(xpath(":not(p)"), "*[not(self::p)]");
+        assert_eq!(
+            xpath(":is(body > p)"),
+            "*[self::p and parent::*[self::body]]"
+        );
+        assert_eq!(
+            xpath(":is(p + p)"),
+            "*[self::p and preceding-sibling::*[1][self::p]]"
+        );
+        assert_eq!(
+            xpath("e:nth-child(1 of p)"),
+            "e[count(preceding-sibling::*[self::p]) = 0 and self::p]"
+        );
+        // :has() looks forward, so the name stays in the node test of the
+        // existence path — except under `+`, where the [1] position
+        // predicate has to count every sibling.
+        assert_eq!(xpath(":has(p)"), "*[.//p]");
+        assert_eq!(xpath(":has(> p)"), "*[child::p]");
+        assert_eq!(xpath("e:has(+ p)"), "e[following-sibling::*[1][self::p]]");
+
+        // A name needing quoting cannot be a node test at all, so it
+        // folds into a name() comparison — which compares the qualified
+        // name, and so needs the namespace pinned to mean the same as a
+        // name that can.
+        const E: &str = "name() = 'é' and namespace-uri() = ''";
+        assert_eq!(xpath("é"), format!("*[{E}]"));
+        assert_eq!(xpath("|é"), format!("*[{E}]"));
+        assert_eq!(xpath("é ~ é"), format!("*[{E}]/following-sibling::*[{E}]"));
+        assert_eq!(xpath(":is(é)"), format!("*[{E}]"));
+        assert_eq!(xpath("e:is(é > é)"), format!("e[{E} and parent::*[{E}]]"));
+        assert_eq!(xpath("e:has(é)"), format!("e[.//*[{E}]]"));
+        assert_eq!(
+            xpath("e:has(+ é)"),
+            format!("e[following-sibling::*[1][{E}]]")
+        );
+        assert_eq!(
+            xpath("e:nth-child(1 of é)"),
+            format!("e[count(preceding-sibling::*[{E}]) = 0 and {E}]")
+        );
+
+        // `*|e` asks for the name in any namespace, and it too means the
+        // same thing wherever it is written.
+        assert_eq!(xpath("*|p"), "*[local-name() = 'p']");
+        assert_eq!(xpath(":is(*|p)"), "*[local-name() = 'p']");
+        assert_eq!(xpath(":has(*|p)"), "*[.//*[local-name() = 'p']]");
+        assert_eq!(
+            xpath(":is(*|body > *|p)"),
+            "*[local-name() = 'p' and parent::*[local-name() = 'body']]"
+        );
     }
 
     #[test]
@@ -671,23 +754,24 @@ mod tests {
             xpath("e:only-of-type"),
             "e[count(preceding-sibling::e) = 0 and count(following-sibling::e) = 0]"
         );
-        // Element names needing quoting fold into a name() condition; the
-        // of-type pseudos count same-type siblings through the same test.
+        // Element names needing quoting fold into a namespace-pinned
+        // name() condition; the of-type pseudos count same-type siblings
+        // through the same test.
         assert_eq!(
             xpath("é:first-of-type"),
-            "*[name() = 'é' and count(preceding-sibling::*[name() = 'é']) = 0]"
+            "*[name() = 'é' and namespace-uri() = '' and count(preceding-sibling::*[name() = 'é' and namespace-uri() = '']) = 0]"
         );
         assert_eq!(
             xpath("é:nth-of-type(2)"),
-            "*[name() = 'é' and count(preceding-sibling::*[name() = 'é']) = 1]"
+            "*[name() = 'é' and namespace-uri() = '' and count(preceding-sibling::*[name() = 'é' and namespace-uri() = '']) = 1]"
         );
         assert_eq!(
             xpath("é:nth-last-of-type(1)"),
-            "*[name() = 'é' and count(following-sibling::*[name() = 'é']) = 0]"
+            "*[name() = 'é' and namespace-uri() = '' and count(following-sibling::*[name() = 'é' and namespace-uri() = '']) = 0]"
         );
         assert_eq!(
             xpath("é:only-of-type"),
-            "*[name() = 'é' and count(preceding-sibling::*[name() = 'é']) = 0 and count(following-sibling::*[name() = 'é']) = 0]"
+            "*[name() = 'é' and namespace-uri() = '' and count(preceding-sibling::*[name() = 'é' and namespace-uri() = '']) = 0 and count(following-sibling::*[name() = 'é' and namespace-uri() = '']) = 0]"
         );
         // Explicit-namespace and no-namespace elements go through
         // local-name()/name()-plus-namespace-uri() the same way.
@@ -737,10 +821,10 @@ mod tests {
             xpath("li:nth-child(-n of .item)"),
             "li[0 and @class and contains(concat(' ', normalize-space(@class), ' '), ' item ')]"
         );
-        // An element argument folds into a name() test.
+        // An element argument folds into a self:: test.
         assert_eq!(
             xpath("div:nth-child(2 of div.foo)"),
-            "div[count(preceding-sibling::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and name() = 'div']) = 1 and @class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and name() = 'div']"
+            "div[count(preceding-sibling::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]) = 1 and @class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]"
         );
         // A universal argument makes the list match everything, like a
         // plain :nth-child.
@@ -767,13 +851,13 @@ mod tests {
         // Two levels, in full: `a` appears four times, not twice.
         assert_eq!(
             xpath(&nest(2)),
-            "*[count(preceding-sibling::*[count(preceding-sibling::*[name() = 'a']) = 1 \
-              and name() = 'a']) = 1 \
-              and count(preceding-sibling::*[name() = 'a']) = 1 and name() = 'a']"
+            "*[count(preceding-sibling::*[count(preceding-sibling::*[self::a]) = 1 \
+              and self::a]) = 1 \
+              and count(preceding-sibling::*[self::a]) = 1 and self::a]"
         );
         // The doubling itself: each level is a little over twice the last.
-        assert_eq!(xpath(&nest(4)).len(), 765);
-        assert_eq!(xpath(&nest(8)).len(), 12_765);
+        assert_eq!(xpath(&nest(4)).len(), 685);
+        assert_eq!(xpath(&nest(8)).len(), 11_485);
 
         // Past the limit it is an error, and a cheap one: the depth is
         // checked before descending, so nothing exponential is built.
@@ -860,18 +944,15 @@ mod tests {
             "e[not(count(preceding-sibling::*) mod 2 = 0)]"
         );
         assert_eq!(xpath("e:nOT(*)"), "e[0]");
-        assert_eq!(xpath("e:not(a)"), "e[not(name() = 'a')]");
+        assert_eq!(xpath("e:not(a)"), "e[not(self::a)]");
         assert_eq!(xpath(":not(*|e)"), "*[not(local-name() = 'e')]");
-        assert_eq!(xpath("e:not(a, b)"), "e[not(name() = 'a' or name() = 'b')]");
+        assert_eq!(xpath("e:not(a, b)"), "e[not(self::a or self::b)]");
         // A universal argument makes :not() unmatchable...
         assert_eq!(xpath("div:not(a, *)"), "div[0]");
         // :where() / :is() OR their arguments together into one condition
         // that ANDs with the rest of the compound.
-        assert_eq!(xpath("div:where(p)"), "div[name() = 'p']");
-        assert_eq!(
-            xpath("div:where(p, span)"),
-            "div[name() = 'p' or name() = 'span']"
-        );
+        assert_eq!(xpath("div:where(p)"), "div[self::p]");
+        assert_eq!(xpath("div:where(p, span)"), "div[self::p or self::span]");
         assert_eq!(xpath("section:where(#main)"), "section[@id = 'main']");
         assert_eq!(xpath("input:where([required])"), "input[@required]");
         assert_eq!(
@@ -888,51 +969,42 @@ mod tests {
         );
         assert_eq!(
             xpath("*:where(div.content)"),
-            "*[@class and contains(concat(' ', normalize-space(@class), ' '), ' content ') and name() = 'div']"
+            "*[@class and contains(concat(' ', normalize-space(@class), ' '), ' content ') and self::div]"
         );
         assert_eq!(
             xpath("div:where(p):where(span)"),
-            "div[name() = 'p' and name() = 'span']"
+            "div[self::p and self::span]"
         );
-        assert_eq!(xpath("div:is(p)"), "div[name() = 'p']");
+        assert_eq!(xpath("div:is(p)"), "div[self::p]");
         // :matches() is the legacy alias for :is().
-        assert_eq!(xpath("div:matches(p)"), "div[name() = 'p']");
+        assert_eq!(xpath("div:matches(p)"), "div[self::p]");
         // ...and :is()/:where() a no-op constraint.
         assert_eq!(xpath("e:is(*)"), "e");
         assert_eq!(xpath("div:is(a, *)"), "div");
         assert_eq!(xpath("div:where(a, *)"), "div");
         // :has().
-        assert_eq!(xpath("div:has(p)"), "div[.//*[name() = 'p']]");
+        assert_eq!(xpath("div:has(p)"), "div[.//p]");
         assert_eq!(
             xpath("div:has(.foo)"),
             "div[.//*[@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]]"
         );
-        assert_eq!(
-            xpath("div:has(p, span)"),
-            "div[.//*[name() = 'p'] | .//*[name() = 'span']]"
-        );
-        assert_eq!(
-            xpath("div:has(p):has(span)"),
-            "div[.//*[name() = 'p'] and .//*[name() = 'span']]"
-        );
+        assert_eq!(xpath("div:has(p, span)"), "div[.//p | .//span]");
+        assert_eq!(xpath("div:has(p):has(span)"), "div[.//p and .//span]");
         assert_eq!(
             xpath("section:has(div.content)"),
-            "section[.//*[@class and contains(concat(' ', normalize-space(@class), ' '), ' content ') and name() = 'div']]"
+            "section[.//div[@class and contains(concat(' ', normalize-space(@class), ' '), ' content ')]]"
         );
         assert_eq!(xpath("div:has(*)"), "div[.//*]");
         assert_eq!(xpath("section:has(#main)"), "section[.//*[@id = 'main']]");
         assert_eq!(xpath("form:has([required])"), "form[.//*[@required]]");
-        assert_eq!(xpath("*:has(img)"), "*[.//*[name() = 'img']]");
+        assert_eq!(xpath("*:has(img)"), "*[.//img]");
         // Leading combinators in :has() (selectors-4 relative selectors).
-        assert_eq!(xpath("e:has(> img)"), "e[child::*[name() = 'img']]");
-        assert_eq!(xpath("e:has(~ p)"), "e[following-sibling::*[name() = 'p']]");
-        assert_eq!(
-            xpath("e:has(+ p)"),
-            "e[following-sibling::*[1][name() = 'p']]"
-        );
+        assert_eq!(xpath("e:has(> img)"), "e[child::img]");
+        assert_eq!(xpath("e:has(~ p)"), "e[following-sibling::p]");
+        assert_eq!(xpath("e:has(+ p)"), "e[following-sibling::*[1][self::p]]");
         assert_eq!(
             xpath("e:has(> a, ~ p)"),
-            "e[child::*[name() = 'a'] | following-sibling::*[name() = 'p']]"
+            "e[child::a | following-sibling::p]"
         );
         assert_eq!(
             xpath("e:has(> .foo)"),
@@ -940,12 +1012,12 @@ mod tests {
         );
         assert_eq!(
             xpath("e:has(+ p.foo)"),
-            "e[following-sibling::*[1][@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and name() = 'p']]"
+            "e[following-sibling::*[1][@class and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::p]]"
         );
         // Nested :not() (Selectors Level 4).
-        assert_eq!(xpath(":not(:not(a))"), "*[not(not(name() = 'a'))]");
-        assert_eq!(xpath("e:is(:not(f))"), "e[not(name() = 'f')]");
-        assert_eq!(xpath("e:has(:not(f))"), "e[.//*[not(name() = 'f')]]");
+        assert_eq!(xpath(":not(:not(a))"), "*[not(not(self::a))]");
+        assert_eq!(xpath("e:is(:not(f))"), "e[not(self::f)]");
+        assert_eq!(xpath("e:has(:not(f))"), "e[.//*[not(self::f)]]");
         // Prefixed names inside arguments stay node tests, resolved
         // through the namespace map like a top-level `svg|g` — not a
         // string comparison against the document's prefix.
@@ -1016,192 +1088,168 @@ mod tests {
     #[test]
     fn complex_pseudo_arguments() {
         // One reversed axis per combinator.
-        assert_eq!(
-            xpath("e:is(a b)"),
-            "e[name() = 'b' and ancestor::*[name() = 'a']]"
-        );
-        assert_eq!(
-            xpath("e:is(a > b)"),
-            "e[name() = 'b' and parent::*[name() = 'a']]"
-        );
+        assert_eq!(xpath("e:is(a b)"), "e[self::b and ancestor::*[self::a]]");
+        assert_eq!(xpath("e:is(a > b)"), "e[self::b and parent::*[self::a]]");
         assert_eq!(
             xpath("e:is(a + b)"),
-            "e[name() = 'b' and preceding-sibling::*[1][name() = 'a']]"
+            "e[self::b and preceding-sibling::*[1][self::a]]"
         );
         assert_eq!(
             xpath("e:is(a ~ b)"),
-            "e[name() = 'b' and preceding-sibling::*[name() = 'a']]"
+            "e[self::b and preceding-sibling::*[self::a]]"
         );
         // Longer chains nest, each step wrapping the remainder.
         assert_eq!(
             xpath("e:is(a b c)"),
-            "e[name() = 'c' and ancestor::*[name() = 'b' and ancestor::*[name() = 'a']]]"
+            "e[self::c and ancestor::*[self::b and ancestor::*[self::a]]]"
         );
         assert_eq!(
             xpath("e:is(a > b ~ c)"),
-            "e[name() = 'c' and preceding-sibling::*[name() = 'b' and parent::*[name() = 'a']]]"
+            "e[self::c and preceding-sibling::*[self::b and parent::*[self::a]]]"
         );
         assert_eq!(
             xpath("e:is(a + b > c)"),
-            "e[name() = 'c' and parent::*[name() = 'b' and preceding-sibling::*[1][name() = 'a']]]"
+            "e[self::c and parent::*[self::b and preceding-sibling::*[1][self::a]]]"
         );
         // :not() negates the whole chain condition; complex and compound
         // arguments OR together ('and' binds tighter than 'or').
         assert_eq!(
             xpath("e:not(a b)"),
-            "e[not(name() = 'b' and ancestor::*[name() = 'a'])]"
+            "e[not(self::b and ancestor::*[self::a])]"
         );
         assert_eq!(
             xpath("e:not(a > b + c)"),
-            "e[not(name() = 'c' and preceding-sibling::*[1][name() = 'b' and parent::*[name() = 'a']])]"
+            "e[not(self::c and preceding-sibling::*[1][self::b and parent::*[self::a]])]"
         );
         assert_eq!(
             xpath("e:is(a b, c)"),
-            "e[name() = 'b' and ancestor::*[name() = 'a'] or name() = 'c']"
+            "e[self::b and ancestor::*[self::a] or self::c]"
         );
         assert_eq!(
             xpath("e:is(a, b c)"),
-            "e[name() = 'a' or name() = 'c' and ancestor::*[name() = 'b']]"
+            "e[self::a or self::c and ancestor::*[self::b]]"
         );
         // Universal steps: a bare-`*` left-hand side is a bare axis test,
         // a bare-`*` rightmost compound leaves only the chain test, and a
         // universal *argument* still makes the list trivially true (or
         // :not() unmatchable).
-        assert_eq!(xpath("e:is(* b)"), "e[name() = 'b' and ancestor::*]");
-        assert_eq!(xpath("e:is(a *)"), "e[ancestor::*[name() = 'a']]");
-        assert_eq!(xpath("e:not(a *)"), "e[not(ancestor::*[name() = 'a'])]");
+        assert_eq!(xpath("e:is(* b)"), "e[self::b and ancestor::*]");
+        assert_eq!(xpath("e:is(a *)"), "e[ancestor::*[self::a]]");
+        assert_eq!(xpath("e:not(a *)"), "e[not(ancestor::*[self::a])]");
         assert_eq!(xpath("e:is(a b, *)"), "e");
         assert_eq!(xpath("e:not(a b, *)"), "e[0]");
         // Conditions on chain steps come before each step's name test.
         assert_eq!(
             xpath("e:is(a.x b.y)"),
             "e[@class and contains(concat(' ', normalize-space(@class), ' '), ' y ') and \
-             name() = 'b' and \
+             self::b and \
              ancestor::*[@class and contains(concat(' ', normalize-space(@class), ' '), ' x ') \
-             and name() = 'a']]"
+             and self::a]]"
         );
         assert_eq!(
             xpath("e:is(a[foo='bar'] > b)"),
-            "e[name() = 'b' and parent::*[@foo = 'bar' and name() = 'a']]"
+            "e[self::b and parent::*[@foo = 'bar' and self::a]]"
         );
         assert_eq!(
             xpath("e:is(a:first-child b)"),
-            "e[name() = 'b' and ancestor::*[count(preceding-sibling::*) = 0 and name() = 'a']]"
+            "e[self::b and ancestor::*[count(preceding-sibling::*) = 0 and self::a]]"
         );
         assert_eq!(
             xpath("e:is(a:hover b)"),
-            "e[name() = 'b' and ancestor::*[0 and name() = 'a']]"
+            "e[self::b and ancestor::*[0 and self::a]]"
         );
         // Nested pseudo-classes inside chain steps; an or-group condition
         // is parenthesized when conjoined with the chain test.
         assert_eq!(
             xpath("e:is(:not(a) b)"),
-            "e[name() = 'b' and ancestor::*[not(name() = 'a')]]"
+            "e[self::b and ancestor::*[not(self::a)]]"
         );
         assert_eq!(
             xpath("e:not(:is(a b))"),
-            "e[not(name() = 'b' and ancestor::*[name() = 'a'])]"
+            "e[not(self::b and ancestor::*[self::a])]"
         );
         assert_eq!(
             xpath("e:is(:not(a b) c)"),
-            "e[name() = 'c' and ancestor::*[not(name() = 'b' and ancestor::*[name() = 'a'])]]"
+            "e[self::c and ancestor::*[not(self::b and ancestor::*[self::a])]]"
         );
         assert_eq!(
             xpath("e:is(:is(a, b) c)"),
-            "e[name() = 'c' and ancestor::*[name() = 'a' or name() = 'b']]"
+            "e[self::c and ancestor::*[self::a or self::b]]"
         );
         assert_eq!(
             xpath("e:is(c :is(a, b))"),
-            "e[(name() = 'a' or name() = 'b') and ancestor::*[name() = 'c']]"
+            "e[(self::a or self::b) and ancestor::*[self::c]]"
         );
         // Prefixed names in chain steps stay self:: node tests.
         assert_eq!(
             xpath("ns|e:is(a b)"),
-            "ns:e[name() = 'b' and ancestor::*[name() = 'a']]"
+            "ns:e[self::b and ancestor::*[self::a]]"
         );
         assert_eq!(
             xpath("e:is(ns|a b)"),
-            "e[name() = 'b' and ancestor::*[self::ns:a]]"
+            "e[self::b and ancestor::*[self::ns:a]]"
         );
         assert_eq!(
             xpath("e:is(a ns|b)"),
-            "e[self::ns:b and ancestor::*[name() = 'a']]"
+            "e[self::ns:b and ancestor::*[self::a]]"
         );
         // :has() walks forward: one joiner per combinator, with the
         // leading combinator choosing the first axis.
-        assert_eq!(
-            xpath("e:has(a b)"),
-            "e[.//*[name() = 'a']//*[name() = 'b']]"
-        );
-        assert_eq!(
-            xpath("e:has(a > b)"),
-            "e[.//*[name() = 'a']/*[name() = 'b']]"
-        );
+        assert_eq!(xpath("e:has(a b)"), "e[.//a//b]");
+        assert_eq!(xpath("e:has(a > b)"), "e[.//a/b]");
         assert_eq!(
             xpath("e:has(a + b)"),
-            "e[.//*[name() = 'a']/following-sibling::*[1][name() = 'b']]"
+            "e[.//a/following-sibling::*[1][self::b]]"
         );
-        assert_eq!(
-            xpath("e:has(a ~ b)"),
-            "e[.//*[name() = 'a']/following-sibling::*[name() = 'b']]"
-        );
-        assert_eq!(
-            xpath("e:has(> a b)"),
-            "e[child::*[name() = 'a']//*[name() = 'b']]"
-        );
-        assert_eq!(
-            xpath("e:has(> a > b)"),
-            "e[child::*[name() = 'a']/*[name() = 'b']]"
-        );
+        assert_eq!(xpath("e:has(a ~ b)"), "e[.//a/following-sibling::b]");
+        assert_eq!(xpath("e:has(> a b)"), "e[child::a//b]");
+        assert_eq!(xpath("e:has(> a > b)"), "e[child::a/b]");
         assert_eq!(
             xpath("e:has(+ a > b)"),
-            "e[following-sibling::*[1][name() = 'a']/*[name() = 'b']]"
+            "e[following-sibling::*[1][self::a]/b]"
         );
         assert_eq!(
             xpath("e:has(~ a + b)"),
-            "e[following-sibling::*[name() = 'a']/following-sibling::*[1][name() = 'b']]"
+            "e[following-sibling::a/following-sibling::*[1][self::b]]"
         );
-        assert_eq!(
-            xpath("e:has(~ a > b)"),
-            "e[following-sibling::*[name() = 'a']/*[name() = 'b']]"
-        );
+        assert_eq!(xpath("e:has(~ a > b)"), "e[following-sibling::a/b]");
         assert_eq!(
             xpath("e:has(a > b + c)"),
-            "e[.//*[name() = 'a']/*[name() = 'b']/following-sibling::*[1][name() = 'c']]"
+            "e[.//a/b/following-sibling::*[1][self::c]]"
         );
         assert_eq!(
             xpath("e:has(> a:is(b c))"),
-            "e[child::*[name() = 'c' and ancestor::*[name() = 'b'] and name() = 'a']]"
+            "e[child::a[self::c and ancestor::*[self::b]]]"
         );
         assert_eq!(
             xpath("e:has(a.x > b.y)"),
-            "e[.//*[@class and contains(concat(' ', normalize-space(@class), ' '), ' x ') \
-             and name() = 'a']/*[@class and \
-             contains(concat(' ', normalize-space(@class), ' '), ' y ') and name() = 'b']]"
+            "e[.//a[@class and contains(concat(' ', normalize-space(@class), ' '), ' x ')]\
+             /b[@class and \
+             contains(concat(' ', normalize-space(@class), ' '), ' y ')]]"
         );
         // Prefixed names stay path node tests, except under `+` where the
         // [1] position predicate needs the node test to stay `*`.
-        assert_eq!(xpath("e:has(ns|a > b)"), "e[.//ns:a/*[name() = 'b']]");
+        assert_eq!(xpath("e:has(ns|a > b)"), "e[.//ns:a/b]");
         assert_eq!(
             xpath("e:has(a + ns|b)"),
-            "e[.//*[name() = 'a']/following-sibling::*[1][self::ns:b]]"
+            "e[.//a/following-sibling::*[1][self::ns:b]]"
         );
         // `of S` with complex selectors: the chain condition filters the
         // counted siblings and constrains the current element.
         assert_eq!(
             xpath("e:nth-child(2n of a b)"),
-            "e[(count(preceding-sibling::*[name() = 'b' and ancestor::*[name() = 'a']]) +1) \
-             mod 2 = 0 and name() = 'b' and ancestor::*[name() = 'a']]"
+            "e[(count(preceding-sibling::*[self::b and ancestor::*[self::a]]) +1) \
+             mod 2 = 0 and self::b and ancestor::*[self::a]]"
         );
         assert_eq!(
             xpath("e:nth-child(2n of a > b)"),
-            "e[(count(preceding-sibling::*[name() = 'b' and parent::*[name() = 'a']]) +1) \
-             mod 2 = 0 and name() = 'b' and parent::*[name() = 'a']]"
+            "e[(count(preceding-sibling::*[self::b and parent::*[self::a]]) +1) \
+             mod 2 = 0 and self::b and parent::*[self::a]]"
         );
         assert_eq!(
             xpath("e:nth-last-child(3 of a b)"),
-            "e[count(following-sibling::*[name() = 'b' and ancestor::*[name() = 'a']]) = 2 \
-             and name() = 'b' and ancestor::*[name() = 'a']]"
+            "e[count(following-sibling::*[self::b and ancestor::*[self::a]]) = 2 \
+             and self::b and ancestor::*[self::a]]"
         );
     }
 
