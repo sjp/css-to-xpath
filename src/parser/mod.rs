@@ -32,16 +32,6 @@ impl SelectorImpl for CssToXpathImpl {
     type PseudoElement = NeverPseudoElement;
 }
 
-/// One argument to `:lang()`: an ident or string value, or a bare `*`
-/// wildcard. These are collected as raw tokens (commas and whitespace are
-/// separators); `xx-` followed by `*` is combined into `xx-*` at
-/// translation time.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LangArg {
-    Value(String),
-    Star,
-}
-
 /// The non-tree-structural pseudo-classes the translators know.
 /// Everything here is the "never matches" set under the generic
 /// translator; the HTML translator overrides `:checked`, `:link`,
@@ -74,7 +64,10 @@ pub enum PseudoClass {
     Checked,
     Required,
     Optional,
-    Lang(Vec<LangArg>),
+    /// The comma-separated language ranges of `:lang()`, each
+    /// reassembled from the tokens it was spelled with (see
+    /// [`is_valid_lang_range`]).
+    Lang(Vec<String>),
     Dir(String),
 }
 
@@ -108,15 +101,23 @@ impl ToCss for PseudoClass {
         dest.write_char(':')?;
         dest.write_str(self.name())?;
         match self {
-            PseudoClass::Lang(args) => {
+            PseudoClass::Lang(ranges) => {
                 dest.write_char('(')?;
-                for (i, arg) in args.iter().enumerate() {
+                for (i, range) in ranges.iter().enumerate() {
                     if i > 0 {
-                        dest.write_char(' ')?;
+                        dest.write_str(", ")?;
                     }
-                    match arg {
-                        LangArg::Value(v) => cssparser::serialize_identifier(v, dest)?,
-                        LangArg::Star => dest.write_char('*')?,
+                    // A range is written back as the token sequence it
+                    // was parsed from: `*` cannot be part of an
+                    // identifier, so the pieces around it are serialized
+                    // separately (`en-*` as the ident `en-` then `*`).
+                    for (j, piece) in range.split('*').enumerate() {
+                        if j > 0 {
+                            dest.write_char('*')?;
+                        }
+                        if !piece.is_empty() {
+                            cssparser::serialize_identifier(piece, dest)?;
+                        }
                     }
                 }
                 dest.write_char(')')
@@ -234,12 +235,16 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
         Ok(pc)
     }
 
-    /// `:lang()` argument grammar: idents, strings, and `*` wildcards,
-    /// separated by whitespace and/or commas (commas are pure
-    /// separators — leading, trailing, and repeated commas are all
-    /// tolerated). At least one argument is required; NUMBER/`+`/`-`
-    /// tokens are rejected. `:dir()` is stricter, matching its
-    /// selectors-4 grammar: exactly one identifier.
+    /// `:lang()` argument grammar: a comma-separated list of at least
+    /// one language range, each an ident or string optionally glued to
+    /// `*` wildcards. Whitespace is allowed only around the commas: it
+    /// is a range *terminator*, never a separator, so `:lang(en fr)` is
+    /// an error rather than two ranges, and `en *` is not the range
+    /// `en-*`. A range is assembled here, while the tokens' adjacency is
+    /// still known — the tokenizer splits `en-*` into an ident and a
+    /// delimiter — and is then checked by [`is_valid_lang_range`].
+    /// NUMBER/`+`/`-` tokens are rejected. `:dir()` is stricter,
+    /// matching its selectors-4 grammar: exactly one identifier.
     ///
     /// The non-standard text-content pseudo `:contains()` is deliberately
     /// unsupported and falls through to the rejection arm, as does any
@@ -272,30 +277,12 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
             ));
         }
 
-        let mut args = Vec::new();
-        loop {
-            let token = match parser.next() {
-                Ok(t) => t.clone(),
-                Err(_) => break, // end of the function's arguments
-            };
-            match token {
-                Token::Ident(ref v) => args.push(LangArg::Value(v.as_ref().to_owned())),
-                Token::QuotedString(ref v) => args.push(LangArg::Value(v.as_ref().to_owned())),
-                Token::Delim('*') => args.push(LangArg::Star),
-                Token::Comma => {}
-                _ => {
-                    return Err(parser.new_custom_error(
-                        SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
-                    ));
-                }
-            }
-        }
-        if args.is_empty() {
-            return Err(parser.new_custom_error(
+        match parse_lang_ranges(parser) {
+            Some(ranges) => Ok(PseudoClass::Lang(ranges)),
+            None => Err(parser.new_custom_error(
                 SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
-            ));
+            )),
         }
-        Ok(PseudoClass::Lang(args))
     }
 
     /// Identity mapping: `svg|g` translates to `svg:g` — a prefix-only
@@ -314,6 +301,80 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
     fn default_namespace(&self) -> Option<CssString> {
         Some(CssString::from(""))
     }
+}
+
+/// The body of the `:lang()` argument grammar: the comma-separated
+/// ranges, or `None` if the arguments do not spell out at least one
+/// valid range. Assembling happens here rather than at translation time
+/// because only the token stream records whether two pieces were
+/// adjacent, and adjacency is the whole difference between the range
+/// `en-*` and the pair `en-`, `*`.
+fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> {
+    let mut ranges: Vec<String> = Vec::new();
+    let mut current = String::new();
+    // Whether `current` has a piece yet, and whether the next piece
+    // would be adjacent to it. The two are distinct because an empty
+    // string is a piece: `:lang("" *)` has started a range even though
+    // `current` is still empty.
+    let mut started = false;
+    let mut adjacent = true;
+    loop {
+        // Whitespace and comments both terminate a range, so neither may
+        // be skipped over here.
+        let token = match parser.next_including_whitespace_and_comments() {
+            Ok(t) => t.clone(),
+            Err(_) => break, // end of the function's arguments
+        };
+        let piece = match token {
+            Token::WhiteSpace(_) | Token::Comment(_) => {
+                adjacent = false;
+                continue;
+            }
+            Token::Comma => {
+                if !started || !is_valid_lang_range(&current) {
+                    return None;
+                }
+                ranges.push(std::mem::take(&mut current));
+                (started, adjacent) = (false, true);
+                continue;
+            }
+            Token::Ident(ref v) | Token::QuotedString(ref v) => v.as_ref().to_owned(),
+            Token::Delim('*') => "*".to_owned(),
+            _ => return None,
+        };
+        if started && !adjacent {
+            return None; // two ranges with no comma between them
+        }
+        current.push_str(&piece);
+        started = true;
+    }
+    if !started || !is_valid_lang_range(&current) {
+        return None; // no ranges at all, or a trailing comma
+    }
+    ranges.push(current);
+    Some(ranges)
+}
+
+/// Whether an assembled `:lang()` argument is a language range: one or
+/// more non-empty `-`-separated subtags, each either a whole `*` or free
+/// of `*` entirely (RFC 4647 extended-language-range, minus its
+/// restrictions on subtag length and character set — which cost nothing
+/// but never-matching output, unlike the shapes rejected here).
+///
+/// The wildcard rule is what makes a typo like `:lang(en*)` an error
+/// instead of the two ranges `en` and `*`, the second of which matches
+/// every element with a known language. The non-empty-subtag rule
+/// rejects `""`, `en-`, and `--x`; a trailing `-` in particular reads as
+/// a half-written `en-*`.
+///
+/// Positional restrictions the translators impose on a *valid* wildcard
+/// (only `*` or a final `en-*` survive XPath 1.0) belong to translation,
+/// not to this grammar.
+fn is_valid_lang_range(range: &str) -> bool {
+    !range.is_empty()
+        && range
+            .split('-')
+            .all(|subtag| !subtag.is_empty() && (subtag == "*" || !subtag.contains('*')))
 }
 
 /// The maximum functional-pseudo-class nesting depth accepted, measured
@@ -448,30 +509,76 @@ mod tests {
 
     #[test]
     fn pseudo_class_to_css_lang() {
+        assert_eq!(css(&PseudoClass::Lang(vec!["en".into()])), ":lang(en)");
         assert_eq!(
-            css(&PseudoClass::Lang(vec![LangArg::Value("en".into())])),
-            ":lang(en)"
+            css(&PseudoClass::Lang(vec!["en".into(), "fr".into()])),
+            ":lang(en, fr)"
         );
+        // A wildcard is not part of an identifier, so a range carrying
+        // one is written as the tokens it was parsed from.
+        assert_eq!(css(&PseudoClass::Lang(vec!["de-*".into()])), ":lang(de-*)");
+        assert_eq!(css(&PseudoClass::Lang(vec!["*".into()])), ":lang(*)");
         assert_eq!(
-            css(&PseudoClass::Lang(vec![
-                LangArg::Value("en".into()),
-                LangArg::Value("fr".into()),
-            ])),
-            ":lang(en fr)"
-        );
-        assert_eq!(
-            css(&PseudoClass::Lang(vec![
-                LangArg::Value("de".into()),
-                LangArg::Star,
-            ])),
-            ":lang(de *)"
+            css(&PseudoClass::Lang(vec!["de-*".into(), "*".into()])),
+            ":lang(de-*, *)"
         );
         // Values are run through `serialize_identifier`, not written raw:
         // a leading digit needs escaping to remain a valid CSS identifier.
+        assert_eq!(css(&PseudoClass::Lang(vec!["1x".into()])), ":lang(\\31 x)");
+    }
+
+    /// The `:lang()` argument grammar, at the level the parser decides
+    /// it: whether a token run assembles into ranges at all.
+    #[test]
+    fn lang_range_grammar() {
+        fn ranges(css: &str) -> Option<Vec<String>> {
+            let mut input = ParserInput::new(css);
+            let mut parser = CssParser::new(&mut input);
+            parser.expect_function_matching("lang").ok()?;
+            parser
+                .parse_nested_block(|p| {
+                    Ok::<_, cssparser::ParseError<'_, ()>>(parse_lang_ranges(p))
+                })
+                .ok()?
+        }
+        let one = |css: &str, range: &str| {
+            assert_eq!(
+                ranges(css).as_deref(),
+                Some(&[range.to_owned()][..]),
+                "{css}"
+            );
+        };
+        one("lang(en)", "en");
+        one("lang( en )", "en");
+        one("lang(\"en\")", "en");
+        one("lang(en-*)", "en-*");
+        one("lang(*)", "*");
+        one("lang(*-CH)", "*-CH");
+        one("lang(\"en nz\")", "en nz");
         assert_eq!(
-            css(&PseudoClass::Lang(vec![LangArg::Value("1x".into())])),
-            ":lang(\\31 x)"
+            ranges("lang( en , fr )"),
+            Some(vec!["en".to_owned(), "fr".to_owned()])
         );
+        for css in [
+            "lang()",
+            "lang(en fr)", // whitespace is not a separator
+            "lang(en *)",  // ... and does not build `en-*` either
+            "lang(en*)",   // `*` is only ever a whole subtag
+            "lang(*en)",
+            "lang(\"\")",
+            "lang(en-)",
+            "lang(--x)",
+            "lang(en--)",
+            "lang(,)",
+            "lang(,en)",
+            "lang(en,)",
+            "lang(en,,fr)",
+            "lang(5)",
+            "lang(-)",
+            "lang(en/**/fr)", // a comment separates tokens as whitespace does
+        ] {
+            assert_eq!(ranges(css), None, "{css}");
+        }
     }
 
     #[test]

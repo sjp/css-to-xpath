@@ -6,7 +6,7 @@
 //! for everything except `:lang()`, which it maps to XPath's `lang()`
 //! function.
 
-use crate::parser::{LangArg, PseudoClass};
+use crate::parser::PseudoClass;
 
 use super::error::Error;
 use super::xpath_expr::{XPathExpr, xpath_literal};
@@ -164,18 +164,19 @@ impl Translator {
     /// matching natively, so `en` and `en-*` both become `lang('en')`-style
     /// tests. A bare `*` matches elements whose language is *known*, which
     /// `lang()` cannot express, so it walks `xml:lang` instead.
-    fn lang_generic(&self, xpath: &mut XPathExpr, args: &[LangArg]) -> Result<(), Error> {
+    fn lang_generic(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
-        for value in lang_values(args)? {
+        for value in ranges {
+            check_wildcard_position(value)?;
             if value == "*" {
                 conditions.push(lang_known_condition(XML_LANG_ATTRIBUTE));
-            } else if let Some(prefix) = value.strip_suffix('*') {
-                // lang('en-') would never match: libxml2 expects the
-                // argument itself to end at a subtag boundary.
-                let prefix = prefix.trim_end_matches('-');
+            } else if let Some(prefix) = value.strip_suffix("-*") {
+                // The trailing '-' goes with the wildcard: lang('en-')
+                // would never match, since libxml2 expects the argument
+                // itself to end at a subtag boundary.
                 conditions.push(format!("lang({})", xpath_literal(prefix)));
             } else {
-                conditions.push(format!("lang({})", xpath_literal(&value)));
+                conditions.push(format!("lang({})", xpath_literal(value)));
             }
         }
         add_lang_conditions(xpath, conditions);
@@ -184,20 +185,20 @@ impl Translator {
 
     /// HTML `:lang()`: the nearest `lang`-attributed ancestor-or-self is
     /// tested with a lowercased, dash-terminated prefix match.
-    fn lang_html(&self, xpath: &mut XPathExpr, args: &[LangArg]) -> Result<(), Error> {
+    fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
-        for value in lang_values(args)? {
+        for value in ranges {
+            check_wildcard_position(value)?;
             if value == "*" {
                 conditions.push(lang_known_condition(LANG_ATTRIBUTE));
-            } else if let Some(prefix) = value.strip_suffix('*') {
-                // Wildcard suffix like "en-*": don't add '-' if the prefix
-                // already ends with it.
-                let search_prefix = if prefix.ends_with('-') {
+            } else if let Some(prefix) = value.strip_suffix("-*") {
+                // A trailing wildcard ("en-*") matches the same prefix as
+                // the range without it ("en"): both stop at a subtag
+                // boundary.
+                conditions.push(lang_ancestor_condition(&format!(
+                    "{}-",
                     prefix.to_lowercase()
-                } else {
-                    format!("{}-", prefix.to_lowercase())
-                };
-                conditions.push(lang_ancestor_condition(&search_prefix));
+                )));
             } else {
                 conditions.push(lang_ancestor_condition(&format!(
                     "{}-",
@@ -210,63 +211,23 @@ impl Translator {
     }
 }
 
-/// Reassemble the raw `:lang()` arguments into language ranges. The
-/// tokenizer breaks a wildcard range apart at every `*` — `en-*` arrives as
-/// `["en-", *]`, `*-CH` as `[*, "-CH"]`, `de-*-DE` as `["de-", *, "-DE"]` —
-/// and drops whitespace, so a range is a maximal run of adjacent pieces.
-/// Two facts let us rejoin them without the comma boundaries (which the
-/// parser also dropped): a separate range can never start with `-`, so a
-/// `Value` beginning with `-` always continues the current range; and a `*`
-/// continues the current range only when that range so far ends in `-`
-/// (otherwise it is a fresh `*` range). Thus `:lang(*, fr)` stays two
-/// ranges while `:lang(*-CH)` rejoins into one.
-///
 /// A wildcard is meaningful to the XPath 1.0 translations only as a whole
 /// range (`*`) or as the final subtag (`en-*`); RFC 4647 extended filtering
 /// also allows it in any interior position (`*-CH`, `de-*-DE`), which
 /// neither translator can express, so those ranges are rejected rather than
-/// silently over- or under-matching.
-fn lang_values(args: &[LangArg]) -> Result<Vec<String>, Error> {
-    let mut values: Vec<String> = Vec::new();
-    let mut current: Option<String> = None;
-    for arg in args {
-        match arg {
-            // A continuation subtag (always starts with '-') extends the
-            // range in progress; with nothing in progress it can only be a
-            // (degenerate) range of its own.
-            LangArg::Value(v) if v.starts_with('-') && current.is_some() => {
-                current.as_mut().unwrap().push_str(v);
-            }
-            LangArg::Value(v) => {
-                if let Some(done) = current.replace(v.clone()) {
-                    values.push(done);
-                }
-            }
-            // A '*' glued onto a "<subtag>-" prefix is a trailing wildcard
-            // ("en-*"); anywhere else it begins a fresh "*" range.
-            LangArg::Star if current.as_deref().is_some_and(|c| c.ends_with('-')) => {
-                current.as_mut().unwrap().push('*');
-            }
-            LangArg::Star => {
-                if let Some(done) = current.replace("*".to_owned()) {
-                    values.push(done);
-                }
-            }
-        }
+/// silently over- or under-matching. (The parser has already rejected a
+/// `*` that is not a whole subtag, such as `en*`, so a range that passes
+/// here is either `*` itself or ends in `-*`.)
+fn check_wildcard_position(range: &str) -> Result<(), Error> {
+    if let Some(pos) = range.find('*')
+        && pos != range.len() - 1
+    {
+        return Err(Error::Unsupported(format!(
+            "the :lang() language range {range:?} \
+             (a wildcard outside the final subtag)"
+        )));
     }
-    values.extend(current);
-
-    for range in &values {
-        if let Some(pos) = range.find('*')
-            && pos != range.len() - 1
-        {
-            return Err(Error::Unsupported(format!(
-                "the :lang() language range {range:?} \
-                 (a wildcard outside the final subtag)"
-            )));
-        }
-    }
-    Ok(values)
+    Ok(())
 }
 
 /// The shared condition-combining tail of both `:lang()` translations: a

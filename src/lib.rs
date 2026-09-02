@@ -1217,11 +1217,33 @@ mod tests {
             xpath("e:lang(en, de, fr)"),
             "e[lang('en') or lang('de') or lang('fr')]"
         );
-        // Whitespace is a separator too.
-        assert_eq!(xpath("e:lang(en fr)"), "e[lang('en') or lang('fr')]");
-        // Trailing/leading hyphens are still valid idents, not wildcards.
-        assert_eq!(xpath("e:lang(en--)"), "e[lang('en--')]");
-        assert_eq!(xpath("e:lang(--x)"), "e[lang('--x')]");
+        // Whitespace around the commas is fine.
+        assert_eq!(xpath("e:lang( en , fr )"), "e[lang('en') or lang('fr')]");
+        // But whitespace alone is not a separator (selectors-4 wants a
+        // comma-separated list), and it does not glue a range together
+        // either. `en*` is the case that matters most: read as the two
+        // ranges `en` and `*`, a typo would quietly widen the selector
+        // to every element with a known language.
+        for sel in [
+            "e:lang(en fr)",
+            "e:lang(en *)",
+            "e:lang(en*)",
+            // Empty and empty-subtag ranges cannot match anything and
+            // are not valid language ranges.
+            "e:lang(\"\")",
+            "e:lang(en-)",
+            "e:lang(en--)",
+            "e:lang(--x)",
+            "e:lang(en,)",
+            "e:lang(en,,fr)",
+        ] {
+            assert!(
+                Translator::new(Mode::Generic)
+                    .css_to_xpath(sel, "")
+                    .is_err(),
+                "{sel} should error"
+            );
+        }
         // A bare * stays match-anything even alongside other ranges: it
         // must not be confused with the head of an interior wildcard.
         assert_eq!(
@@ -1237,6 +1259,12 @@ mod tests {
         assert_eq!(
             html.css_to_xpath("e:lang(*)", "").unwrap(),
             "e[ancestor-or-self::*[@lang][1][string-length(@lang) > 0]]"
+        );
+        // A trailing wildcard matches the same prefix as the range
+        // without it: both stop at a subtag boundary.
+        assert_eq!(
+            html.css_to_xpath("e:lang(en-*)", "").unwrap(),
+            html.css_to_xpath("e:lang(en)", "").unwrap()
         );
         // A hyphenated range keeps its full spelling in the prefix match.
         assert_eq!(
