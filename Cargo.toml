@@ -5,6 +5,12 @@ edition = "2024"
 rust-version = "1.88"
 description = "Translate CSS selectors to XPath 1.0 expressions"
 license = "MIT"
+repository = "https://github.com/sjp/css-to-xpath"
+documentation = "https://docs.rs/css-to-xpath"
+readme = "README.md"
+keywords = ["css", "xpath", "selectors", "html", "xml"]
+categories = ["parser-implementations", "web-programming", "text-processing"]
+include = ["/src/**/*.rs", "/Cargo.toml", "/LICENSE", "/README.md"]
 
 [dependencies]
 selectors = "0.40"

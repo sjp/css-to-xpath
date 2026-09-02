@@ -25,13 +25,34 @@ pub(crate) enum Kind {
 }
 
 /// The translator flavour: which pseudo-class overrides, name-casing
-/// rules, and `:lang()` language source to apply. `Html` and `Xhtml`
-/// share the HTML overrides; only `Html` ASCII-lowercases element and attribute
-/// names, and only `Xhtml` reads `xml:lang`.
+/// rules, and `:lang()` language source to apply.
+///
+/// [`Html`](Mode::Html) and [`Xhtml`](Mode::Xhtml) share the HTML
+/// pseudo-class overrides; only `Html` ASCII-lowercases element and
+/// attribute names and folds HTML's legacy case-insensitive attribute
+/// values, and only `Xhtml` reads `xml:lang`.
+///
+/// Pseudo-classes with no static equivalent (`:hover`, `:visited`,
+/// `:focus`, …) translate to an unmatchable `[0]` in every flavour.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
+    /// Plain CSS/XPath semantics: case-sensitive names, no
+    /// HTML-specific pseudo-classes, and `:lang()` via XPath's own
+    /// `lang()` function.
     Generic,
+    /// An HTML document, as an HTML parser leaves it: element and
+    /// attribute names are ASCII-lowercased, HTML's legacy
+    /// case-insensitive attribute values (`type`, `rel`, …) compare
+    /// without regard to case, and `:link`, `:checked`,
+    /// `:disabled`/`:enabled`, `:required`/`:optional` and `:lang()`
+    /// take their static HTML meaning over the elements HTML defines
+    /// them for. `:lang()` reads the nearest `@lang` ancestor.
     Html,
+    /// XHTML: the same HTML pseudo-class semantics as [`Mode::Html`],
+    /// but case is preserved (XHTML is XML, so both names and those
+    /// attribute values are case-sensitive) and `:lang()` reads
+    /// `xml:lang` as well as `lang`, preferring `xml:lang` when both sit
+    /// on the nearest ancestor.
     Xhtml,
 }
 
@@ -69,6 +90,11 @@ enum NsConstraint<'a> {
 }
 
 impl Translator {
+    /// Build a translator for one of the three [`Mode`] flavours.
+    ///
+    /// The result is immutable and holds no per-selector state, so a
+    /// single translator can be reused for any number of translations.
+    #[must_use]
     pub fn new(mode: Mode) -> Self {
         match mode {
             Mode::Generic => Translator {

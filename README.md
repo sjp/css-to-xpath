@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/css-to-xpath.svg)](https://crates.io/crates/css-to-xpath)
 [![Docs.rs](https://docs.rs/css-to-xpath/badge.svg)](https://docs.rs/css-to-xpath)
 [![CI](https://github.com/sjp/css-to-xpath/actions/workflows/ci.yml/badge.svg)](https://github.com/sjp/css-to-xpath/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sjp/css-to-xpath/blob/master/LICENSE)
 
 Translate CSS selectors to XPath 1.0 expressions.
 
@@ -18,12 +18,12 @@ cargo add css-to-xpath
 
 ```toml
 [dependencies]
-css-to-xpath = "0.2"
+css-to-xpath = "0.3"
 ```
 
 ## Quick start
 
-```rust,no_run
+```rust
 use css_to_xpath::{css_to_xpath, Mode};
 
 // mode: Mode::Generic | Mode::Html | Mode::Xhtml; prefix: prepended to the result.
@@ -40,7 +40,7 @@ assert_eq!(
 
 For repeated translations, build a `Translator` once and reuse it:
 
-```rust,no_run
+```rust
 use css_to_xpath::{Mode, Translator};
 
 let translator = Translator::new(Mode::Generic);
@@ -99,7 +99,7 @@ erroring, in every flavour.
 `"descendant-or-self::"` to search an entire subtree, or `""` for a bare
 expression:
 
-```rust,no_run
+```rust
 use css_to_xpath::{css_to_xpath, Mode};
 
 assert_eq!(
@@ -112,7 +112,7 @@ A selector group anchored on `:scope` ignores `prefix` and instead
 anchors on the `self::` axis, since `:scope` names the context node the
 XPath is evaluated from:
 
-```rust,no_run
+```rust
 use css_to_xpath::{css_to_xpath, Mode};
 
 assert_eq!(
@@ -162,7 +162,7 @@ appear — at the top level, on the right of a combinator, and inside
 `:is()`, `:where()`, `:not()`, `:has()` and `An+B of S`, where it becomes
 the equivalent `self::` test:
 
-```rust,no_run
+```rust
 use css_to_xpath::{css_to_xpath, Mode};
 
 assert_eq!(css_to_xpath("body > p", "", Mode::Generic).unwrap(), "body/p");
@@ -178,7 +178,7 @@ written by hand. Ask for the name in any namespace with `*|e`, which
 translates to a `local-name()` test and is likewise the same wherever it
 is written:
 
-```rust,no_run
+```rust
 use css_to_xpath::{css_to_xpath, Mode};
 
 assert_eq!(
@@ -240,7 +240,7 @@ express them faithfully:
 through `?` into `Box<dyn Error>`, `anyhow::Error`, or a `thiserror`
 `#[from]` field with no wrapper of its own:
 
-```rust,no_run
+```rust
 use css_to_xpath::{css_to_xpath, Mode};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -262,7 +262,7 @@ A caller that still holds the selector can render the fuller diagnostic
 with `Error::message`, which quotes the selector and — for a parse error
 — points a caret at the offending position:
 
-```rust,no_run
+```rust
 use css_to_xpath::{css_to_xpath, Mode};
 
 let selector = "col || td";
@@ -333,4 +333,4 @@ dependency versions this crate requires.
 
 ## License
 
-Licensed under the [MIT license](LICENSE).
+Licensed under the [MIT license](https://github.com/sjp/css-to-xpath/blob/master/LICENSE).
