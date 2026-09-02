@@ -475,6 +475,17 @@ mod tests {
         assert!(t.css_to_xpath(".foo:first-of-type", "").is_err());
         assert!(t.css_to_xpath("[bar]:nth-of-type(2)", "").is_err());
         assert!(t.css_to_xpath(":is(e):first-of-type", "").is_err());
+        // Every wildcard subject is universal for this purpose: a
+        // prefixed wildcard names a namespace, not a type, so counting
+        // `ns|*` siblings would be a position among all elements in that
+        // namespace rather than among elements of the same type.
+        assert!(t.css_to_xpath("svg|*:first-of-type", "").is_err());
+        assert!(t.css_to_xpath("svg|*:last-of-type", "").is_err());
+        assert!(t.css_to_xpath("svg|*:nth-of-type(2)", "").is_err());
+        assert!(t.css_to_xpath("svg|*:nth-last-of-type(2)", "").is_err());
+        assert!(t.css_to_xpath("svg|*:only-of-type", "").is_err());
+        assert!(t.css_to_xpath("*|*:first-of-type", "").is_err());
+        assert!(t.css_to_xpath("|*:first-of-type", "").is_err());
         // :lang()/:dir() argument validation; a lone '-' is not a valid
         // ident.
         assert!(t.css_to_xpath(":lang()", "").is_err());

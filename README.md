@@ -128,9 +128,10 @@ express them faithfully:
   outside the never-match allow-list, such as `:valid`, `:read-only`,
   and `:placeholder-shown` — these error instead of silently matching
   nothing, so typos stay loud.
-- of-type pseudos (`:first-of-type`, `:nth-of-type()`, …) on a bare `*`
-  or implicit-type compound: XPath 1.0 cannot compare a sibling's name
-  against the matched element's own.
+- of-type pseudos (`:first-of-type`, `:nth-of-type()`, …) on any
+  wildcard subject (`*`, `*|*`, `|*`, `ns|*`) or implicit-type compound:
+  XPath 1.0 cannot compare a sibling's name against the matched
+  element's own.
 - Nested `:has()`, `:host`, and the `&` parent selector.
 - Namespace prefixes that need quoting (`\31 ns|div`): a prefix that is
   not a valid XPath name cannot appear in a node test, and XPath 1.0
