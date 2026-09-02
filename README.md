@@ -244,7 +244,7 @@ The CSS selector "col || td" uses the `||` column combinator, which this transla
 ## Minimum supported Rust version
 
 Rust **1.88**, edition 2024 — set by the floor of the `cssparser`/`selectors`
-dependency versions this crate pins.
+dependency versions this crate requires.
 
 ## License
 

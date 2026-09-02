@@ -7,10 +7,10 @@ description = "Translate CSS selectors to XPath 1.0 expressions"
 license = "MIT"
 
 [dependencies]
-selectors = "=0.40.0"
-cssparser = "=0.37.0"
-unicode-width = "=0.2.2"
-precomputed-hash = "=0.1.1"
+selectors = "0.40"
+cssparser = "0.37"
+unicode-width = "0.2"
+precomputed-hash = "0.1"
 
 [profile.release]
 panic = "unwind"

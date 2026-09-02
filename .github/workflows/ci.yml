@@ -44,6 +44,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features
 
+  latest-deps:
+    name: Test (latest compatible deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo update
+      - run: cargo test --all-features
+
   docs:
     name: Docs
     runs-on: ubuntu-latest
