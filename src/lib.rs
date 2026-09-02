@@ -303,6 +303,59 @@ mod tests {
         );
     }
 
+    /// Nesting depth is bounded before Servo is entered, so neither the
+    /// parser, the translator, nor dropping the selector tree can recurse
+    /// far enough to overflow the stack — an overflow aborts the process
+    /// outright, which no caller can catch. The whole test runs on a
+    /// thread with the 2 MB stack the limit is sized against (Rust's
+    /// default for a spawned thread), so a regression fails the build
+    /// instead of tearing the test runner down.
+    #[test]
+    fn nesting_depth_is_bounded() {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(|| {
+                let t = Translator::new(Mode::Generic);
+                let nest = |open: &str, n: usize| format!("{}a{}", open.repeat(n), ")".repeat(n));
+                let too_deep = crate::Error::Unsupported(
+                    "functional pseudo-classes nested more than 64 levels deep".to_owned(),
+                );
+
+                for open in [":not(", ":is(", ":where(", ":matches("] {
+                    assert!(t.css_to_xpath(&nest(open, 64), "").is_ok());
+                    assert_eq!(t.css_to_xpath(&nest(open, 65), "").unwrap_err(), too_deep);
+                    // Well past the depth that used to abort the process.
+                    assert_eq!(
+                        t.css_to_xpath(&nest(open, 10_000), "").unwrap_err(),
+                        too_deep
+                    );
+                }
+                assert_eq!(
+                    too_deep.into_message(":not(:not(a))"),
+                    "The CSS selector \":not(:not(a))\" uses functional pseudo-classes \
+                     nested more than 64 levels deep, which this translator does not support"
+                );
+
+                // Parens inside strings, escapes, and comments are not
+                // nesting, exactly as the `||` scan treats pipes.
+                let parens = "(".repeat(1000);
+                assert!(t.css_to_xpath(&format!("[foo=\"{parens}\"]"), "").is_ok());
+                assert!(t.css_to_xpath(&format!("a /* {parens} */ b"), "").is_ok());
+                assert!(t.css_to_xpath(&"a\\(".repeat(1000), "").is_ok());
+
+                // Depth is the limit, not length: an argument chain adds
+                // no stack frames, so a chain far longer than the depth
+                // limit still translates.
+                let chain = vec!["a"; 20_000].join(" > ");
+                assert!(t.css_to_xpath(&format!(":is({chain})"), "").is_ok());
+                assert!(t.css_to_xpath(&format!("b:has({chain})"), "").is_ok());
+                assert!(t.css_to_xpath(&chain, "").is_ok());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     #[test]
     fn unsupported_errors() {
         let t = Translator::new(Mode::Generic);

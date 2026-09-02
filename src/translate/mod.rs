@@ -536,7 +536,7 @@ impl Translator {
         let mut trivially_true = false;
         for selector in selectors {
             let seqs = collect_seqs(selector);
-            match self.argument_condition(&seqs, 0, context)? {
+            match self.argument_condition(&seqs, context)? {
                 None => trivially_true = true,
                 Some(condition) => conditions.push(condition),
             }
@@ -548,52 +548,69 @@ impl Translator {
         })
     }
 
-    /// The condition imposed on the candidate element by the argument
-    /// chain from `seqs[idx]` leftwards. The compound's element becomes a
-    /// condition — a `self::` node test for prefixed names (so the prefix
-    /// resolves through the namespace map, like a top-level `svg|g`), a
-    /// `name()` comparison otherwise. A complex argument applies its
-    /// rightmost compound to the candidate, with everything to its left
-    /// becoming an existence test through reversed axes, recursively:
+    /// The condition imposed on the candidate element by the whole
+    /// argument chain. The compound's element becomes a condition — a
+    /// `self::` node test for prefixed names (so the prefix resolves
+    /// through the namespace map, like a top-level `svg|g`), a `name()`
+    /// comparison otherwise. A complex argument applies its rightmost
+    /// compound to the candidate, with everything to its left becoming an
+    /// existence test through reversed axes:
     /// `:is(a > b ~ c)` matches a `c` with a preceding sibling `b` whose
     /// parent is an `a`.
+    ///
+    /// The chain is walked twice rather than recursed over, so its length
+    /// costs no stack: once left-to-right to translate each compound and
+    /// pick its reversed axis, then once right-to-left (leftmost compound
+    /// first) to wrap each condition inside the one to its right.
     ///
     /// `None` means the chain imposes no condition (a bare `*` argument).
     fn argument_condition(
         &self,
         seqs: &[(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)],
-        idx: usize,
         context: &str,
     ) -> Result<Option<Condition>, Error> {
-        let (compound, combinator) = &seqs[idx];
-        let mut sub = self.compound_to_xpath(compound)?;
-        if sub.element.contains(':') {
-            let element = std::mem::replace(&mut sub.element, "*".to_owned());
-            sub.add_condition(&format!("self::{element}"));
-        } else {
-            sub.add_name_test();
+        let mut subs: Vec<XPathExpr> = Vec::with_capacity(seqs.len());
+        // `axes[i]` points back at where the left-hand side of `seqs[i]`'s
+        // combinator must be, relative to the element matched by
+        // `seqs[i]`. The leftmost compound has nothing to its left, so
+        // there is one fewer axis than compound.
+        let mut axes: Vec<&str> = Vec::with_capacity(seqs.len().saturating_sub(1));
+        for (idx, (compound, combinator)) in seqs.iter().enumerate() {
+            let mut sub = self.compound_to_xpath(compound)?;
+            if sub.element.contains(':') {
+                let element = std::mem::replace(&mut sub.element, "*".to_owned());
+                sub.add_condition(&format!("self::{element}"));
+            } else {
+                sub.add_name_test();
+            }
+            subs.push(sub);
+            if idx + 1 < seqs.len() {
+                axes.push(match combinator {
+                    Some(Combinator::Descendant) => "ancestor::*",
+                    Some(Combinator::Child) => "parent::*",
+                    Some(Combinator::LaterSibling) => "preceding-sibling::*",
+                    Some(Combinator::NextSibling) => "preceding-sibling::*[1]",
+                    other => {
+                        return Err(Error::Unsupported(format!(
+                            "an unexpected combinator ({other:?}) inside `{context}`"
+                        )));
+                    }
+                });
+            }
         }
-        if idx + 1 < seqs.len() {
-            // The axis pointing back at where the left-hand side of the
-            // combinator must be, relative to the element matched here.
-            let axis = match combinator {
-                Some(Combinator::Descendant) => "ancestor::*",
-                Some(Combinator::Child) => "parent::*",
-                Some(Combinator::LaterSibling) => "preceding-sibling::*",
-                Some(Combinator::NextSibling) => "preceding-sibling::*[1]",
-                other => {
-                    return Err(Error::Unsupported(format!(
-                        "an unexpected combinator ({other:?}) inside `{context}`"
-                    )));
-                }
-            };
-            let rev_test = match self.argument_condition(seqs, idx + 1, context)? {
-                Some(inner) => format!("{axis}[{}]", inner.expr),
+
+        // Start from the leftmost compound and wrap outward, so each step
+        // nests the condition built so far inside its reversed axis.
+        let mut inner = subs.pop().expect("a selector has at least one compound");
+        for (mut sub, axis) in subs.into_iter().zip(axes).rev() {
+            let rev_test = match inner.condition() {
+                Some(condition) => format!("{axis}[{}]", condition.expr),
                 None => axis.to_owned(),
             };
             sub.add_condition(&rev_test);
+            inner = sub;
         }
-        Ok(sub.condition())
+        Ok(inner.condition())
     }
 }
 

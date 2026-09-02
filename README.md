@@ -134,6 +134,12 @@ express them faithfully:
 - Nested `:has()`, `:host`, and the `&` parent selector.
 - `:scope` outside the leftmost compound, or inside a functional
   pseudo-class argument.
+- Functional pseudo-classes (`:is()`, `:not()`, `:where()`, `:has()`,
+  `:nth-child(… of S)`) nested more than **64** levels deep. Parsing and
+  translating both recurse once per level, so the depth is capped to turn
+  a pathological selector into an error instead of a stack overflow.
+  Nothing hand-written comes close; only the nesting depth is limited,
+  not the length of a selector or of an argument chain.
 
 ## Error handling
 

@@ -316,19 +316,47 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
     }
 }
 
-/// Whether the selector uses the Level 4 column combinator `||` —
-/// outside strings, escapes, and comments, where a doubled pipe can only
-/// be that combinator (a single `|` occurs in namespace prefixes and
-/// `|=`, never doubled). Servo has no column-combinator support and its
-/// parse error misreads the second pipe as namespace syntax
-/// (`ExplicitNamespaceUnexpectedToken`), so the construct is caught
-/// before parsing and named properly. Column selection has no XPath 1.0
-/// translation anyway: column membership depends on `colspan`/`rowspan`
-/// layout arithmetic.
-fn uses_column_combinator(css: &str) -> bool {
+/// The maximum functional-pseudo-class nesting depth accepted, measured
+/// as parenthesis nesting in the source selector. Both Servo's parser and
+/// this crate's translator recurse once per nesting level (as does
+/// dropping the resulting selector tree), so an unbounded depth would
+/// overflow the stack — a hard abort, not a panic, so the caller cannot
+/// catch it.
+///
+/// The value is set from the profile that costs the most stack per level:
+/// an unoptimized build, which needs roughly 16 KB a level against about
+/// 4 KB optimized. 64 levels therefore fits in Rust's default 2 MB
+/// spawned-thread stack even in a debug build, with room to spare, and is
+/// still far beyond any hand-written selector.
+pub const MAX_NESTING_DEPTH: usize = 64;
+
+/// The facts about a selector that must be known before Servo is entered,
+/// gathered in one linear walk that skips strings, escapes, and comments.
+struct Scan {
+    /// Whether the selector uses the Level 4 column combinator `||`.
+    /// Outside strings, escapes, and comments a doubled pipe can only be
+    /// that combinator (a single `|` occurs in namespace prefixes and
+    /// `|=`, never doubled). Servo has no column-combinator support and
+    /// its parse error misreads the second pipe as namespace syntax
+    /// (`ExplicitNamespaceUnexpectedToken`), so the construct is caught
+    /// before parsing and named properly. Column selection has no XPath
+    /// 1.0 translation anyway: column membership depends on
+    /// `colspan`/`rowspan` layout arithmetic.
+    column_combinator: bool,
+    /// The deepest parenthesis nesting reached, an upper bound on how far
+    /// the parser and translator will recurse.
+    max_depth: usize,
+}
+
+fn scan(css: &str) -> Scan {
     let bytes = css.as_bytes();
     let mut i = 0;
     let mut quote: Option<u8> = None;
+    let mut depth: usize = 0;
+    let mut scan = Scan {
+        column_combinator: false,
+        max_depth: 0,
+    };
     while i < bytes.len() {
         let b = bytes[i];
         match quote {
@@ -350,19 +378,32 @@ fn uses_column_combinator(css: &str) -> bool {
                     }
                     i += 1;
                 }
-                b'|' if bytes.get(i + 1) == Some(&b'|') => return true,
+                b'|' if bytes.get(i + 1) == Some(&b'|') => scan.column_combinator = true,
+                b'(' => {
+                    depth += 1;
+                    scan.max_depth = scan.max_depth.max(depth);
+                }
+                // Unbalanced closers are Servo's to reject, not this
+                // walk's: just never go below zero.
+                b')' => depth = depth.saturating_sub(1),
                 _ => {}
             },
         }
         i += 1;
     }
-    false
+    scan
 }
 
 /// Parse a full selector list (comma-separated groups).
 pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
-    if uses_column_combinator(css) {
+    let scan = scan(css);
+    if scan.column_combinator {
         return Err(Error::Unsupported("the `||` column combinator".into()));
+    }
+    if scan.max_depth > MAX_NESTING_DEPTH {
+        return Err(Error::Unsupported(format!(
+            "functional pseudo-classes nested more than {MAX_NESTING_DEPTH} levels deep"
+        )));
     }
     let mut input = ParserInput::new(css);
     let mut parser = CssParser::new(&mut input);
