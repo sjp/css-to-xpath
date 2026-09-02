@@ -231,7 +231,7 @@ impl Translator {
     }
 
     /// HTML `:lang()`: the language of the nearest ancestor-or-self that
-    /// has one (see [`LangSource`]) is tested with a lowercased,
+    /// has one (see [`LangSource`]) is tested with an ASCII-lowercased,
     /// dash-terminated prefix match.
     fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
@@ -246,7 +246,7 @@ impl Translator {
                 let range = value.strip_suffix("-*").unwrap_or(value);
                 conditions.push(lang_ancestor_condition(
                     self.lang_source,
-                    &format!("{}-", range.to_lowercase()),
+                    &format!("{}-", range.to_ascii_lowercase()),
                 ));
             }
         }

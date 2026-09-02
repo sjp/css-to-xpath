@@ -26,7 +26,7 @@ pub(crate) enum Kind {
 
 /// The translator flavour: which pseudo-class overrides, name-casing
 /// rules, and `:lang()` language source to apply. `Html` and `Xhtml`
-/// share the HTML overrides; only `Html` lowercases element and attribute
+/// share the HTML overrides; only `Html` ASCII-lowercases element and attribute
 /// names, and only `Xhtml` reads `xml:lang`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -213,7 +213,7 @@ impl Translator {
             Some(e) => {
                 let safe = is_safe_name(e);
                 let e = if self.lower_case_element_names {
-                    e.to_lowercase()
+                    e.to_ascii_lowercase()
                 } else {
                     e.to_owned()
                 };
@@ -488,13 +488,13 @@ impl Translator {
         }
     }
 
-    /// Attribute-name handling: lowercase (html), safety check, namespace
+    /// Attribute-name handling: ASCII-lowercase (html), safety check, namespace
     /// qualification. Prefixes take part in the safety check, as in
     /// `xpath_element`: one that needs quoting cannot be a node test at
     /// all, and errors.
     fn attrib_expr(&self, ns: NsConstraint, local_name: &str) -> Result<String, Error> {
         let name = if self.lower_case_attribute_names {
-            local_name.to_lowercase()
+            local_name.to_ascii_lowercase()
         } else {
             local_name.to_owned()
         };

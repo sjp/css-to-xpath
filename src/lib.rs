@@ -1393,6 +1393,12 @@ mod tests {
             html.css_to_xpath("e:lang(en-*)", "").unwrap(),
             html.css_to_xpath("e:lang(en)", "").unwrap()
         );
+        // The range is ASCII-lowercased, matching the XPath
+        // translate() alphabet on the other side of the comparison.
+        assert_eq!(
+            html.css_to_xpath("e:lang(T\u{dc}RK)", "").unwrap(),
+            "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 't\u{dc}rk-')]]"
+        );
         // A hyphenated range keeps its full spelling in the prefix match.
         assert_eq!(
             html.css_to_xpath("e:lang(en-nz)", "").unwrap(),
@@ -1636,6 +1642,27 @@ mod tests {
         // xhtml preserves case
         let xhtml = Translator::new(Mode::Xhtml);
         assert_eq!(xhtml.css_to_xpath("DIV", "").unwrap(), "DIV");
+    }
+
+    /// HTML names are ASCII case-insensitive: the parser lowercases
+    /// A-Z and leaves every other code point alone, so full Unicode
+    /// case mapping (which turns '\u{130}' into "i\u{307}") would build a
+    /// name no document ever has.
+    #[test]
+    fn html_name_lowercasing_is_ascii_only() {
+        let html = Translator::new(Mode::Html);
+        assert_eq!(
+            html.css_to_xpath("\u{130}", "").unwrap(),
+            "*[name() = '\u{130}' and namespace-uri() = '']"
+        );
+        assert_eq!(
+            html.css_to_xpath("[\u{130}]", "").unwrap(),
+            "*[attribute::*[name() = '\u{130}']]"
+        );
+        assert_eq!(
+            html.css_to_xpath("*|\u{130}", "").unwrap(),
+            "*[local-name() = '\u{130}']"
+        );
     }
 
     #[test]
