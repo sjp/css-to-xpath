@@ -779,12 +779,15 @@ mod tests {
         // checked before descending, so nothing exponential is built.
         assert_eq!(t.css_to_xpath(&nest(9), "").unwrap_err(), too_deep);
         assert_eq!(t.css_to_xpath(&nest(40), "").unwrap_err(), too_deep);
+        // The selector is 154 bytes, so its quote is elided at 120
+        // with a `…`: every message is bounded, not just the
+        // caret-bearing ones.
         assert_eq!(
             too_deep.into_message(&nest(9)),
             format!(
-                "The CSS selector {:?} uses `An+B of S` selector lists nested more than \
-                 8 levels deep, which this translator does not support",
-                nest(9)
+                "The CSS selector \"{}\u{2026}\" uses `An+B of S` selector lists nested \
+                 more than 8 levels deep, which this translator does not support",
+                &nest(9)[..120]
             )
         );
 
@@ -1573,10 +1576,10 @@ mod tests {
         let t = Translator::new(Mode::Generic);
 
         // A dangling combinator: not valid CSS, so `Error::Parse`. The
-        // caret lands one past the last character, at the EOF position.
+        // caret lands one past the last character, at the EOF offset.
         let sel = "div > ";
         let err = t.css_to_xpath(sel, "").unwrap_err();
-        assert_eq!(err, crate::Error::Parse("DanglingCombinator".to_owned(), 7));
+        assert_eq!(err, crate::Error::Parse("DanglingCombinator".to_owned(), 6));
         assert_eq!(
             err.into_message(sel),
             "Unable to parse the CSS selector \"div > \": DanglingCombinator\n\
@@ -1591,7 +1594,7 @@ mod tests {
         let err = t.css_to_xpath(sel, "").unwrap_err();
         assert_eq!(
             err,
-            crate::Error::Parse("BadValueInAttr(Delim('#'))".to_owned(), 6)
+            crate::Error::Parse("BadValueInAttr(Delim('#'))".to_owned(), 5)
         );
         assert_eq!(
             err.into_message(sel),
@@ -1606,7 +1609,7 @@ mod tests {
         let err = t.css_to_xpath(sel, "").unwrap_err();
         assert_eq!(
             err,
-            crate::Error::Parse("UnexpectedToken(Delim('/'))".to_owned(), 5)
+            crate::Error::Parse("UnexpectedToken(Delim('/'))".to_owned(), 4)
         );
         assert_eq!(
             err.into_message(sel),
@@ -1650,5 +1653,89 @@ mod tests {
             "The CSS selector \"e:is(:scope)\" uses the `:scope` pseudo-class \
              inside a functional pseudo-class, which this translator does not support"
         );
+    }
+
+    /// The caret gutter's alignment and bounds. The caret is padded by
+    /// display width, not by character or byte count, and the gutter
+    /// echoes a window of the *line* the error is on, so a message stays
+    /// legible (and printable) whatever the selector contains.
+    #[test]
+    fn error_message_caret_alignment() {
+        let t = Translator::new(Mode::Generic);
+        // The gutter's echo line and caret line, without the leading
+        // `  | ` on each: what has to line up, isolated from the wording.
+        let gutter = |sel: &str| {
+            let message = t.css_to_xpath(sel, "").unwrap_err().into_message(sel);
+            let mut lines = message
+                .split('\n')
+                .skip(2)
+                .map(|l| l["  | ".len()..].to_owned());
+            (lines.next().unwrap(), lines.next().unwrap())
+        };
+
+        // A tab is echoed as a single space: its rendered width is the
+        // terminal's business, and the caret cannot guess the tab stops.
+        assert_eq!(
+            gutter("\tdiv >"),
+            (" div >".to_owned(), "      ^".to_owned())
+        );
+
+        // Wide characters take two columns each, so the caret needs
+        // eight spaces here and not the five characters (or eleven
+        // bytes, or six UTF-16 units) that precede the error.
+        assert_eq!(
+            gutter("日本語 >"),
+            ("日本語 >".to_owned(), "        ^".to_owned())
+        );
+        // A combining mark takes none, and a non-BMP character — two
+        // UTF-16 units — still only one.
+        assert_eq!(
+            gutter("e\u{301}\u{ff21} >"),
+            ("e\u{301}\u{ff21} >".to_owned(), "     ^".to_owned())
+        );
+        assert_eq!(
+            gutter("\u{1f600} >"),
+            ("\u{1f600} >".to_owned(), "    ^".to_owned())
+        );
+
+        // Control characters are never echoed raw into a terminal.
+        assert_eq!(
+            gutter("[foo=\u{1}]"),
+            ("[foo=\u{fffd}]".to_owned(), "     ^".to_owned())
+        );
+
+        // Only the line the error is on is echoed, so the caret's column
+        // is a column of the text above it. All of `\n`, `\r`, `\r\n`
+        // and `\f` end a line.
+        for sel in ["a,\nbbbb >", "a,\rbbbb >", "a,\r\nbbbb >", "a,\u{c}bbbb >"] {
+            assert_eq!(gutter(sel), ("bbbb >".to_owned(), "      ^".to_owned()));
+        }
+
+        // A line wider than the 72-column window is cut down to it,
+        // centred on the caret, with `…` for what was dropped.
+        let (line, caret) = gutter(&format!("{}/{}", "a".repeat(100), "b".repeat(100)));
+        assert_eq!(line, format!("…{}/{}…", "a".repeat(36), "b".repeat(35)));
+        assert_eq!(caret, format!("{}^", " ".repeat(37)));
+        assert_eq!(line.chars().count(), 74); // 72 columns plus both `…`
+        // The pad counts the leading `…` too, so the caret really is
+        // under the `/` as printed.
+        assert_eq!(line.chars().nth(caret.len() - 1), Some('/'));
+
+        // Put together: a 20 KB selector still yields a message a caller
+        // can print, with the caret intact — the selector is quoted only
+        // as far as the 120-byte elision, and echoed only as far as the
+        // window.
+        let big = format!("{}div >", "a,".repeat(10_000));
+        let message = t.css_to_xpath(&big, "").unwrap_err().into_message(&big);
+        assert!(message.len() < 1024, "{} bytes", message.len());
+        assert!(message.starts_with(&format!(
+            "Unable to parse the CSS selector \"{}…\":",
+            &big[..120]
+        )));
+        assert!(message.ends_with(&format!(
+            "\n  | …{}div >\n  | {}^",
+            "a,".repeat(33),
+            " ".repeat(72)
+        )));
     }
 }

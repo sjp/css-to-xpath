@@ -473,8 +473,53 @@ pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
             cssparser::ParseErrorKind::Basic(ref kind) => format!("{kind:?}"),
             cssparser::ParseErrorKind::Custom(ref kind) => format!("{kind:?}"),
         };
-        Error::Parse(detail, e.location.column)
+        Error::Parse(detail, byte_offset(css, e.location))
     })
+}
+
+/// The byte offset within `css` that `location` points at.
+///
+/// A `SourceLocation` cannot be used as an index: its line is 0-indexed,
+/// its column is 1-indexed, and — the part that bites — the column
+/// counts UTF-16 code units, so a tab counts as one unit but renders as
+/// several columns, a CJK character counts as one but renders as two,
+/// and a non-BMP character counts as two but is a single character. A
+/// byte offset is what the caret renderer needs to look at the source
+/// text itself.
+fn byte_offset(css: &str, location: SourceLocation) -> u32 {
+    let bytes = css.as_bytes();
+    // Walk to the start of the error's line. `\r\n`, `\r`, `\n` and `\f`
+    // are all line breaks, matching cssparser's own line counter.
+    let mut offset = 0;
+    let mut line = 0;
+    while line < location.line && offset < bytes.len() {
+        match bytes[offset] {
+            b'\r' => {
+                offset += 1;
+                if bytes.get(offset) == Some(&b'\n') {
+                    offset += 1;
+                }
+                line += 1;
+            }
+            b'\n' | b'\x0C' => {
+                offset += 1;
+                line += 1;
+            }
+            _ => offset += 1,
+        }
+    }
+    // Then across `column - 1` UTF-16 code units of that line. A column
+    // in the middle of a surrogate pair is not reachable from a token
+    // boundary, but `saturating_sub` keeps one from running away.
+    let mut units = location.column.saturating_sub(1);
+    for c in css[offset..].chars() {
+        if units == 0 {
+            break;
+        }
+        units = units.saturating_sub(c.len_utf16() as u32);
+        offset += c.len_utf8();
+    }
+    offset as u32
 }
 
 #[cfg(test)]
