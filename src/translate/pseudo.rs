@@ -183,7 +183,7 @@ fn required_applies() -> String {
 
 impl Translator {
     pub(crate) fn apply_pseudo_class(
-        &self,
+        self,
         xpath: &mut XPathExpr,
         pc: &PseudoClass,
     ) -> Result<(), Error> {
@@ -260,7 +260,7 @@ impl Translator {
     /// matching natively, so `en` and `en-*` both become `lang('en')`-style
     /// tests. A bare `*` matches elements whose language is *known*, which
     /// `lang()` cannot express, so it walks the language source instead.
-    fn lang_generic(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
+    fn lang_generic(self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_wildcard_position(value)?;
@@ -275,14 +275,14 @@ impl Translator {
                 conditions.push(format!("lang({})", xpath_literal(value)));
             }
         }
-        add_lang_conditions(xpath, conditions);
+        add_lang_conditions(xpath, &conditions);
         Ok(())
     }
 
     /// HTML `:lang()`: the language of the nearest ancestor-or-self that
     /// has one (see [`LangSource`]) is tested with an ASCII-lowercased,
     /// dash-terminated prefix match.
-    fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
+    fn lang_html(self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_wildcard_position(value)?;
@@ -299,7 +299,7 @@ impl Translator {
                 ));
             }
         }
-        add_lang_conditions(xpath, conditions);
+        add_lang_conditions(xpath, &conditions);
         Ok(())
     }
 }
@@ -409,7 +409,7 @@ fn check_wildcard_position(range: &str) -> Result<(), Error> {
 
 /// The shared condition-combining tail of both `:lang()` translations: a
 /// single condition is added as-is, multiple are OR-joined.
-fn add_lang_conditions(xpath: &mut XPathExpr, conditions: Vec<String>) {
+fn add_lang_conditions(xpath: &mut XPathExpr, conditions: &[String]) {
     match conditions.len() {
         0 => {}
         1 => xpath.add_condition(&conditions[0]),

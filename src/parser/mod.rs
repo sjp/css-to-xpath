@@ -1,7 +1,7 @@
 //! `SelectorImpl` and `Parser` implementations bridging Servo's `selectors`
 //! crate to this crate's translator.
 
-pub mod impls;
+mod impls;
 
 use cssparser::{
     Parser as CssParser, ParserInput, SourceLocation, ToCss, Token, match_ignore_ascii_case,
@@ -13,12 +13,12 @@ use selectors::parser::{
 use selectors::visitor::{SelectorListKind, SelectorVisitor};
 use std::fmt;
 
-pub use impls::CssString;
+pub(crate) use impls::CssString;
 
 use crate::translate::error::{Error, ParseErrorKind};
 
 #[derive(Clone, Debug)]
-pub struct CssToXpathImpl;
+pub(crate) struct CssToXpathImpl;
 
 impl SelectorImpl for CssToXpathImpl {
     type ExtraMatchingData<'a> = ();
@@ -48,7 +48,7 @@ impl SelectorImpl for CssToXpathImpl {
 /// form pseudo-classes `:read-only` or `:placeholder-shown`), error
 /// instead, so typos and genuinely missing features stay loud.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PseudoClass {
+pub(crate) enum PseudoClass {
     AnyLink,
     Link,
     Visited,
@@ -155,9 +155,13 @@ impl NonTSPseudoClass for PseudoClass {
 /// Uninhabited: `parse_pseudo_element` is left at its erroring default, so
 /// `::before` etc. fail to parse — pseudo-elements are not supported.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum NeverPseudoElement {}
+pub(crate) enum NeverPseudoElement {}
 
 impl ToCss for NeverPseudoElement {
+    // The standard way to write a total match on an uninhabited type.
+    // `&self` here can never be a live reference, so clippy's warning
+    // about dereferencing one describes a call that cannot happen.
+    #[allow(clippy::uninhabited_references)]
     fn to_css<W: fmt::Write>(&self, _dest: &mut W) -> fmt::Result {
         match *self {}
     }
@@ -167,7 +171,7 @@ impl PseudoElement for NeverPseudoElement {
     type Impl = CssToXpathImpl;
 }
 
-pub struct CssToXpathParser {
+pub(crate) struct CssToXpathParser {
     /// Whether Servo may recover from an invalid `:is()` / `:where()`
     /// argument instead of failing the whole parse. Only the retry in
     /// [`parse`] sets this, and it then rejects every recovery bar the
@@ -416,6 +420,19 @@ struct Scan {
     max_depth: usize,
 }
 
+/// The string handling here diverges from the CSS tokenizer on one point:
+/// a newline inside a string ends it there, as a bad-string token, where
+/// this walk stays "in string" until the closing quote or the end of the
+/// input. So the walk can treat as string content — and skip — text the
+/// tokenizer reads as syntax, which for `||` only loses a nicer error
+/// message and for parentheses could undercount the depth.
+///
+/// Neither matters, because reaching that state needs a string that no
+/// newline-free closing quote follows, and cssparser turns the newline
+/// into a bad-string token that fails the parse. The skipped text is
+/// everything after that point, so nothing in it is ever parsed, let
+/// alone recursed into. Every selector that does parse is one the walk
+/// and the tokenizer agree about.
 fn scan(css: &str) -> Scan {
     let bytes = css.as_bytes();
     let mut i = 0;
@@ -476,7 +493,7 @@ type ParseFailure<'i> = cssparser::ParseError<'i, SelectorParseErrorKind<'i>>;
 /// the strict parse decides, and forgiving parsing is only a retry whose
 /// result is accepted when the sole thing it recovered from was an empty
 /// argument list.
-pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
+pub(crate) fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
     let scan = scan(css);
     if scan.column_combinator {
         return Err(Error::unsupported("the `||` column combinator"));
@@ -495,13 +512,13 @@ pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
         // The forgiving parse recovered from a genuinely invalid
         // argument: the strict error is the one that names it, and
         // points at it.
-        Ok(_) => Err(parse_error(css, strict)),
+        Ok(_) => Err(parse_error(css, &strict)),
         // Both parses failed. An empty argument list is no longer an
         // error, so a strict `EmptySelector` may well be blaming one,
         // while the forgiving parse — which accepts those — stopped at
         // whatever is actually wrong.
-        Err(e) if is_empty_selector(&strict) => Err(parse_error(css, e)),
-        Err(_) => Err(parse_error(css, strict)),
+        Err(e) if is_empty_selector(&strict) => Err(parse_error(css, &e)),
+        Err(_) => Err(parse_error(css, &strict)),
     }
 }
 
@@ -519,7 +536,7 @@ fn parse_list(
     )
 }
 
-fn parse_error(css: &str, e: ParseFailure<'_>) -> Error {
+fn parse_error(css: &str, e: &ParseFailure<'_>) -> Error {
     Error::Parse {
         kind: ParseErrorKind::from_kind(&e.kind),
         offset: byte_offset(css, e.location),
@@ -579,7 +596,7 @@ impl SelectorVisitor for DroppedArgument {
 /// empty list is one such argument whose text holds no tokens: `:is()`,
 /// `:is( )`, `:is(/**/)`. A list of two — `:is(a,)` — is a dropped
 /// argument, not an empty list.
-pub fn is_empty_forgiving_list(list: &[Selector<CssToXpathImpl>]) -> bool {
+pub(crate) fn is_empty_forgiving_list(list: &[Selector<CssToXpathImpl>]) -> bool {
     let [selector] = list else {
         return false;
     };

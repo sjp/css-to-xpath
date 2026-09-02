@@ -9,7 +9,7 @@
 
 /// Whether a name can be used directly in an XPath name test (no quoting
 /// needed).
-pub fn is_safe_name(name: &str) -> bool {
+pub(crate) fn is_safe_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -26,7 +26,7 @@ pub fn is_safe_name(name: &str) -> bool {
 /// flag, HTML's legacy case-insensitive attributes, and the enumerated
 /// `type` keyword the HTML pseudo-classes compare against. Only A-Z is
 /// folded, matching CSS's and HTML's ASCII-only case-insensitivity.
-pub fn ascii_lower(subject: &str) -> String {
+pub(crate) fn ascii_lower(subject: &str) -> String {
     format!(
         "translate({subject}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
          'abcdefghijklmnopqrstuvwxyz')"
@@ -43,7 +43,7 @@ pub fn ascii_lower(subject: &str) -> String {
 /// apostrophes rather than to the length of the string, which matters
 /// for the case that reaches it in practice: JSON in a `data-*`
 /// attribute value.
-pub fn xpath_literal(literal: &str) -> String {
+pub(crate) fn xpath_literal(literal: &str) -> String {
     if !literal.contains('\'') {
         format!("'{literal}'")
     } else if !literal.contains('"') {
@@ -71,16 +71,16 @@ pub fn xpath_literal(literal: &str) -> String {
 /// top-level `or`, which needs parentheses whenever it is joined to other
 /// conditions with `and`.
 #[derive(Clone, Debug)]
-pub struct Condition {
-    pub expr: String,
-    pub or_group: bool,
+pub(crate) struct Condition {
+    pub(crate) expr: String,
+    pub(crate) or_group: bool,
 }
 
 impl Condition {
     /// OR together a list of conditions, as the `:is()`/`:not()`/`of S`
     /// argument handling needs. The result is an or-group when anything
     /// was actually joined (or the single member already was one).
-    pub fn join_or(conditions: &[Condition]) -> Condition {
+    pub(crate) fn join_or(conditions: &[Condition]) -> Condition {
         let exprs: Vec<&str> = conditions.iter().map(|c| c.expr.as_str()).collect();
         Condition {
             expr: exprs.join(" or "),
@@ -92,9 +92,9 @@ impl Condition {
 /// A partially built XPath expression: path, element, predicates, and
 /// conditions.
 #[derive(Clone, Debug)]
-pub struct XPathExpr {
-    pub path: String,
-    pub element: String,
+pub(crate) struct XPathExpr {
+    pub(crate) path: String,
+    pub(crate) element: String,
     conditions: Vec<Condition>,
     /// Standalone predicates rendered each in its own bracket pair before
     /// the combined condition: `element[p1][p2][condition]`. Used where
@@ -107,7 +107,7 @@ pub struct XPathExpr {
     /// name; `None` otherwise. Lets the of-type pseudo-classes
     /// distinguish such elements from the universal selector and count
     /// their siblings correctly.
-    pub name_test: Option<String>,
+    pub(crate) name_test: Option<String>,
     /// The subject's local name, when the compound pins it to exactly
     /// one — whether by a plain node test (`input`, `h:input`) or by the
     /// condition a name needing quoting folds into. `None` for a
@@ -116,14 +116,14 @@ pub struct XPathExpr {
     /// The HTML pseudo-class overrides identify elements by
     /// `local-name()`, so a pinned name decides every one of those tests
     /// at translation time and leaves only the arm that can match.
-    pub local_name: Option<String>,
+    pub(crate) local_name: Option<String>,
 }
 
 impl XPathExpr {
     /// A new expression on `element`, which must be a usable XPath node
     /// test. The local name is read straight off it; the callers that
     /// fold a name into a condition instead set `local_name` themselves.
-    pub fn new(element: &str) -> Self {
+    pub(crate) fn new(element: &str) -> Self {
         let local_name = match element {
             "*" => None,
             _ if element.ends_with(":*") => None,
@@ -139,7 +139,9 @@ impl XPathExpr {
         }
     }
 
-    pub fn str(&self) -> String {
+    /// Render the whole expression: path, node test, predicates and
+    /// the combined condition.
+    pub(crate) fn render(&self) -> String {
         let mut p = self.path.clone();
         self.render_tail(&mut p);
         p
@@ -165,7 +167,7 @@ impl XPathExpr {
     /// untouched (brackets and `not(...)` need no parentheses around a
     /// lone or-group), several join with `and`, parenthesizing the
     /// or-groups among them.
-    pub fn condition(&self) -> Option<Condition> {
+    pub(crate) fn condition(&self) -> Option<Condition> {
         match self.conditions.len() {
             0 => None,
             1 => Some(self.conditions[0].clone()),
@@ -189,14 +191,14 @@ impl XPathExpr {
         }
     }
 
-    pub fn add_predicate(&mut self, predicate: &str) {
+    pub(crate) fn add_predicate(&mut self, predicate: &str) {
         self.predicates.push(predicate.to_owned());
     }
 
     /// Add one condition to the conjunction. The expression must not
     /// contain a top-level `or` — those go through `add_or_condition` so
     /// rendering knows to parenthesize them.
-    pub fn add_condition(&mut self, condition: &str) {
+    pub(crate) fn add_condition(&mut self, condition: &str) {
         self.push_condition(Condition {
             expr: condition.to_owned(),
             or_group: false,
@@ -204,14 +206,14 @@ impl XPathExpr {
     }
 
     /// Add a condition whose expression contains a top-level `or`.
-    pub fn add_or_condition(&mut self, condition: &str) {
+    pub(crate) fn add_or_condition(&mut self, condition: &str) {
         self.push_condition(Condition {
             expr: condition.to_owned(),
             or_group: true,
         });
     }
 
-    pub fn push_condition(&mut self, condition: Condition) {
+    pub(crate) fn push_condition(&mut self, condition: Condition) {
         self.conditions.push(condition);
     }
 
@@ -223,7 +225,7 @@ impl XPathExpr {
     /// as a node test, so a bare name still matches only the null
     /// namespace and a prefixed one still resolves through the caller's
     /// namespace map.
-    pub fn take_element_into_self_test(&mut self) {
+    pub(crate) fn take_element_into_self_test(&mut self) {
         if self.element == "*" {
             return;
         }
@@ -238,7 +240,7 @@ impl XPathExpr {
     /// The node test selecting siblings of the same type, for the of-type
     /// pseudo-classes. `None` when the subject is a wildcard, prefixed
     /// or not, and so has no single type.
-    pub fn same_type_nodetest(&self) -> Option<String> {
+    pub(crate) fn same_type_nodetest(&self) -> Option<String> {
         match &self.name_test {
             // A name test is set whenever the element alone is not the
             // whole story: either it was folded into a condition on `*`,
@@ -257,7 +259,7 @@ impl XPathExpr {
 
     /// Append `combiner` and `other` to this expression, taking over
     /// `other`'s node test, predicates and conditions.
-    pub fn join(&mut self, combiner: &str, other: &XPathExpr) {
+    pub(crate) fn join(&mut self, combiner: &str, other: &XPathExpr) {
         // Grow the accumulated path in place rather than re-rendering it:
         // rendering the whole expression per combinator would copy the
         // path again for each one, so an n-compound chain would cost
@@ -308,17 +310,17 @@ mod tests {
     fn condition_parens() {
         let mut xp = XPathExpr::new("e");
         xp.add_condition("@foo = 'bar'");
-        assert_eq!(xp.str(), "e[@foo = 'bar']");
+        assert_eq!(xp.render(), "e[@foo = 'bar']");
         xp.add_condition("@baz");
-        assert_eq!(xp.str(), "e[@foo = 'bar' and @baz]");
+        assert_eq!(xp.render(), "e[@foo = 'bar' and @baz]");
 
         // a lone or-group needs no parentheses inside the brackets, a
         // conjoined one does
         let mut xp = XPathExpr::new("e");
         xp.add_or_condition("@a or @b");
-        assert_eq!(xp.str(), "e[@a or @b]");
+        assert_eq!(xp.render(), "e[@a or @b]");
         xp.add_condition("@c");
-        assert_eq!(xp.str(), "e[(@a or @b) and @c]");
+        assert_eq!(xp.render(), "e[(@a or @b) and @c]");
     }
 
     #[test]
@@ -326,16 +328,16 @@ mod tests {
         let mut xp = XPathExpr::new("*");
         xp.add_predicate("1");
         xp.add_predicate("self::f");
-        assert_eq!(xp.str(), "*[1][self::f]");
+        assert_eq!(xp.render(), "*[1][self::f]");
         xp.add_condition("@bar");
-        assert_eq!(xp.str(), "*[1][self::f][@bar]");
+        assert_eq!(xp.render(), "*[1][self::f][@bar]");
 
         // join bakes the left side's predicates into the path and takes
         // over the right side's.
         let other = XPathExpr::new("g");
         xp.join("/following-sibling::", &other);
-        assert_eq!(xp.str(), "*[1][self::f][@bar]/following-sibling::g");
+        assert_eq!(xp.render(), "*[1][self::f][@bar]/following-sibling::g");
         xp.add_predicate("1");
-        assert_eq!(xp.str(), "*[1][self::f][@bar]/following-sibling::g[1]");
+        assert_eq!(xp.render(), "*[1][self::f][@bar]/following-sibling::g[1]");
     }
 }

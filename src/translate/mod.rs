@@ -1,18 +1,19 @@
 //! Translation from Servo's parsed selector representation to XPath.
 
-pub mod error;
+pub(crate) mod error;
 mod generic;
 mod nth;
 mod pseudo;
-pub mod xpath_expr;
+mod xpath_expr;
 
 pub use error::{Error, ParseErrorKind};
 pub use nth::{MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH};
 
 use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
-use selectors::parser::{Combinator, Component, Selector};
+use selectors::parser::{Combinator, Component, RelativeSelector, Selector};
 
 use crate::parser::{self, CssToXpathImpl};
+use generic::{attrib_equals, attrib_includes, attrib_operator};
 use pseudo::LangSource;
 use xpath_expr::{Condition, XPathExpr, is_safe_name};
 
@@ -100,12 +101,12 @@ impl Translator {
 
     /// The [`Mode`] this translator was built for.
     #[must_use]
-    pub const fn mode(&self) -> Mode {
+    pub const fn mode(self) -> Mode {
         self.mode
     }
 
     /// Which pseudo-class overrides apply: `Xhtml` shares HTML's.
-    pub(crate) const fn kind(&self) -> Kind {
+    pub(crate) const fn kind(self) -> Kind {
         match self.mode {
             Mode::Generic => Kind::Generic,
             Mode::Html | Mode::Xhtml => Kind::Html,
@@ -114,14 +115,14 @@ impl Translator {
 
     /// Whether element names are ASCII-lowercased: only an HTML parser
     /// does that, and only to elements it knows are HTML.
-    pub(crate) const fn lower_case_element_names(&self) -> bool {
+    pub(crate) const fn lower_case_element_names(self) -> bool {
         matches!(self.mode, Mode::Html)
     }
 
     /// Whether attribute names are ASCII-lowercased. Kept apart from
     /// [`Translator::lower_case_element_names`] because the two answer
     /// different questions, even though today's modes agree on both.
-    pub(crate) const fn lower_case_attribute_names(&self) -> bool {
+    pub(crate) const fn lower_case_attribute_names(self) -> bool {
         matches!(self.mode, Mode::Html)
     }
 
@@ -132,12 +133,12 @@ impl Translator {
     /// apart from [`Translator::lower_case_attribute_names`] because the
     /// two answer different questions — how a name is spelled versus how
     /// a value is compared.
-    pub(crate) const fn html_document(&self) -> bool {
+    pub(crate) const fn html_document(self) -> bool {
         matches!(self.mode, Mode::Html)
     }
 
     /// Where `:lang()` reads an element's language from.
-    pub(crate) const fn lang_source(&self) -> LangSource {
+    pub(crate) const fn lang_source(self) -> LangSource {
         match self.mode {
             Mode::Generic => LangSource::XmlLang,
             Mode::Html => LangSource::Lang,
@@ -164,7 +165,7 @@ impl Translator {
     ///
     /// Returns an [`Error`] when the selector is syntactically invalid
     /// or uses an unsupported construct.
-    pub fn css_to_xpath(&self, css: &str, prefix: &str) -> Result<String, Error> {
+    pub fn css_to_xpath(self, css: &str, prefix: &str) -> Result<String, Error> {
         let list = parser::parse(css)?;
         let mut parts: Vec<String> = Vec::new();
         for sel in list.slice() {
@@ -178,7 +179,7 @@ impl Translator {
     /// Servo's sequences + combinators, then fold from the leftmost
     /// compound.
     fn selector_to_xpath(
-        &self,
+        self,
         selector: &Selector<CssToXpathImpl>,
         prefix: &str,
     ) -> Result<String, Error> {
@@ -221,11 +222,11 @@ impl Translator {
                 .1
                 .ok_or_else(|| Error::unsupported("an unexpected selector structure"))?;
             let right = self.compound_to_xpath(&seqs[i].0, 0)?;
-            xpath = self.apply_combinator(combinator, xpath, &right)?;
+            xpath = apply_combinator(combinator, xpath, &right)?;
         }
 
         let prefix = if scope_anchored { "" } else { prefix };
-        Ok(format!("{prefix}{}", xpath.str()))
+        Ok(format!("{prefix}{}", xpath.render()))
     }
 
     /// Translate one compound selector (a sequence of simple selectors).
@@ -236,7 +237,7 @@ impl Translator {
     /// `of_depth` is how many `An+B of S` argument lists this compound is
     /// nested inside; see [`nth::MAX_NTH_OF_DEPTH`].
     fn compound_to_xpath(
-        &self,
+        self,
         components: &[&Component<CssToXpathImpl>],
         of_depth: usize,
     ) -> Result<XPathExpr, Error> {
@@ -285,7 +286,7 @@ impl Translator {
 
     /// Build the element part of the expression from the namespace
     /// constraint and element name.
-    fn xpath_element(&self, ns: NsConstraint, element: Option<&str>) -> Result<XPathExpr, Error> {
+    fn xpath_element(self, ns: NsConstraint, element: Option<&str>) -> Result<XPathExpr, Error> {
         let (mut name, safe) = match element {
             None => ("*".to_owned(), true),
             Some(e) => {
@@ -379,7 +380,7 @@ impl Translator {
     /// allow-list over `Component` variants. Anything outside the
     /// supported construct set errors, never approximates.
     fn apply_simple(
-        &self,
+        self,
         xpath: &mut XPathExpr,
         component: &Component<CssToXpathImpl>,
         of_depth: usize,
@@ -442,94 +443,18 @@ impl Translator {
                 }
                 Ok(())
             }
-            // :has(): each argument is a relative selector whose optional
-            // leading combinator scopes the match (`>` child, `~`
-            // subsequent sibling, `+` next sibling; omitted means
-            // descendant). Unlike the other functional pseudo-classes,
-            // :has() looks forward, so a complex argument extends the
-            // existence-test path step by step, leftmost compound first.
-            Component::Has(relatives) => {
-                let mut conditions: Vec<String> = Vec::new();
-                for relative in relatives.iter() {
-                    let seqs = collect_seqs(&relative.selector);
-                    // The leftmost sequence is the anchor (the candidate
-                    // element itself); its combinator slot carries the
-                    // argument's leading combinator.
-                    let anchor = &seqs[seqs.len() - 1].0;
-                    let anchor_only = seqs.len() >= 2
-                        && anchor.len() == 1
-                        && matches!(anchor[0], Component::RelativeSelectorAnchor);
-                    if !anchor_only {
-                        return Err(Error::unsupported(
-                            "an unexpected selector structure inside `:has()`",
-                        ));
-                    }
-                    let mut test = String::new();
-                    for i in (0..seqs.len() - 1).rev() {
-                        let first = i == seqs.len() - 2;
-                        let combinator = seqs[i].1;
-                        // The first step is an axis from the candidate
-                        // element; later steps join onto the path.
-                        let axis = match (first, combinator) {
-                            (true, Some(Combinator::Descendant)) => ".//",
-                            (true, Some(Combinator::Child)) => "child::",
-                            (
-                                true,
-                                Some(Combinator::NextSibling) | Some(Combinator::LaterSibling),
-                            ) => "following-sibling::",
-                            (false, Some(Combinator::Descendant)) => "//",
-                            (false, Some(Combinator::Child)) => "/",
-                            (
-                                false,
-                                Some(Combinator::NextSibling) | Some(Combinator::LaterSibling),
-                            ) => "/following-sibling::",
-                            (_, other) => {
-                                return Err(Error::unsupported(format!(
-                                    "an unexpected combinator ({other:?}) inside `:has()`"
-                                )));
-                            }
-                        };
-                        let mut sub = self.compound_to_xpath(&seqs[i].0, of_depth)?;
-                        // The name stays in the node test (`.//p`,
-                        // `.//svg:g`) so it means exactly what it means at
-                        // the top level and a prefix resolves through the
-                        // namespace map — except under `+`, where the [1]
-                        // position predicate has to count every sibling,
-                        // so the node test must stay `*`.
-                        if matches!(combinator, Some(Combinator::NextSibling)) {
-                            sub.take_element_into_self_test();
-                            // Only the immediately following sibling:
-                            // constrain position before applying the match
-                            // conditions.
-                            sub.add_predicate("1");
-                        }
-                        test.push_str(axis);
-                        test.push_str(&sub.str());
-                    }
-                    conditions.push(test);
-                }
-                // A `:has()` list of several arguments renders as a union,
-                // which binds tighter than `and` in XPath 1.0 and so needs
-                // no parentheses — but reads as though it might, so it is
-                // marked an or-group and parenthesized wherever an
-                // or-group would be.
-                match conditions.len() {
-                    0 => {}
-                    1 => xpath.add_condition(&conditions[0]),
-                    _ => xpath.add_or_condition(&conditions.join(" | ")),
-                }
-                Ok(())
-            }
+            // :has(), the one functional pseudo-class that looks forward.
+            Component::Has(relatives) => self.apply_has(xpath, relatives, of_depth),
             // :hover, :checked, :lang(), ... — translator-dependent.
             Component::NonTSPseudoClass(pc) => self.apply_pseudo_class(xpath, pc),
             // e#myid
             Component::ID(id) => {
-                self.attrib_equals(xpath, "@id", id.as_str());
+                attrib_equals(xpath, "@id", id.as_str());
                 Ok(())
             }
             // .foo is defined as [class~=foo] in the spec
             Component::Class(class_name) => {
-                self.attrib_includes(xpath, "@class", class_name.as_str());
+                attrib_includes(xpath, "@class", class_name.as_str());
                 Ok(())
             }
             Component::AttributeInNoNamespaceExists { local_name, .. } => {
@@ -545,8 +470,8 @@ impl Translator {
             } => {
                 let attrib = self.attrib_expr(NsConstraint::None, local_name.as_str())?;
                 let (attrib, value) =
-                    self.apply_case_flag(attrib, value.as_str(), case_sensitivity);
-                self.attrib_operator(xpath, &attrib, *operator, &value)
+                    self.apply_case_flag(attrib, value.as_str(), *case_sensitivity);
+                attrib_operator(xpath, &attrib, *operator, &value)
             }
             Component::AttributeOther(attr) => {
                 let ns = match attr.namespace {
@@ -570,13 +495,92 @@ impl Translator {
                         ref value,
                     } => {
                         let (attrib, value) =
-                            self.apply_case_flag(attrib, value.as_str(), &case_sensitivity);
-                        self.attrib_operator(xpath, &attrib, operator, &value)
+                            self.apply_case_flag(attrib, value.as_str(), case_sensitivity);
+                        attrib_operator(xpath, &attrib, operator, &value)
                     }
                 }
             }
             unsupported => Err(Error::unsupported(describe_component(unsupported))),
         }
+    }
+
+    /// `:has()`: each argument is a relative selector whose optional
+    /// leading combinator scopes the match (`>` child, `~` subsequent
+    /// sibling, `+` next sibling; omitted means descendant). Unlike the
+    /// other functional pseudo-classes, `:has()` looks forward, so a
+    /// complex argument extends the existence-test path step by step,
+    /// leftmost compound first.
+    fn apply_has(
+        self,
+        xpath: &mut XPathExpr,
+        relatives: &[RelativeSelector<CssToXpathImpl>],
+        of_depth: usize,
+    ) -> Result<(), Error> {
+        let mut conditions: Vec<String> = Vec::new();
+        for relative in relatives.iter() {
+            let seqs = collect_seqs(&relative.selector);
+            // The leftmost sequence is the anchor (the candidate element
+            // itself); its combinator slot carries the argument's leading
+            // combinator.
+            let anchor = &seqs[seqs.len() - 1].0;
+            let anchor_only = seqs.len() >= 2
+                && anchor.len() == 1
+                && matches!(anchor[0], Component::RelativeSelectorAnchor);
+            if !anchor_only {
+                return Err(Error::unsupported(
+                    "an unexpected selector structure inside `:has()`",
+                ));
+            }
+            let mut test = String::new();
+            for i in (0..seqs.len() - 1).rev() {
+                let first = i == seqs.len() - 2;
+                let combinator = seqs[i].1;
+                // The first step is an axis from the candidate element;
+                // later steps join onto the path.
+                let axis = match (first, combinator) {
+                    (true, Some(Combinator::Descendant)) => ".//",
+                    (true, Some(Combinator::Child)) => "child::",
+                    (true, Some(Combinator::NextSibling) | Some(Combinator::LaterSibling)) => {
+                        "following-sibling::"
+                    }
+                    (false, Some(Combinator::Descendant)) => "//",
+                    (false, Some(Combinator::Child)) => "/",
+                    (false, Some(Combinator::NextSibling) | Some(Combinator::LaterSibling)) => {
+                        "/following-sibling::"
+                    }
+                    (_, other) => {
+                        return Err(Error::unsupported(format!(
+                            "an unexpected combinator ({other:?}) inside `:has()`"
+                        )));
+                    }
+                };
+                let mut sub = self.compound_to_xpath(&seqs[i].0, of_depth)?;
+                // The name stays in the node test (`.//p`, `.//svg:g`) so
+                // it means exactly what it means at the top level and a
+                // prefix resolves through the namespace map — except under
+                // `+`, where the [1] position predicate has to count every
+                // sibling, so the node test must stay `*`.
+                if matches!(combinator, Some(Combinator::NextSibling)) {
+                    sub.take_element_into_self_test();
+                    // Only the immediately following sibling: constrain
+                    // position before applying the match conditions.
+                    sub.add_predicate("1");
+                }
+                test.push_str(axis);
+                test.push_str(&sub.render());
+            }
+            conditions.push(test);
+        }
+        // A `:has()` list of several arguments renders as a union, which
+        // binds tighter than `and` in XPath 1.0 and so needs no
+        // parentheses — but reads as though it might, so it is marked an
+        // or-group and parenthesized wherever an or-group would be.
+        match conditions.len() {
+            0 => {}
+            1 => xpath.add_condition(&conditions[0]),
+            _ => xpath.add_or_condition(&conditions.join(" | ")),
+        }
+        Ok(())
     }
 
     /// Whether an attribute-value comparison is case-sensitive, and the
@@ -597,10 +601,10 @@ impl Translator {
     /// `translate()`) against the ASCII-lowercased value. An empty value needs
     /// no lowercasing, and skipping it keeps the existence tests exact.
     fn apply_case_flag(
-        &self,
+        self,
         attrib: String,
         value: &str,
-        case_sensitivity: &ParsedCaseSensitivity,
+        case_sensitivity: ParsedCaseSensitivity,
     ) -> (String, String) {
         let fold = match case_sensitivity {
             // `[attr="value" i]`.
@@ -627,7 +631,7 @@ impl Translator {
     /// qualification. Prefixes take part in the safety check, as in
     /// `xpath_element`: one that needs quoting cannot be a node test at
     /// all, and errors.
-    fn attrib_expr(&self, ns: NsConstraint, local_name: &str) -> Result<String, Error> {
+    fn attrib_expr(self, ns: NsConstraint, local_name: &str) -> Result<String, Error> {
         let name = if self.lower_case_attribute_names() {
             local_name.to_ascii_lowercase()
         } else {
@@ -668,39 +672,6 @@ impl Translator {
         }
     }
 
-    /// Join two compound translations with a combinator.
-    fn apply_combinator(
-        &self,
-        combinator: Combinator,
-        mut left: XPathExpr,
-        right: &XPathExpr,
-    ) -> Result<XPathExpr, Error> {
-        match combinator {
-            Combinator::Descendant => left.join("//", right),
-            Combinator::Child => left.join("/", right),
-            Combinator::LaterSibling => left.join("/following-sibling::", right),
-            Combinator::NextSibling => {
-                left.join("/following-sibling::", right);
-                // The node test moves into a self:: predicate so the [1]
-                // position test counts every sibling, not only same-name
-                // ones: *[1][self::element][existing conditions]. A `*`
-                // node test already counts every sibling, so it needs no
-                // predicate — `self::*` would test nothing.
-                let target_element = std::mem::replace(&mut left.element, "*".to_owned());
-                left.add_predicate("1");
-                if target_element != "*" {
-                    left.add_predicate(&format!("self::{target_element}"));
-                }
-            }
-            // PseudoElement / SlotAssignment / Part combinators can never be
-            // produced: the corresponding parser hooks are disabled.
-            other => {
-                return Err(Error::unsupported(format!("the {other:?} combinator")));
-            }
-        }
-        Ok(left)
-    }
-
     /// Harvest the conditions of a pseudo-class argument list, the shared
     /// pattern of :not()/:is()/:where() and the nth `of S` handling:
     /// translate each argument into a condition on the candidate element.
@@ -709,7 +680,7 @@ impl Translator {
     /// OR of the list is then trivially true, so callers must not constrain
     /// on the remaining arguments.
     fn arg_conditions(
-        &self,
+        self,
         selectors: &[Selector<CssToXpathImpl>],
         context: &str,
         of_depth: usize,
@@ -748,7 +719,7 @@ impl Translator {
     ///
     /// `None` means the chain imposes no condition (a bare `*` argument).
     fn argument_condition(
-        &self,
+        self,
         seqs: &[(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)],
         context: &str,
         of_depth: usize,
@@ -833,6 +804,38 @@ impl Translator {
     }
 }
 
+/// Join two compound translations with a combinator.
+fn apply_combinator(
+    combinator: Combinator,
+    mut left: XPathExpr,
+    right: &XPathExpr,
+) -> Result<XPathExpr, Error> {
+    match combinator {
+        Combinator::Descendant => left.join("//", right),
+        Combinator::Child => left.join("/", right),
+        Combinator::LaterSibling => left.join("/following-sibling::", right),
+        Combinator::NextSibling => {
+            left.join("/following-sibling::", right);
+            // The node test moves into a self:: predicate so the [1]
+            // position test counts every sibling, not only same-name
+            // ones: *[1][self::element][existing conditions]. A `*`
+            // node test already counts every sibling, so it needs no
+            // predicate — `self::*` would test nothing.
+            let target_element = std::mem::replace(&mut left.element, "*".to_owned());
+            left.add_predicate("1");
+            if target_element != "*" {
+                left.add_predicate(&format!("self::{target_element}"));
+            }
+        }
+        // PseudoElement / SlotAssignment / Part combinators can never be
+        // produced: the corresponding parser hooks are disabled.
+        other => {
+            return Err(Error::unsupported(format!("the {other:?} combinator")));
+        }
+    }
+    Ok(left)
+}
+
 /// Collect a selector's compound sequences in match order: `seqs[i]` is
 /// (compound, combinator between this compound and the one to its left),
 /// so `seqs[0]` is the rightmost compound and only the last entry's
@@ -881,8 +884,9 @@ fn describe_component(component: &Component<CssToXpathImpl>) -> String {
         Component::ParentSelector => "the `&` parent selector".into(),
         // PseudoElement carries an uninhabited type and the remaining
         // variants require parser features this crate never enables; they
-        // are unreachable, but erroring beats panicking (panic = abort
-        // would tear down the caller's process).
+        // are unreachable, but erroring beats panicking: the caller's
+        // profile is the caller's to choose, and `panic = abort` there
+        // would tear down its process.
         other => format!("an unexpected construct ({other:?})"),
     }
 }

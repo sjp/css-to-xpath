@@ -11,10 +11,10 @@ use cssparser::ToCss;
 use precomputed_hash::PrecomputedHash;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct CssString(pub String);
+pub(crate) struct CssString(pub(crate) String);
 
 impl CssString {
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
 }

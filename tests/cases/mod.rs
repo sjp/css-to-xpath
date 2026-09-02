@@ -21,7 +21,7 @@ use css_to_xpath::{Error, Mode, Translator};
 /// silent. Anything the translator itself can do is still reachable
 /// through [`Cases::css_to_xpath`], for the cases whose expectation is
 /// an error rather than an output string.
-pub struct Cases {
+pub(crate) struct Cases {
     translator: Translator,
     prefix: &'static str,
     failures: String,
@@ -30,12 +30,12 @@ pub struct Cases {
 
 impl Cases {
     /// A checker translating with no path prefix.
-    pub fn new(mode: Mode) -> Self {
+    pub(crate) fn new(mode: Mode) -> Self {
         Self::with_prefix(mode, "")
     }
 
     /// A checker translating with `prefix` prepended to each branch.
-    pub fn with_prefix(mode: Mode, prefix: &'static str) -> Self {
+    pub(crate) fn with_prefix(mode: Mode, prefix: &'static str) -> Self {
         Cases {
             translator: Translator::new(mode),
             prefix,
@@ -45,7 +45,7 @@ impl Cases {
     }
 
     /// The mode this checker translates in.
-    pub fn mode(&self) -> Mode {
+    pub(crate) fn mode(&self) -> Mode {
         self.translator.mode()
     }
 
@@ -53,7 +53,7 @@ impl Cases {
     ///
     /// For expectations this checker cannot express: an error, or a
     /// property of the output other than equality.
-    pub fn css_to_xpath(&self, css: &str, prefix: &str) -> Result<String, Error> {
+    pub(crate) fn css_to_xpath(&self, css: &str, prefix: &str) -> Result<String, Error> {
         self.translator.css_to_xpath(css, prefix)
     }
 
@@ -61,7 +61,7 @@ impl Cases {
     ///
     /// For an expectation stated as a property of the output — its
     /// length, or equality with another selector's translation.
-    pub fn xpath(&self, css: &str) -> String {
+    pub(crate) fn xpath(&self, css: &str) -> String {
         self.translator
             .css_to_xpath(css, self.prefix)
             .unwrap_or_else(|e| panic!("{css:?} failed to translate: {e}"))
@@ -70,7 +70,7 @@ impl Cases {
     /// Translate `css` and record a failure unless the result is
     /// `expected`. A selector that fails to translate at all is a
     /// failure too, reported with its error.
-    pub fn check(&mut self, css: &str, expected: impl AsRef<str>) {
+    pub(crate) fn check(&mut self, css: &str, expected: impl AsRef<str>) {
         let expected = expected.as_ref();
         match self.translator.css_to_xpath(css, self.prefix) {
             Ok(got) if got == expected => {}
@@ -80,7 +80,7 @@ impl Cases {
     }
 
     /// [`Cases::check`] over a table of `(selector, xpath)` pairs.
-    pub fn all(&mut self, pairs: &[(&str, &str)]) {
+    pub(crate) fn all(&mut self, pairs: &[(&str, &str)]) {
         for (css, expected) in pairs {
             self.check(css, expected);
         }

@@ -11,14 +11,14 @@ use sxd_xpath::nodeset::Node;
 use sxd_xpath::{Context, Factory, Value, context, function};
 
 /// The implicit XML namespace, needed to resolve `@xml:lang` name tests.
-pub const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
-pub const XHTML_NS: &str = "http://www.w3.org/1999/xhtml";
-pub const SVG_NS: &str = "http://www.w3.org/2000/svg";
-pub const DC_NS: &str = "http://purl.org/dc/elements/1.1/";
+pub(crate) const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+pub(crate) const XHTML_NS: &str = "http://www.w3.org/1999/xhtml";
+pub(crate) const SVG_NS: &str = "http://www.w3.org/2000/svg";
+pub(crate) const DC_NS: &str = "http://purl.org/dc/elements/1.1/";
 
-pub const MODES: [Mode; 3] = [Mode::Generic, Mode::Html, Mode::Xhtml];
+pub(crate) const MODES: [Mode; 3] = [Mode::Generic, Mode::Html, Mode::Xhtml];
 
-pub fn mode_name(mode: Mode) -> &'static str {
+pub(crate) fn mode_name(mode: Mode) -> &'static str {
     match mode {
         Mode::Generic => "generic",
         Mode::Html => "html",
@@ -32,7 +32,7 @@ pub fn mode_name(mode: Mode) -> &'static str {
 /// One selector per line, stored raw — so a selector containing a line
 /// break cannot be represented here. That is the only gap, and the fuzz
 /// target covers arbitrary bytes anyway.
-pub fn corpus() -> impl Iterator<Item = &'static str> {
+pub(crate) fn corpus() -> impl Iterator<Item = &'static str> {
     include_str!("../corpus/selectors.txt").lines()
 }
 
@@ -43,13 +43,13 @@ pub fn corpus() -> impl Iterator<Item = &'static str> {
 /// (`svg|rect` becomes `svg:rect`) and never resolves them to a URI, so
 /// the *evaluator* is where a prefix acquires its meaning. Every prefix
 /// a fixture uses is bound here to the same URI the document declares.
-pub struct Fixture {
+pub(crate) struct Fixture {
     package: Package,
     namespaces: Vec<(&'static str, &'static str)>,
 }
 
 impl Fixture {
-    pub fn new(xml: &str, namespaces: &[(&'static str, &'static str)]) -> Self {
+    pub(crate) fn new(xml: &str, namespaces: &[(&'static str, &'static str)]) -> Self {
         let package = sxd_document::parser::parse(xml)
             .unwrap_or_else(|e| panic!("fixture is not well-formed XML: {e}"));
         Fixture {
@@ -63,13 +63,13 @@ impl Fixture {
     ///
     /// The `descendant-or-self::` prefix is the README's "search the
     /// whole document" form; evaluation starts at the root node.
-    pub fn select(&self, css: &str, mode: Mode) -> Vec<String> {
+    pub(crate) fn select(&self, css: &str, mode: Mode) -> Vec<String> {
         self.select_from(css, mode, None)
     }
 
     /// As [`Fixture::select`], but evaluated with the element carrying
     /// `scope_id` as the context node — what `:scope` refers to.
-    pub fn select_scoped(&self, css: &str, mode: Mode, scope_id: &str) -> Vec<String> {
+    pub(crate) fn select_scoped(&self, css: &str, mode: Mode, scope_id: &str) -> Vec<String> {
         self.select_from(css, mode, Some(scope_id))
     }
 
@@ -84,7 +84,11 @@ impl Fixture {
 
     /// Evaluate a raw XPath expression, returning node labels in
     /// document order, or an error string.
-    pub fn evaluate(&self, xpath_src: &str, scope_id: Option<&str>) -> Result<Vec<String>, String> {
+    pub(crate) fn evaluate(
+        &self,
+        xpath_src: &str,
+        scope_id: Option<&str>,
+    ) -> Result<Vec<String>, String> {
         let document = self.package.as_document();
 
         let xpath = Factory::new()

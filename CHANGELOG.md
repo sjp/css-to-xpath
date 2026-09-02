@@ -37,6 +37,10 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   every failing selector by name instead of aborting on the first mismatch.
 - Packaging metadata: `keywords`, `categories`, `documentation`, and an
   `include` list. The README is now the crate-level documentation.
+- CI runs `cargo semver-checks check-release` on every change, and the MSRV job
+  runs the test suite rather than only checking that it compiles. The lints the
+  crate has adopted beyond the defaults are declared in a `[lints]` table, so
+  the level is the same locally and in CI.
 - An "Approximations" section in the README recording where the output is
   deliberately not what Selectors Level 4 asks for: `:lang()` as a prefix
   match rather than RFC 4647 extended filtering, Level 3 `:empty`,
@@ -68,6 +72,8 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   values case-sensitive.
 - Dependencies are caret ranges (`selectors = "0.40"`) rather than exact pins,
   so they unify with other crates in a dependency graph.
+- `Translator`'s methods take `self` rather than `&self` — it is a one-byte
+  `Copy` type — which call sites do not have to change for.
 
 ### Deprecated
 

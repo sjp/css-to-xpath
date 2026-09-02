@@ -18,10 +18,19 @@ cssparser = "0.37"
 unicode-width = "0.2"
 precomputed-hash = "0.1"
 
-[profile.release]
-panic = "unwind"
-
 [dev-dependencies]
 proptest = "1.11.0"
 sxd-document = "0.3.2"
 sxd-xpath = "0.4.2"
+
+# The pedantic/nursery lints this crate has adopted, so the chosen level
+# is explicit here rather than in a CI flag. CI runs clippy with
+# `-D warnings`, which promotes all of these to errors.
+[lints.rust]
+unreachable_pub = "warn"
+
+[lints.clippy]
+needless_pass_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
+uninhabited_references = "warn"
+unused_self = "warn"
