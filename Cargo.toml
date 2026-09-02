@@ -10,7 +10,7 @@ documentation = "https://docs.rs/css-to-xpath"
 readme = "README.md"
 keywords = ["css", "xpath", "selectors", "html", "xml"]
 categories = ["parser-implementations", "web-programming", "text-processing"]
-include = ["/src/**/*.rs", "/Cargo.toml", "/LICENSE", "/README.md"]
+include = ["/src/**/*.rs", "/Cargo.toml", "/LICENSE", "/README.md", "/CHANGELOG.md"]
 
 [dependencies]
 selectors = "0.40"

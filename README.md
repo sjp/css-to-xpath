@@ -346,6 +346,13 @@ every change; `cargo-mutants` runs weekly.
 Rust **1.88**, edition 2024 — set by the floor of the `cssparser`/`selectors`
 dependency versions this crate requires.
 
+## Changelog
+
+Release notes, including every change to the XPath a selector translates to,
+are in [CHANGELOG.md](https://github.com/sjp/css-to-xpath/blob/master/CHANGELOG.md).
+The procedure for cutting a release is
+[RELEASING.md](https://github.com/sjp/css-to-xpath/blob/master/RELEASING.md).
+
 ## License
 
 Licensed under the [MIT license](https://github.com/sjp/css-to-xpath/blob/master/LICENSE).
