@@ -5,18 +5,30 @@
 mod parser;
 mod translate;
 
-pub use translate::{Error, Mode, ParseErrorKind, Translator};
+pub use parser::MAX_NESTING_DEPTH;
+pub use translate::{Error, MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH, Mode, ParseErrorKind, Translator};
 
-/// The version of this crate, from `Cargo.toml`.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// A `prefix` that searches the context node and its whole subtree:
+/// `"a"` becomes `descendant-or-self::a`.
+pub const DESCENDANT_OR_SELF: &str = "descendant-or-self::";
+
+/// A `prefix` that searches the whole document, wherever the expression
+/// is evaluated from: `"a"` becomes `//a`.
+pub const WHOLE_DOCUMENT: &str = "//";
 
 /// Translate a CSS selector to an XPath 1.0 expression.
 ///
 /// # Arguments
 ///
 /// * `css` — A CSS selector string.
-/// * `prefix` — An XPath path prefix prepended to the result
-///   (e.g. `"descendant-or-self::"`).  Pass `""` for none.
+/// * `prefix` — An XPath path prefix prepended verbatim to each
+///   selector-group branch, so it must end in something a node test can
+///   follow: an axis ([`DESCENDANT_OR_SELF`]) or a step separator
+///   ([`WHOLE_DOCUMENT`]). Pass `""` for a bare relative expression.
+///   Nothing validates it — `"/html/body "` yields `/html/body div`,
+///   which XPath reads as a division, not a path. A selector group
+///   anchored on `:scope` ignores `prefix` and anchors on `self::`
+///   instead.
 /// * `mode` — The translator flavour: [`Mode::Generic`], [`Mode::Html`], or
 ///   [`Mode::Xhtml`].
 ///
@@ -2195,5 +2207,48 @@ mod tests {
             "a,".repeat(33),
             " ".repeat(72)
         )));
+    }
+
+    /// The public surface a caller can hold on to: a `Translator` is a
+    /// plain value that reports its own mode, and the prefixes and
+    /// limits the README quotes are constants rather than literals to
+    /// copy.
+    #[test]
+    fn public_api_surface() {
+        for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+            let t = Translator::new(mode);
+            assert_eq!(t.mode(), mode);
+            assert_eq!(t, Translator::new(mode));
+            assert_eq!(format!("{t:?}"), format!("Translator {{ mode: {mode:?} }}"));
+        }
+        assert_ne!(Translator::new(Mode::Html), Translator::new(Mode::Xhtml));
+
+        assert_eq!(
+            crate::css_to_xpath("a", crate::DESCENDANT_OR_SELF, Mode::Generic).unwrap(),
+            "descendant-or-self::a"
+        );
+        assert_eq!(
+            crate::css_to_xpath("a", crate::WHOLE_DOCUMENT, Mode::Generic).unwrap(),
+            "//a"
+        );
+
+        // The limits are the ones the errors quote.
+        let deep = format!("{}a{}", ":is(".repeat(65), ")".repeat(65));
+        assert!(
+            Translator::new(Mode::Generic)
+                .css_to_xpath(&deep, "")
+                .unwrap_err()
+                .to_string()
+                .contains(&crate::MAX_NESTING_DEPTH.to_string())
+        );
+        let nested_of = format!("{}a{}", ":nth-child(1 of ".repeat(9), ")".repeat(9));
+        assert!(
+            Translator::new(Mode::Generic)
+                .css_to_xpath(&nested_of, "")
+                .unwrap_err()
+                .to_string()
+                .contains(&crate::MAX_NTH_OF_DEPTH.to_string())
+        );
+        assert_eq!(crate::MAX_NTH_OF_BYTES, 1 << 20);
     }
 }

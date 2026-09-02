@@ -26,16 +26,16 @@ use crate::parser::CssToXpathImpl;
 /// a few hundred times the argument's own translation, and nothing
 /// hand-written nests `of S` at all.
 ///
-/// This is far below [`crate::parser::MAX_NESTING_DEPTH`], which bounds
+/// This is far below [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH), which bounds
 /// *recursion* rather than output size and so can afford to be generous.
-pub(crate) const MAX_NTH_OF_DEPTH: usize = 8;
+pub const MAX_NTH_OF_DEPTH: usize = 8;
 
 /// The maximum size of one `of S` translation, a last line of defence
-/// behind [`MAX_NTH_OF_DEPTH`]: the doubling is bounded by the depth
+/// behind [`MAX_NTH_OF_DEPTH`](crate::MAX_NTH_OF_DEPTH): the doubling is bounded by the depth
 /// limit, but the argument it doubles is bounded only by the length of
 /// the selector, so cap the product too. Checked per nesting level, which
 /// caps the largest string ever built at roughly twice this.
-pub(crate) const MAX_NTH_OF_BYTES: usize = 1 << 20;
+pub const MAX_NTH_OF_BYTES: usize = 1 << 20;
 
 /// A Level 4 `of S` argument list, carried together with how many other
 /// such lists it is nested inside — the two are only ever meaningful

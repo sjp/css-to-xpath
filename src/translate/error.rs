@@ -77,6 +77,7 @@ impl Error {
     /// [`Display`](std::fmt::Display) is the one-line form for callers
     /// that no longer hold the selector; this is the form to print when
     /// they do.
+    #[must_use]
     pub fn message(&self, selector: &str) -> String {
         let quoted = quote(selector);
         match self {
@@ -95,6 +96,7 @@ impl Error {
     /// Deprecated alias for [`Error::message`], which borrows the error
     /// rather than consuming it.
     #[deprecated(since = "0.3.0", note = "use `Error::message`, which takes `&self`")]
+    #[must_use]
     pub fn into_message(self, selector: &str) -> String {
         self.message(selector)
     }

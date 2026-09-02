@@ -7,6 +7,7 @@ mod pseudo;
 pub mod xpath_expr;
 
 pub use error::{Error, ParseErrorKind};
+pub use nth::{MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH};
 
 use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
 use selectors::parser::{Combinator, Component, Selector};
@@ -34,7 +35,12 @@ pub(crate) enum Kind {
 ///
 /// Pseudo-classes with no static equivalent (`:hover`, `:visited`,
 /// `:focus`, …) translate to an unmatchable `[0]` in every flavour.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+///
+/// The enum is deliberately exhaustive: these three are the document
+/// flavours CSS selector matching distinguishes, and callers benefit
+/// more from exhaustive `match` than the crate would from room to add a
+/// fourth.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Mode {
     /// Plain CSS/XPath semantics: case-sensitive names, no
     /// HTML-specific pseudo-classes, and `:lang()` via XPath's own
@@ -56,23 +62,16 @@ pub enum Mode {
     Xhtml,
 }
 
-/// One struct with a kind tag, lowercasing flags, and the `:lang()`
-/// language source. Casing is applied here in the translator, never via
-/// Servo's parser settings, so the translator families differ only in
-/// these fields.
+/// A reusable translator for one [`Mode`].
+///
+/// It holds nothing but the mode: every flavour difference — which
+/// pseudo-class overrides apply, whether names are ASCII-lowercased,
+/// where `:lang()` reads from — is derived from it by the private
+/// accessors below. Casing is applied here in the translator, never via
+/// Servo's parser settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Translator {
-    pub(crate) kind: Kind,
-    pub(crate) lower_case_element_names: bool,
-    pub(crate) lower_case_attribute_names: bool,
-    /// Whether the target document is an HTML document, which is what
-    /// makes HTML's legacy case-insensitive attribute values fold (see
-    /// `apply_case_flag`). Only `Mode::Html` sets it: `Mode::Xhtml` is
-    /// XML, where those attributes compare case-sensitively. It is kept
-    /// apart from `lower_case_attribute_names` because the two answer
-    /// different questions — how a name is spelled versus how a value is
-    /// compared — even though today's modes happen to agree on both.
-    pub(crate) html_document: bool,
-    pub(crate) lang_source: LangSource,
+    mode: Mode,
 }
 
 /// The namespace constraint on a type or attribute selector: none
@@ -95,34 +94,76 @@ impl Translator {
     /// The result is immutable and holds no per-selector state, so a
     /// single translator can be reused for any number of translations.
     #[must_use]
-    pub fn new(mode: Mode) -> Self {
-        match mode {
-            Mode::Generic => Translator {
-                kind: Kind::Generic,
-                lower_case_element_names: false,
-                lower_case_attribute_names: false,
-                html_document: false,
-                lang_source: LangSource::XmlLang,
-            },
-            Mode::Html => Translator {
-                kind: Kind::Html,
-                lower_case_element_names: true,
-                lower_case_attribute_names: true,
-                html_document: true,
-                lang_source: LangSource::Lang,
-            },
-            Mode::Xhtml => Translator {
-                kind: Kind::Html,
-                lower_case_element_names: false,
-                lower_case_attribute_names: false,
-                html_document: false,
-                lang_source: LangSource::Both,
-            },
+    pub const fn new(mode: Mode) -> Self {
+        Translator { mode }
+    }
+
+    /// The [`Mode`] this translator was built for.
+    #[must_use]
+    pub const fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Which pseudo-class overrides apply: `Xhtml` shares HTML's.
+    pub(crate) const fn kind(&self) -> Kind {
+        match self.mode {
+            Mode::Generic => Kind::Generic,
+            Mode::Html | Mode::Xhtml => Kind::Html,
+        }
+    }
+
+    /// Whether element names are ASCII-lowercased: only an HTML parser
+    /// does that, and only to elements it knows are HTML.
+    pub(crate) const fn lower_case_element_names(&self) -> bool {
+        matches!(self.mode, Mode::Html)
+    }
+
+    /// Whether attribute names are ASCII-lowercased. Kept apart from
+    /// [`Translator::lower_case_element_names`] because the two answer
+    /// different questions, even though today's modes agree on both.
+    pub(crate) const fn lower_case_attribute_names(&self) -> bool {
+        matches!(self.mode, Mode::Html)
+    }
+
+    /// Whether the target document is an HTML document, which is what
+    /// makes HTML's legacy case-insensitive attribute values fold (see
+    /// `apply_case_flag`). Only `Mode::Html` sets it: `Mode::Xhtml` is
+    /// XML, where those attributes compare case-sensitively. It is kept
+    /// apart from [`Translator::lower_case_attribute_names`] because the
+    /// two answer different questions — how a name is spelled versus how
+    /// a value is compared.
+    pub(crate) const fn html_document(&self) -> bool {
+        matches!(self.mode, Mode::Html)
+    }
+
+    /// Where `:lang()` reads an element's language from.
+    pub(crate) const fn lang_source(&self) -> LangSource {
+        match self.mode {
+            Mode::Generic => LangSource::XmlLang,
+            Mode::Html => LangSource::Lang,
+            Mode::Xhtml => LangSource::Both,
         }
     }
 
     /// Translate comma-separated selector groups, each prefixed, joined
     /// with " | ".
+    ///
+    /// `prefix` is prepended verbatim to every selector-group branch, so
+    /// it must end in something a node test can follow: an axis
+    /// (`"descendant-or-self::"`, [`crate::DESCENDANT_OR_SELF`]) or a
+    /// step separator (`"//"`, [`crate::WHOLE_DOCUMENT`]). Pass `""` for
+    /// a bare relative expression. Nothing validates it — a prefix like
+    /// `"/html/body "` yields `/html/body div`, which XPath reads as a
+    /// division, not a path.
+    ///
+    /// A selector group anchored on `:scope` ignores `prefix` and
+    /// anchors on the `self::` axis instead, since `:scope` names the
+    /// context node the XPath is evaluated from.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] when the selector is syntactically invalid
+    /// or uses an unsupported construct.
     pub fn css_to_xpath(&self, css: &str, prefix: &str) -> Result<String, Error> {
         let list = parser::parse(css)?;
         let mut parts: Vec<String> = Vec::new();
@@ -249,7 +290,7 @@ impl Translator {
             None => ("*".to_owned(), true),
             Some(e) => {
                 let safe = is_safe_name(e);
-                let e = if self.lower_case_element_names {
+                let e = if self.lower_case_element_names() {
                     e.to_ascii_lowercase()
                 } else {
                     e.to_owned()
@@ -568,7 +609,7 @@ impl Translator {
             // folds only where the document is HTML. `Mode::Xhtml` is XML,
             // where these attributes are case-sensitive like any other.
             ParsedCaseSensitivity::AsciiCaseInsensitiveIfInHtmlElementInHtmlDocument => {
-                self.html_document
+                self.html_document()
             }
             // `[attr="value" s]`, and the case-sensitive no-flag default.
             ParsedCaseSensitivity::ExplicitCaseSensitive | ParsedCaseSensitivity::CaseSensitive => {
@@ -587,7 +628,7 @@ impl Translator {
     /// `xpath_element`: one that needs quoting cannot be a node test at
     /// all, and errors.
     fn attrib_expr(&self, ns: NsConstraint, local_name: &str) -> Result<String, Error> {
-        let name = if self.lower_case_attribute_names {
+        let name = if self.lower_case_attribute_names() {
             local_name.to_ascii_lowercase()
         } else {
             local_name.to_owned()

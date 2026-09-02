@@ -124,6 +124,15 @@ assert_eq!(
 );
 ```
 
+`prefix` is prepended verbatim and is not validated, so it has to end in
+something a node test can follow: an axis or a step separator. The two
+that come up are exported as constants — `DESCENDANT_OR_SELF`
+(`"descendant-or-self::"`, the context node's subtree) and
+`WHOLE_DOCUMENT` (`"//"`, the whole document wherever the expression is
+evaluated from). A prefix ending anywhere else silently produces a
+different expression: `"/html/body "` yields `/html/body div`, which
+XPath reads as a division, not a path.
+
 ## Supported selectors
 
 - Type, universal (`*`), and namespace selectors (`ns|e`, `*|e`, `|e`).
@@ -228,14 +237,17 @@ express them faithfully:
   translating both recurse once per level, so the depth is capped to turn
   a pathological selector into an error instead of a stack overflow.
   Nothing hand-written comes close; only the nesting depth is limited,
-  not the length of a selector or of an argument chain.
+  not the length of a selector or of an argument chain. The value is
+  exported as `MAX_NESTING_DEPTH`.
 - `:nth-child(… of S)` / `:nth-last-child(… of S)` nested more than **8**
   levels deep, or a single `of S` list translating to more than **1 MiB**.
   XPath 1.0 has no variables, so `S` has to be written out twice — once to
   filter the siblings being counted, once to constrain the element being
   matched — and a nested `of S` lands in both copies, so the output
   doubles per level. The duplication is inherent to the target language,
-  so only a limit can keep a ~500-byte selector from asking for gigabytes.
+  so only a limit can keep a ~500-byte selector from asking for
+  gigabytes. The two values are exported as `MAX_NTH_OF_DEPTH` and
+  `MAX_NTH_OF_BYTES`.
 
 ## Error handling
 

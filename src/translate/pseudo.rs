@@ -198,7 +198,7 @@ impl Translator {
         // pseudo-class is applied.
         let name = xpath.local_name.clone();
         let name = name.as_deref();
-        match (self.kind, pc) {
+        match (self.kind(), pc) {
             (_, PseudoClass::Dir(_)) => {
                 // :dir() matches by *resolved* directionality, which needs
                 // runtime bidi resolution, so it never matches — in both
@@ -265,7 +265,7 @@ impl Translator {
         for value in ranges {
             check_wildcard_position(value)?;
             if value == "*" {
-                conditions.push(lang_known_condition(self.lang_source));
+                conditions.push(lang_known_condition(self.lang_source()));
             } else if let Some(prefix) = value.strip_suffix("-*") {
                 // The trailing '-' goes with the wildcard: lang('en-')
                 // would never match, since libxml2 expects the argument
@@ -287,14 +287,14 @@ impl Translator {
         for value in ranges {
             check_wildcard_position(value)?;
             if value == "*" {
-                conditions.push(lang_known_condition(self.lang_source));
+                conditions.push(lang_known_condition(self.lang_source()));
             } else {
                 // A trailing wildcard ("en-*") matches the same prefix as
                 // the range without it ("en"): both stop at a subtag
                 // boundary.
                 let range = value.strip_suffix("-*").unwrap_or(value);
                 conditions.push(lang_ancestor_condition(
-                    self.lang_source,
+                    self.lang_source(),
                     &format!("{}-", range.to_ascii_lowercase()),
                 ));
             }
