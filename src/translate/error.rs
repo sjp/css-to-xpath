@@ -1,15 +1,29 @@
 //! Error types for selector translation.
 //!
-//! Errors always name the selector and the construct. The exact wording
-//! here is part of this crate's output contract and is pinned by tests.
+//! An [`Error`] is self-describing: its [`Display`](std::fmt::Display)
+//! impl names the construct at fault without needing the selector back,
+//! so an error that has travelled through a few layers can still be
+//! printed. [`Error::message`] additionally takes the selector and
+//! renders the full diagnostic — the quoted selector and, for a parse
+//! error, a caret gutter. The exact wording of both is part of this
+//! crate's output contract and is pinned by tests.
 //!
-//! Both messages are bounded, so that a caller can print one whatever it
-//! was handed: the quoted selector is elided past [`MAX_SELECTOR_ECHO`]
-//! bytes, and a [`Error::Parse`] caret gutter shows a window of the line
-//! the error is on rather than the whole selector. A 30 KB selector
-//! therefore still yields a message of a few hundred bytes, with the
-//! caret intact.
+//! Messages are bounded, so that a caller can print one whatever it was
+//! handed: an echoed token is elided past [`MAX_TOKEN_ECHO`] bytes, the
+//! quoted selector past [`MAX_SELECTOR_ECHO`] bytes, and a
+//! [`Error::Parse`] caret gutter shows a window of the line the error is
+//! on rather than the whole selector. A 30 KB selector therefore still
+//! yields a message of a few hundred bytes, with the caret intact.
+//!
+//! Nothing here echoes a dependency's `Debug` output: every parse
+//! failure is mapped to a [`ParseErrorKind`] of this crate's own, so the
+//! text a user sees does not change when `selectors` or `cssparser`
+//! renames one of its internal error variants.
 
+use std::fmt;
+
+use cssparser::{BasicParseErrorKind, ParseErrorKind as CssErrorKind, ToCss, Token};
+use selectors::parser::SelectorParseErrorKind;
 use unicode_width::UnicodeWidthChar;
 
 /// Bytes of the selector reproduced in a message's opening quote before
@@ -17,45 +31,240 @@ use unicode_width::UnicodeWidthChar;
 /// quoted exactly as `{:?}` would quote it.
 const MAX_SELECTOR_ECHO: usize = 120;
 
+/// Bytes of a single offending token echoed in a [`ParseErrorKind`]
+/// before the rest is elided with `…`. Tokens are usually a character or
+/// two, but a name is only bounded by the selector's length.
+const MAX_TOKEN_ECHO: usize = 40;
+
 /// Display columns of the error's line kept around the caret in a
 /// [`Error::Parse`] gutter: enough for the offending compound and its
 /// neighbours, and narrow enough to survive an 80-column terminal
 /// alongside the two-space gutter.
 const MAX_GUTTER_WIDTH: usize = 72;
 
+/// Why a CSS selector could not be translated.
+///
+/// The variants split by *whose* rules were broken: [`Error::Parse`] for
+/// a selector CSS itself rejects, [`Error::Unsupported`] for a valid
+/// selector this crate declines to approximate. Only the former has an
+/// offending byte position, so only the former renders a caret.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Error {
     /// The selector is not valid CSS (as judged by Servo's parser).
-    /// The second field is the 0-indexed *byte* offset of the error
-    /// within the selector string, used to render a caret pointer. It is
-    /// `selector.len()` for an error at end of input.
-    Parse(String, u32),
+    Parse {
+        /// What is wrong with the selector.
+        kind: ParseErrorKind,
+        /// The 0-indexed *byte* offset of the error within the selector
+        /// string, used to render a caret pointer. It is
+        /// `selector.len()` for an error at end of input.
+        offset: usize,
+    },
     /// The selector is valid CSS, but uses a construct outside the
     /// supported set: this crate errors rather than approximating.
-    Unsupported(String),
+    Unsupported {
+        /// The offending construct, as a noun phrase (`` the `||` column
+        /// combinator ``) that reads as the object of "uses …".
+        construct: String,
+    },
 }
 
 impl Error {
-    /// Render the user-facing message, naming the offending selector.
-    pub fn into_message(self, selector: &str) -> String {
+    /// Render the full user-facing message, naming the offending
+    /// selector — and, for a [`Error::Parse`], pointing a caret at the
+    /// position within it.
+    ///
+    /// [`Display`](std::fmt::Display) is the one-line form for callers
+    /// that no longer hold the selector; this is the form to print when
+    /// they do.
+    pub fn message(&self, selector: &str) -> String {
+        let quoted = quote(selector);
         match self {
-            Error::Parse(detail, offset) => {
-                let quoted = quote(selector);
-                let (line, caret) = gutter(selector, offset as usize);
+            Error::Parse { kind, offset } => {
+                let (line, caret) = gutter(selector, *offset);
                 format!(
-                    "Unable to parse the CSS selector {quoted}: {detail}\n  |\n  | {line}\n  | {caret}"
+                    "Unable to parse the CSS selector {quoted}: {kind}\n  |\n  | {line}\n  | {caret}"
                 )
             }
-            Error::Unsupported(construct) => {
-                let quoted = quote(selector);
-                format!(
-                    "The CSS selector {quoted} uses {construct}, which this translator does not support"
-                )
+            Error::Unsupported { construct } => format!(
+                "The CSS selector {quoted} uses {construct}, which this translator does not support"
+            ),
+        }
+    }
+
+    /// Deprecated alias for [`Error::message`], which borrows the error
+    /// rather than consuming it.
+    #[deprecated(since = "0.3.0", note = "use `Error::message`, which takes `&self`")]
+    pub fn into_message(self, selector: &str) -> String {
+        self.message(selector)
+    }
+
+    /// An [`Error::Unsupported`] naming `construct`.
+    pub(crate) fn unsupported(construct: impl Into<String>) -> Self {
+        Error::Unsupported {
+            construct: construct.into(),
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    /// The one-line form, which does not need the selector: enough to
+    /// identify the fault when the error is all a caller still has.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Parse { kind, offset } => {
+                write!(f, "invalid CSS selector at byte {offset}: {kind}")
+            }
+            Error::Unsupported { construct } => {
+                write!(f, "unsupported CSS construct: {construct}")
             }
         }
     }
 }
 
+impl std::error::Error for Error {}
+
+/// What is wrong with a selector that is not valid CSS.
+///
+/// This is a translation of the `selectors`/`cssparser` error kinds into
+/// wording of this crate's own, not a re-export of them: their variants
+/// are internal to those crates and several are unreachable from a
+/// selector parse. Anything with no closer match — including a variant a
+/// future version of either crate adds — becomes [`ParseErrorKind::Other`],
+/// so a dependency bump cannot turn into a panic.
+///
+/// Payloads that echo the selector (a token, a pseudo-class name) are
+/// sanitized: control characters are replaced, and the text is elided
+/// past 40 bytes (`MAX_TOKEN_ECHO`), so a message stays printable
+/// however long the selector is.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ParseErrorKind {
+    /// The selector, or one group of a selector list, has nothing in it.
+    EmptySelector,
+    /// A combinator with nothing after it, as in `div > `.
+    DanglingCombinator,
+    /// The selector ends in the middle of a construct.
+    EndOfInput,
+    /// A construct in a position that does not allow it: a
+    /// pseudo-element inside `:is()`, a combinator after one, a `:has()`
+    /// nested in another `:has()`.
+    InvalidPosition,
+    /// A token that cannot appear where it does, as CSS source text.
+    UnexpectedToken(String),
+    /// A name was required — after `.` or `::` — and something else was
+    /// found. Holds the offending token as CSS source text.
+    ExpectedName(String),
+    /// A pseudo-class or pseudo-element outside the supported set (which
+    /// is every pseudo-element: XPath 1.0 has no notion of one). Holds
+    /// the name, without its leading colons.
+    UnsupportedPseudo(String),
+    /// Something that cannot appear inside `[...]`, as CSS source text:
+    /// a malformed attribute name, operator, or value.
+    InvalidAttributeSelector(String),
+    /// A parse failure with no more specific kind here, already worded
+    /// as a phrase to be printed after "…selector `x`: ".
+    Other(String),
+}
+
+impl fmt::Display for ParseErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseErrorKind::EmptySelector => f.write_str("the selector is empty"),
+            ParseErrorKind::DanglingCombinator => f.write_str("a combinator with nothing after it"),
+            ParseErrorKind::EndOfInput => f.write_str("the selector ends unexpectedly"),
+            ParseErrorKind::InvalidPosition => {
+                f.write_str("a construct that is not allowed in this position")
+            }
+            ParseErrorKind::UnexpectedToken(token) => write!(f, "unexpected `{token}`"),
+            ParseErrorKind::ExpectedName(token) => write!(f, "expected a name, found `{token}`"),
+            ParseErrorKind::UnsupportedPseudo(name) => {
+                // Named without its colons: the parser cannot tell how
+                // many were written, and `::before` reported as
+                // `` `:before` `` would be a third thing again.
+                write!(
+                    f,
+                    "`{name}` is not a supported pseudo-class or pseudo-element"
+                )
+            }
+            ParseErrorKind::InvalidAttributeSelector(token) => {
+                write!(f, "`{token}` is not valid in an attribute selector")
+            }
+            ParseErrorKind::Other(detail) => f.write_str(detail),
+        }
+    }
+}
+
+impl ParseErrorKind {
+    /// Translate one parse failure from the dependencies' vocabulary
+    /// into this crate's.
+    ///
+    /// The arms cover every kind the two crates actually produce while
+    /// parsing a selector; the rest — the `@`-rule kinds, which need a
+    /// stylesheet, and the several `selectors` variants nothing
+    /// constructs — fall through to [`ParseErrorKind::Other`], as would a
+    /// variant added upstream.
+    pub(crate) fn from_kind(kind: &CssErrorKind<'_, SelectorParseErrorKind<'_>>) -> Self {
+        use SelectorParseErrorKind as S;
+        match kind {
+            // A token after an explicit namespace prefix (`ns|5`) is
+            // just a token in the wrong place, so it joins the basic
+            // kind rather than earning wording of its own.
+            CssErrorKind::Basic(BasicParseErrorKind::UnexpectedToken(t))
+            | CssErrorKind::Custom(S::ExplicitNamespaceUnexpectedToken(t)) => {
+                ParseErrorKind::UnexpectedToken(token_text(t))
+            }
+            CssErrorKind::Basic(BasicParseErrorKind::EndOfInput) => ParseErrorKind::EndOfInput,
+            CssErrorKind::Custom(S::EmptySelector) => ParseErrorKind::EmptySelector,
+            CssErrorKind::Custom(S::DanglingCombinator) => ParseErrorKind::DanglingCombinator,
+            CssErrorKind::Custom(S::InvalidState) => ParseErrorKind::InvalidPosition,
+            CssErrorKind::Custom(S::ClassNeedsIdent(t) | S::PseudoElementExpectedIdent(t)) => {
+                ParseErrorKind::ExpectedName(token_text(t))
+            }
+            CssErrorKind::Custom(S::UnsupportedPseudoClassOrElement(name)) => {
+                ParseErrorKind::UnsupportedPseudo(elide(sanitize(name)))
+            }
+            CssErrorKind::Custom(
+                S::NoQualifiedNameInAttributeSelector(t)
+                | S::InvalidQualNameInAttr(t)
+                | S::ExpectedBarInAttr(t)
+                | S::UnexpectedTokenInAttributeSelector(t)
+                | S::BadValueInAttr(t),
+            ) => ParseErrorKind::InvalidAttributeSelector(token_text(t)),
+            CssErrorKind::Custom(S::ExpectedNamespace(prefix)) => ParseErrorKind::Other(format!(
+                "the namespace prefix `{}` is not declared",
+                elide(sanitize(prefix))
+            )),
+            _ => ParseErrorKind::Other("the selector is not valid CSS".to_owned()),
+        }
+    }
+}
+
+/// A token as the CSS source text it was written as, sanitized and
+/// elided for printing. `to_css` writes into a `String` infallibly.
+fn token_text(token: &Token<'_>) -> String {
+    let mut css = String::new();
+    let _ = token.to_css(&mut css);
+    elide(sanitize(&css))
+}
+
+/// `text` with every control character — which a message must never
+/// echo raw into a terminal — replaced by U+FFFD, as the caret gutter
+/// does for the selector itself.
+fn sanitize(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
+}
+
+/// `text`, cut to [`MAX_TOKEN_ECHO`] bytes with a `…` if it is longer.
+fn elide(mut text: String) -> String {
+    if text.len() > MAX_TOKEN_ECHO {
+        text.truncate(char_boundary(&text, MAX_TOKEN_ECHO));
+        text.push('…');
+    }
+    text
+}
 /// Quote `selector` as `{:?}` would, eliding everything past
 /// [`MAX_SELECTOR_ECHO`] bytes with `…` so the message stays printable
 /// however long the selector is.

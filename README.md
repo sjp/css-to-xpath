@@ -236,19 +236,58 @@ express them faithfully:
 
 ## Error handling
 
-`Error` carries enough detail to build a user-facing diagnostic:
+`Error` implements `Display` and `std::error::Error`, so it propagates
+through `?` into `Box<dyn Error>`, `anyhow::Error`, or a `thiserror`
+`#[from]` field with no wrapper of its own:
 
 ```rust,no_run
 use css_to_xpath::{css_to_xpath, Mode};
 
-if let Err(e) = css_to_xpath("col || td", "", Mode::Generic) {
-    eprintln!("{}", e.into_message("col || td"));
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let xpath = css_to_xpath("div > p", "", Mode::Generic)?;
+    println!("{xpath}");
+    Ok(())
+}
+```
+
+`Display` is a one-line summary that needs nothing but the error, so an
+error that has travelled a few layers can still be printed:
+
+```text
+invalid CSS selector at byte 6: a combinator with nothing after it
+unsupported CSS construct: the `||` column combinator
+```
+
+A caller that still holds the selector can render the fuller diagnostic
+with `Error::message`, which quotes the selector and — for a parse error
+— points a caret at the offending position:
+
+```rust,no_run
+use css_to_xpath::{css_to_xpath, Mode};
+
+let selector = "col || td";
+if let Err(e) = css_to_xpath(selector, "", Mode::Generic) {
+    eprintln!("{}", e.message(selector));
 }
 ```
 
 ```text
 The CSS selector "col || td" uses the `||` column combinator, which this translator does not support
 ```
+
+```text
+Unable to parse the CSS selector "div > ": a combinator with nothing after it
+  |
+  | div > 
+  |       ^
+```
+
+The two variants say whose rules were broken. `Error::Parse { kind,
+offset }` is a selector CSS itself rejects, with `kind` a
+`ParseErrorKind` of this crate's own — never a `Debug` rendering of a
+dependency's internal error — and `offset` the byte position the caret
+points at. `Error::Unsupported { construct }` is a valid selector this
+crate declines to approximate. Both are `#[non_exhaustive]`.
 
 ## Minimum supported Rust version
 

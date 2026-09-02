@@ -15,7 +15,7 @@ use std::fmt;
 
 pub use impls::CssString;
 
-use crate::translate::error::Error;
+use crate::translate::error::{Error, ParseErrorKind};
 
 #[derive(Clone, Debug)]
 pub struct CssToXpathImpl;
@@ -479,10 +479,10 @@ type ParseFailure<'i> = cssparser::ParseError<'i, SelectorParseErrorKind<'i>>;
 pub fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
     let scan = scan(css);
     if scan.column_combinator {
-        return Err(Error::Unsupported("the `||` column combinator".into()));
+        return Err(Error::unsupported("the `||` column combinator"));
     }
     if scan.max_depth > MAX_NESTING_DEPTH {
-        return Err(Error::Unsupported(format!(
+        return Err(Error::unsupported(format!(
             "functional pseudo-classes nested more than {MAX_NESTING_DEPTH} levels deep"
         )));
     }
@@ -520,11 +520,10 @@ fn parse_list(
 }
 
 fn parse_error(css: &str, e: ParseFailure<'_>) -> Error {
-    let detail = match e.kind {
-        cssparser::ParseErrorKind::Basic(ref kind) => format!("{kind:?}"),
-        cssparser::ParseErrorKind::Custom(ref kind) => format!("{kind:?}"),
-    };
-    Error::Parse(detail, byte_offset(css, e.location))
+    Error::Parse {
+        kind: ParseErrorKind::from_kind(&e.kind),
+        offset: byte_offset(css, e.location),
+    }
 }
 
 fn is_empty_selector(e: &ParseFailure<'_>) -> bool {
@@ -607,7 +606,7 @@ pub fn is_empty_forgiving_list(list: &[Selector<CssToXpathImpl>]) -> bool {
 /// and a non-BMP character counts as two but is a single character. A
 /// byte offset is what the caret renderer needs to look at the source
 /// text itself.
-fn byte_offset(css: &str, location: SourceLocation) -> u32 {
+fn byte_offset(css: &str, location: SourceLocation) -> usize {
     let bytes = css.as_bytes();
     // Walk to the start of the error's line. `\r\n`, `\r`, `\n` and `\f`
     // are all line breaks, matching cssparser's own line counter.
@@ -640,7 +639,7 @@ fn byte_offset(css: &str, location: SourceLocation) -> u32 {
         units = units.saturating_sub(c.len_utf16() as u32);
         offset += c.len_utf8();
     }
-    offset as u32
+    offset
 }
 
 #[cfg(test)]

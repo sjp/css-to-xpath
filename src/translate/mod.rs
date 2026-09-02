@@ -6,7 +6,7 @@ mod nth;
 mod pseudo;
 pub mod xpath_expr;
 
-pub use error::Error;
+pub use error::{Error, ParseErrorKind};
 
 use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
 use selectors::parser::{Combinator, Component, Selector};
@@ -125,8 +125,8 @@ impl Translator {
         let leftmost = seqs.len() - 1;
         for (compound, _) in &seqs[..leftmost] {
             if compound.iter().any(|c| matches!(c, Component::Scope)) {
-                return Err(Error::Unsupported(
-                    "the `:scope` pseudo-class outside the leftmost compound".into(),
+                return Err(Error::unsupported(
+                    "the `:scope` pseudo-class outside the leftmost compound",
                 ));
             }
         }
@@ -152,7 +152,7 @@ impl Translator {
         for i in (0..leftmost).rev() {
             let combinator = seqs[i]
                 .1
-                .ok_or_else(|| Error::Unsupported("an unexpected selector structure".into()))?;
+                .ok_or_else(|| Error::unsupported("an unexpected selector structure"))?;
             let right = self.compound_to_xpath(&seqs[i].0, 0)?;
             xpath = self.apply_combinator(combinator, xpath, &right)?;
         }
@@ -388,8 +388,8 @@ impl Translator {
                         && anchor.len() == 1
                         && matches!(anchor[0], Component::RelativeSelectorAnchor);
                     if !anchor_only {
-                        return Err(Error::Unsupported(
-                            "an unexpected selector structure inside `:has()`".into(),
+                        return Err(Error::unsupported(
+                            "an unexpected selector structure inside `:has()`",
                         ));
                     }
                     let mut test = String::new();
@@ -412,7 +412,7 @@ impl Translator {
                                 Some(Combinator::NextSibling) | Some(Combinator::LaterSibling),
                             ) => "/following-sibling::",
                             (_, other) => {
-                                return Err(Error::Unsupported(format!(
+                                return Err(Error::unsupported(format!(
                                     "an unexpected combinator ({other:?}) inside `:has()`"
                                 )));
                             }
@@ -496,7 +496,7 @@ impl Translator {
                     }
                 }
             }
-            unsupported => Err(Error::Unsupported(describe_component(unsupported))),
+            unsupported => Err(Error::unsupported(describe_component(unsupported))),
         }
     }
 
@@ -612,7 +612,7 @@ impl Translator {
             // PseudoElement / SlotAssignment / Part combinators can never be
             // produced: the corresponding parser hooks are disabled.
             other => {
-                return Err(Error::Unsupported(format!("the {other:?} combinator")));
+                return Err(Error::unsupported(format!("the {other:?} combinator")));
             }
         }
         Ok(left)
@@ -687,7 +687,7 @@ impl Translator {
                     Some(Combinator::LaterSibling) => "preceding-sibling::*",
                     Some(Combinator::NextSibling) => "preceding-sibling::*[1]",
                     other => {
-                        return Err(Error::Unsupported(format!(
+                        return Err(Error::unsupported(format!(
                             "an unexpected combinator ({other:?}) inside `{context}`"
                         )));
                     }
@@ -778,7 +778,7 @@ fn collect_seqs(
 /// happen to use that very prefix, so such a prefix errors rather than
 /// approximating.
 fn unsafe_prefix_error(prefix: &str) -> Error {
-    Error::Unsupported(format!(
+    Error::unsupported(format!(
         "a namespace prefix that needs quoting (`{prefix}`)"
     ))
 }

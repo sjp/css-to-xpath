@@ -1,7 +1,7 @@
 mod parser;
 mod translate;
 
-pub use translate::{Error, Mode, Translator};
+pub use translate::{Error, Mode, ParseErrorKind, Translator};
 
 /// The version of this crate, from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -515,9 +515,10 @@ mod tests {
             .spawn(|| {
                 let t = Translator::new(Mode::Generic);
                 let nest = |open: &str, n: usize| format!("{}a{}", open.repeat(n), ")".repeat(n));
-                let too_deep = crate::Error::Unsupported(
-                    "functional pseudo-classes nested more than 64 levels deep".to_owned(),
-                );
+                let too_deep = crate::Error::Unsupported {
+                    construct: "functional pseudo-classes nested more than 64 levels deep"
+                        .to_owned(),
+                };
 
                 for open in [":not(", ":is(", ":where(", ":matches("] {
                     assert!(t.css_to_xpath(&nest(open, 64), "").is_ok());
@@ -529,7 +530,7 @@ mod tests {
                     );
                 }
                 assert_eq!(
-                    too_deep.into_message(":not(:not(a))"),
+                    too_deep.message(":not(:not(a))"),
                     "The CSS selector \":not(:not(a))\" uses functional pseudo-classes \
                      nested more than 64 levels deep, which this translator does not support"
                 );
@@ -625,9 +626,9 @@ mod tests {
         // Inside a functional pseudo-class, the context node is
         // unreachable from an XPath 1.0 predicate: all four entry points
         // hit the same `describe_component` message.
-        let scope_in_functional = crate::Error::Unsupported(
-            "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
-        );
+        let scope_in_functional = crate::Error::Unsupported {
+            construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
+        };
         assert_eq!(
             t.css_to_xpath("e:is(:scope)", "").unwrap_err(),
             scope_in_functional
@@ -686,8 +687,9 @@ mod tests {
         // node test, and XPath 1.0 cannot resolve it without the
         // namespace URI: comparing the whole `prefix:name` against
         // `name()` would match only documents using that very prefix.
-        let unsafe_prefix =
-            crate::Error::Unsupported("a namespace prefix that needs quoting (`1ns`)".to_owned());
+        let unsafe_prefix = crate::Error::Unsupported {
+            construct: "a namespace prefix that needs quoting (`1ns`)".to_owned(),
+        };
         assert_eq!(
             t.css_to_xpath("\\31 ns|div", "").unwrap_err(),
             unsafe_prefix
@@ -952,9 +954,9 @@ mod tests {
     fn nth_child_of_nesting_is_bounded() {
         let t = Translator::new(Mode::Generic);
         let nest = |n: usize| format!("{}a{}", ":nth-child(2 of ".repeat(n), ")".repeat(n));
-        let too_deep = crate::Error::Unsupported(
-            "`An+B of S` selector lists nested more than 8 levels deep".to_owned(),
-        );
+        let too_deep = crate::Error::Unsupported {
+            construct: "`An+B of S` selector lists nested more than 8 levels deep".to_owned(),
+        };
 
         // Two levels, in full: `a` appears four times, not twice.
         assert_eq!(
@@ -975,7 +977,7 @@ mod tests {
         // with a `…`: every message is bounded, not just the
         // caret-bearing ones.
         assert_eq!(
-            too_deep.into_message(&nest(9)),
+            too_deep.message(&nest(9)),
             format!(
                 "The CSS selector \"{}\u{2026}\" uses `An+B of S` selector lists nested \
                  more than 8 levels deep, which this translator does not support",
@@ -990,9 +992,9 @@ mod tests {
         assert!(t.css_to_xpath(&laundered(8), "").is_ok());
         assert_eq!(
             t.css_to_xpath(&laundered(9), "").unwrap_err(),
-            crate::Error::Unsupported(
-                "`An+B of S` selector lists nested more than 8 levels deep".to_owned()
-            )
+            crate::Error::Unsupported {
+                construct: "`An+B of S` selector lists nested more than 8 levels deep".to_owned()
+            }
         );
 
         // The depth limit bounds the doubling, not what is doubled, so a
@@ -1009,9 +1011,10 @@ mod tests {
         assert!(t.css_to_xpath(&big(200), "").is_ok());
         assert_eq!(
             t.css_to_xpath(&big(800), "").unwrap_err(),
-            crate::Error::Unsupported(
-                "an `An+B of S` selector list translating to more than 1048576 bytes".to_owned()
-            )
+            crate::Error::Unsupported {
+                construct: "an `An+B of S` selector list translating to more than 1048576 bytes"
+                    .to_owned()
+            }
         );
     }
 
@@ -1177,13 +1180,19 @@ mod tests {
         // the error names it where it stands.
         assert_eq!(
             t.css_to_xpath(":is(a, ::before)", "").unwrap_err(),
-            crate::Error::Parse("InvalidState".to_owned(), 15)
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::InvalidPosition,
+                offset: 15
+            }
         );
         // An empty list no longer being an error, the error reported for
         // a selector holding one is the next thing that is wrong.
         assert_eq!(
             t.css_to_xpath(":is() > ::after", "").unwrap_err(),
-            crate::Error::Parse("UnsupportedPseudoClassOrElement(\"after\")".to_owned(), 9)
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::UnsupportedPseudo("after".to_owned()),
+                offset: 9
+            }
         );
     }
 
@@ -1833,11 +1842,12 @@ mod tests {
         assert!(t.css_to_xpath(":contains(\"foo", "").is_err());
     }
 
-    /// `Error::into_message`'s wording — including the caret-pointer
-    /// gutter under a `Parse` error, and the plain sentence for an
+    /// `Error::message`'s wording — including the caret-pointer gutter
+    /// under a `Parse` error, and the plain sentence for an
     /// `Unsupported` one — is documented in `translate::error` as part
-    /// of the crate's output contract. Pin it here, plus the `Parse` vs
-    /// `Unsupported` variant split, which selects the message shape.
+    /// of the crate's output contract. Pin it here, alongside the
+    /// one-line `Display` form and the `Parse` vs `Unsupported` variant
+    /// split, which selects the message shape.
     #[test]
     fn error_messages() {
         let t = Translator::new(Mode::Generic);
@@ -1846,26 +1856,46 @@ mod tests {
         // caret lands one past the last character, at the EOF offset.
         let sel = "div > ";
         let err = t.css_to_xpath(sel, "").unwrap_err();
-        assert_eq!(err, crate::Error::Parse("DanglingCombinator".to_owned(), 6));
         assert_eq!(
-            err.into_message(sel),
-            "Unable to parse the CSS selector \"div > \": DanglingCombinator\n\
+            err,
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::DanglingCombinator,
+                offset: 6
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "invalid CSS selector at byte 6: a combinator with nothing after it"
+        );
+        assert_eq!(
+            err.message(sel),
+            "Unable to parse the CSS selector \"div > \": a combinator with nothing after it\n\
              \x20 |\n\
              \x20 | div > \n\
              \x20 |       ^"
         );
 
         // A stray '#' where an attribute value is expected: also a
-        // `Parse` error, caret under the offending character.
+        // `Parse` error, caret under the offending character. The token
+        // is echoed as the CSS it was written as, not as Servo's
+        // `Debug` for it.
         let sel = "[foo=#]";
         let err = t.css_to_xpath(sel, "").unwrap_err();
         assert_eq!(
             err,
-            crate::Error::Parse("BadValueInAttr(Delim('#'))".to_owned(), 5)
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::InvalidAttributeSelector("#".to_owned()),
+                offset: 5
+            }
         );
         assert_eq!(
-            err.into_message(sel),
-            "Unable to parse the CSS selector \"[foo=#]\": BadValueInAttr(Delim('#'))\n\
+            err.to_string(),
+            "invalid CSS selector at byte 5: `#` is not valid in an attribute selector"
+        );
+        assert_eq!(
+            err.message(sel),
+            "Unable to parse the CSS selector \"[foo=#]\": \
+             `#` is not valid in an attribute selector\n\
              \x20 |\n\
              \x20 | [foo=#]\n\
              \x20 |      ^"
@@ -1876,14 +1906,41 @@ mod tests {
         let err = t.css_to_xpath(sel, "").unwrap_err();
         assert_eq!(
             err,
-            crate::Error::Parse("UnexpectedToken(Delim('/'))".to_owned(), 4)
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::UnexpectedToken("/".to_owned()),
+                offset: 4
+            }
         );
         assert_eq!(
-            err.into_message(sel),
-            "Unable to parse the CSS selector \"html/body\": UnexpectedToken(Delim('/'))\n\
+            err.message(sel),
+            "Unable to parse the CSS selector \"html/body\": unexpected `/`\n\
              \x20 |\n\
              \x20 | html/body\n\
              \x20 |     ^"
+        );
+
+        // An unknown pseudo-class, and a pseudo-element: the name is
+        // echoed, not a `Debug` rendering of the parser's own error.
+        let sel = "a:hoverr";
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        assert_eq!(
+            err,
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::UnsupportedPseudo("hoverr".to_owned()),
+                offset: 2
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "invalid CSS selector at byte 2: \
+             `hoverr` is not a supported pseudo-class or pseudo-element"
+        );
+        assert_eq!(
+            t.css_to_xpath("p::before", "").unwrap_err(),
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::UnsupportedPseudo("before".to_owned()),
+                offset: 2
+            }
         );
 
         // The column combinator is valid CSS syntax but has no XPath 1.0
@@ -1893,10 +1950,16 @@ mod tests {
         let err = t.css_to_xpath(sel, "").unwrap_err();
         assert_eq!(
             err,
-            crate::Error::Unsupported("the `||` column combinator".to_owned())
+            crate::Error::Unsupported {
+                construct: "the `||` column combinator".to_owned()
+            }
         );
         assert_eq!(
-            err.into_message(sel),
+            err.to_string(),
+            "unsupported CSS construct: the `||` column combinator"
+        );
+        assert_eq!(
+            err.message(sel),
             "The CSS selector \"col || td\" uses the `||` column combinator, \
              which this translator does not support"
         );
@@ -1911,14 +1974,99 @@ mod tests {
         let err = t.css_to_xpath(sel, "").unwrap_err();
         assert_eq!(
             err,
-            crate::Error::Unsupported(
-                "the `:scope` pseudo-class inside a functional pseudo-class".to_owned()
-            )
+            crate::Error::Unsupported {
+                construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned()
+            }
         );
         assert_eq!(
-            err.into_message(sel),
+            err.message(sel),
             "The CSS selector \"e:is(:scope)\" uses the `:scope` pseudo-class \
              inside a functional pseudo-class, which this translator does not support"
+        );
+    }
+
+    /// `Error` is a `std::error::Error`, so `?` converts it into the
+    /// boxed and `anyhow`-style error types callers actually propagate
+    /// through, with no wrapper of their own.
+    #[test]
+    fn error_is_std_error() {
+        fn boxed() -> Result<(), Box<dyn std::error::Error>> {
+            crate::css_to_xpath("a", "", Mode::Generic)?;
+            crate::css_to_xpath("div > ", "", Mode::Generic)?;
+            Ok(())
+        }
+        let e = boxed().unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "invalid CSS selector at byte 6: a combinator with nothing after it"
+        );
+        assert!(e.source().is_none());
+    }
+
+    /// Neither message form echoes a dependency's `Debug` output: the
+    /// wording is this crate's own, so a `selectors`/`cssparser` bump
+    /// that renames an internal error variant cannot change it.
+    #[test]
+    fn error_messages_are_not_debug_renderings() {
+        let t = Translator::new(Mode::Generic);
+        for sel in [
+            "div > ",
+            "[foo=#]",
+            "html/body",
+            "p:before",
+            ":is(a, :before)",
+            "div.-",
+            "ns|5",
+            "",
+            "a,",
+            "a:",
+            "[foo!=bar]",
+            "col || td",
+            "e:is(:scope)",
+        ] {
+            let err = t.css_to_xpath(sel, "").unwrap_err();
+            for message in [err.to_string(), err.message(sel)] {
+                for debris in [
+                    "Delim(",
+                    "QuotedString(",
+                    "Ident(",
+                    "Number(",
+                    "InvalidState",
+                    "DanglingCombinator",
+                    "EmptySelector",
+                    "BadValueInAttr",
+                    "UnsupportedPseudoClassOrElement",
+                ] {
+                    assert!(!message.contains(debris), "{sel:?} -> {message:?}");
+                }
+            }
+        }
+    }
+
+    /// The payloads echoed from the selector are bounded and safe to
+    /// print, exactly as the quoted selector and the caret gutter are: a
+    /// token or pseudo-class name is elided past 40 bytes, and control
+    /// characters never reach the terminal raw.
+    #[test]
+    fn error_payloads_are_bounded() {
+        let t = Translator::new(Mode::Generic);
+        let long = "z".repeat(100);
+        assert_eq!(
+            t.css_to_xpath(&format!("a:{long}"), "").unwrap_err(),
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::UnsupportedPseudo(format!(
+                    "{}\u{2026}",
+                    "z".repeat(40)
+                )),
+                offset: 2
+            }
+        );
+        assert_eq!(
+            t.css_to_xpath("[foo=\u{1}]", "").unwrap_err(),
+            crate::Error::Parse {
+                kind: crate::ParseErrorKind::InvalidAttributeSelector("\u{fffd}".to_owned()),
+                offset: 5
+            }
         );
     }
 
@@ -1932,7 +2080,7 @@ mod tests {
         // The gutter's echo line and caret line, without the leading
         // `  | ` on each: what has to line up, isolated from the wording.
         let gutter = |sel: &str| {
-            let message = t.css_to_xpath(sel, "").unwrap_err().into_message(sel);
+            let message = t.css_to_xpath(sel, "").unwrap_err().message(sel);
             let mut lines = message
                 .split('\n')
                 .skip(2)
@@ -1993,7 +2141,7 @@ mod tests {
         // as far as the 120-byte elision, and echoed only as far as the
         // window.
         let big = format!("{}div >", "a,".repeat(10_000));
-        let message = t.css_to_xpath(&big, "").unwrap_err().into_message(&big);
+        let message = t.css_to_xpath(&big, "").unwrap_err().message(&big);
         assert!(message.len() < 1024, "{} bytes", message.len());
         assert!(message.starts_with(&format!(
             "Unable to parse the CSS selector \"{}…\":",

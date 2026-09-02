@@ -77,7 +77,7 @@ impl Translator {
             // :only-of-type
             NthType::OnlyOfType => {
                 let nodetest = xpath.same_type_nodetest().ok_or_else(|| {
-                    Error::Unsupported("`:only-of-type` on the universal selector `*`".into())
+                    Error::unsupported("`:only-of-type` on the universal selector `*`")
                 })?;
                 xpath.add_condition(&format!(
                     "count(preceding-sibling::{nodetest}) = 0 \
@@ -99,9 +99,7 @@ impl Translator {
             // selector `*`.
             NthType::OfType | NthType::LastOfType => {
                 let nodetest = xpath.same_type_nodetest().ok_or_else(|| {
-                    Error::Unsupported(
-                        "an of-type pseudo-class on the universal selector `*`".into(),
-                    )
+                    Error::unsupported("an of-type pseudo-class on the universal selector `*`")
                 })?;
                 self.xpath_nth_child(
                     xpath,
@@ -147,7 +145,7 @@ impl Translator {
         let current_element_check = match of {
             Some(of) => {
                 if of.depth >= MAX_NTH_OF_DEPTH {
-                    return Err(Error::Unsupported(format!(
+                    return Err(Error::unsupported(format!(
                         "`An+B of S` selector lists nested more than \
                          {MAX_NTH_OF_DEPTH} levels deep"
                     )));
@@ -160,7 +158,7 @@ impl Translator {
                     .as_ref()
                     .is_some_and(|c| c.expr.len() > MAX_NTH_OF_BYTES)
                 {
-                    return Err(Error::Unsupported(format!(
+                    return Err(Error::unsupported(format!(
                         "an `An+B of S` selector list translating to more than \
                          {MAX_NTH_OF_BYTES} bytes"
                     )));

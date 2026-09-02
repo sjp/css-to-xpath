@@ -286,7 +286,7 @@ fn check_wildcard_position(range: &str) -> Result<(), Error> {
     if let Some(pos) = range.find('*')
         && pos != range.len() - 1
     {
-        return Err(Error::Unsupported(format!(
+        return Err(Error::unsupported(format!(
             "the :lang() language range {range:?} \
              (a wildcard outside the final subtag)"
         )));
