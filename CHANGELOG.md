@@ -34,6 +34,13 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   `cargo-fuzz` target, and a weekly `cargo-mutants` workflow.
 - Packaging metadata: `keywords`, `categories`, `documentation`, and an
   `include` list. The README is now the crate-level documentation.
+- An "Approximations" section in the README recording where the output is
+  deliberately not what Selectors Level 4 asks for: `:lang()` as a prefix
+  match rather than RFC 4647 extended filtering, Level 3 `:empty`,
+  attribute-only `:checked`, `Mode::Html` lowercasing foreign content,
+  form feed in class token lists, and quoted non-ASCII names. The empty
+  language range `:lang("")` is listed under "Not supported". No behaviour
+  changed.
 
 ### Changed
 

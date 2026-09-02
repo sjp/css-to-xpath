@@ -158,7 +158,8 @@ XPath reads as a division, not a path.
   `@xml:lang` instead. `Mode::Xhtml` reads `@xml:lang` for every range.
   Both rely on the `xml` prefix, which XML binds implicitly and so needs
   no entry in the caller's namespace map; processors that do not pre-bind
-  it need it registered.
+  it need it registered. `:empty` and `:lang()` both follow Level 3
+  rather than Level 4 — see [Approximations](#approximations).
 - The `Mode::Html`/`Mode::Xhtml` form and link pseudo-classes listed above.
 
 ## Namespaces
@@ -232,6 +233,10 @@ express them faithfully:
   caller's namespace map.
 - `:scope` outside the leftmost compound, or inside a functional
   pseudo-class argument.
+- The empty language range `:lang("")`, which Level 4 defines as matching
+  only elements whose language is *not* tagged. It is rejected with the
+  other malformed ranges (`en-`, `--x`, `en*`) rather than given that
+  meaning; the ones that are supported are described below.
 - Functional pseudo-classes (`:is()`, `:not()`, `:where()`, `:has()`,
   `:nth-child(… of S)`) nested more than **64** levels deep. Parsing and
   translating both recurse once per level, so the depth is capped to turn
@@ -248,6 +253,50 @@ express them faithfully:
   so only a limit can keep a ~500-byte selector from asking for
   gigabytes. The two values are exported as `MAX_NTH_OF_DEPTH` and
   `MAX_NTH_OF_BYTES`.
+
+## Approximations
+
+These translate to something useful but not to exactly what Selectors
+Level 4 asks for, because XPath 1.0 — or a static translation of any
+kind — cannot reach the spec's answer. They are listed here so the
+contract stays honest.
+
+- **`:lang()` is a prefix match, not RFC 4647 extended filtering.** The
+  range is compared against the language tag up to a subtag boundary, the
+  Level 3 / `[lang|=…]` rule, so `:lang(de-DE)` matches `de-DE` and
+  `de-DE-1996` but not `de-Latn-DE`, which Level 4 requires it to match:
+  the wildcards Level 4 implies *between* subtags are not modelled. A
+  written wildcard is allowed only as the whole range (`*`) or as the
+  final subtag (`en-*`); an interior one (`de-*-DE`) errors rather than
+  quietly matching the wrong set. Single-subtag ranges — `en`, `en-*`,
+  `*`, the common case — are unaffected. Under `Mode::Generic` the test
+  is XPath's own `lang()`, which is a prefix match in the same way.
+- **`:empty` follows Level 3, so white space counts.** `e:empty` is
+  `e[not(*) and not(string-length())]`, and `<p> </p>` is therefore not
+  empty. Level 4 ignores document white space; browsers still ship the
+  Level 3 behaviour, and so does this crate.
+- **`:checked` reads attributes only.** An `<option>` can be selected
+  with no `selected` attribute — the first option of a single-select
+  with none marked — and only one radio per group can really be checked.
+  Neither fact is visible to a translation that has only the document
+  tree to work with.
+- **`Mode::Html` lowercases foreign content too.** `svg|linearGradient`
+  becomes `svg:lineargradient`, which is right for libxml2's HTML
+  parser, since it lowercases every name it sees. An HTML5 parser
+  (html5ever, a browser) restores the camelCase SVG and MathML names
+  instead, so `Mode::Html` is aimed at libxml2-style trees.
+- **Class matching splits on XML white space.** `.foo` is
+  `contains(concat(' ', normalize-space(@class), ' '), ' foo ')`, and
+  `normalize-space` counts space, tab, CR and LF, while HTML's
+  space-separated tokens also include the form feed U+000C. A `class`
+  attribute that separates two tokens with a form feed keeps them joined
+  here.
+- **Non-ASCII names are quoted, and non-ASCII prefixes are rejected.** A
+  name is written into the node test directly only if it is ASCII
+  letters, digits, `_`, `.` or `-`, so `é` folds into the conservative
+  `*[name() = 'é' and namespace-uri() = '']`. A namespace *prefix* gets
+  no such fallback: `nsé|div` is an error under the rule above, even
+  though `nsé` is a valid XML `NCName` and would be a valid XPath prefix.
 
 ## Error handling
 
