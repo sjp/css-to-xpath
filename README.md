@@ -58,7 +58,10 @@ assert_eq!(
 - **`Mode::Generic`** — plain CSS/XPath semantics, case-sensitive names, no
   HTML-specific pseudo-classes.
 - **`Mode::Html`** — lowercases element and attribute names (as HTML parsing
-  does) and gives dynamic-seeming pseudo-classes their static HTML
+  does), compares HTML's legacy case-insensitive attribute values
+  (`type`, `rel`, `lang`, `checked`, … — the list HTML fixes) without
+  regard to case, so `[type=CHECKBOX]` matches `<input type="checkbox">`,
+  and gives dynamic-seeming pseudo-classes their static HTML
   meaning where one exists. Each is limited to the elements HTML
   defines it over, so nothing else matches:
   - `:link`/`:any-link` — an `a` or `area` with an `href`.
@@ -76,9 +79,10 @@ assert_eq!(
     `textarea` and the `input` types it applies to.
   - `:lang()` — nearest `@lang` ancestor, case-folded prefix match.
 - **`Mode::Xhtml`** — the same HTML pseudo-class semantics as `Mode::Html`,
-  but preserves case (XHTML is XML, so names are case-sensitive) and
-  reads `xml:lang` as well as `lang` for `:lang()`, preferring `xml:lang`
-  when both are on the nearest ancestor (HTML's language determination).
+  but preserves case (XHTML is XML, so both names and those attribute
+  values are case-sensitive) and reads `xml:lang` as well as `lang` for
+  `:lang()`, preferring `xml:lang` when both are on the nearest ancestor
+  (HTML's language determination).
   The element names *inside* these pseudo-classes — the `fieldset`
   ancestor, the parent `optgroup`, the `a`/`area` of `:link` — are matched
   by local name, so they see XHTML's namespaced elements and work with

@@ -43,6 +43,14 @@ pub struct Translator {
     pub(crate) kind: Kind,
     pub(crate) lower_case_element_names: bool,
     pub(crate) lower_case_attribute_names: bool,
+    /// Whether the target document is an HTML document, which is what
+    /// makes HTML's legacy case-insensitive attribute values fold (see
+    /// `apply_case_flag`). Only `Mode::Html` sets it: `Mode::Xhtml` is
+    /// XML, where those attributes compare case-sensitively. It is kept
+    /// apart from `lower_case_attribute_names` because the two answer
+    /// different questions — how a name is spelled versus how a value is
+    /// compared — even though today's modes happen to agree on both.
+    pub(crate) html_document: bool,
     pub(crate) lang_source: LangSource,
 }
 
@@ -67,18 +75,21 @@ impl Translator {
                 kind: Kind::Generic,
                 lower_case_element_names: false,
                 lower_case_attribute_names: false,
+                html_document: false,
                 lang_source: LangSource::XmlLang,
             },
             Mode::Html => Translator {
                 kind: Kind::Html,
                 lower_case_element_names: true,
                 lower_case_attribute_names: true,
+                html_document: true,
                 lang_source: LangSource::Lang,
             },
             Mode::Xhtml => Translator {
                 kind: Kind::Html,
                 lower_case_element_names: false,
                 lower_case_attribute_names: false,
+                html_document: false,
                 lang_source: LangSource::Both,
             },
         }
@@ -454,7 +465,8 @@ impl Translator {
                 case_sensitivity,
             } => {
                 let attrib = self.attrib_expr(NsConstraint::None, local_name.as_str())?;
-                let (attrib, value) = apply_case_flag(attrib, value.as_str(), case_sensitivity);
+                let (attrib, value) =
+                    self.apply_case_flag(attrib, value.as_str(), case_sensitivity);
                 self.attrib_operator(xpath, &attrib, *operator, &value)
             }
             Component::AttributeOther(attr) => {
@@ -479,12 +491,56 @@ impl Translator {
                         ref value,
                     } => {
                         let (attrib, value) =
-                            apply_case_flag(attrib, value.as_str(), &case_sensitivity);
+                            self.apply_case_flag(attrib, value.as_str(), &case_sensitivity);
                         self.attrib_operator(xpath, &attrib, operator, &value)
                     }
                 }
             }
             unsupported => Err(Error::Unsupported(describe_component(unsupported))),
+        }
+    }
+
+    /// Whether an attribute-value comparison is case-sensitive, and the
+    /// resulting comparison pair.
+    ///
+    /// Selectors 4 leaves attribute-value case sensitivity to the document
+    /// language unless a flag overrides it, and HTML makes a fixed list of
+    /// attributes (`type`, `rel`, `dir`, `checked`, ... — the presentational
+    /// and enumerated legacy ones) ASCII case-insensitive on HTML elements in
+    /// HTML documents. Servo's parser does that classification for us and
+    /// hands back `AsciiCaseInsensitiveIfInHtmlElementInHtmlDocument`, already
+    /// restricted to unflagged, un-namespaced attributes. The other half of
+    /// that variant's condition — that the element is in the HTML namespace —
+    /// is not checkable from a selector, but it holds wherever the flag does:
+    /// an HTML parser puts every element in one document, without namespaces.
+    ///
+    /// Folding means comparing the ASCII-lowercased attribute (via XPath
+    /// `translate()`) against the ASCII-lowercased value. An empty value needs
+    /// no lowercasing, and skipping it keeps the existence tests exact.
+    fn apply_case_flag(
+        &self,
+        attrib: String,
+        value: &str,
+        case_sensitivity: &ParsedCaseSensitivity,
+    ) -> (String, String) {
+        let fold = match case_sensitivity {
+            // `[attr="value" i]`.
+            ParsedCaseSensitivity::AsciiCaseInsensitive => true,
+            // No flag on one of HTML's case-insensitive attributes: it
+            // folds only where the document is HTML. `Mode::Xhtml` is XML,
+            // where these attributes are case-sensitive like any other.
+            ParsedCaseSensitivity::AsciiCaseInsensitiveIfInHtmlElementInHtmlDocument => {
+                self.html_document
+            }
+            // `[attr="value" s]`, and the case-sensitive no-flag default.
+            ParsedCaseSensitivity::ExplicitCaseSensitive | ParsedCaseSensitivity::CaseSensitive => {
+                false
+            }
+        };
+        if fold && !value.is_empty() {
+            (xpath_expr::ascii_lower(&attrib), value.to_ascii_lowercase())
+        } else {
+            (attrib, value.to_owned())
         }
     }
 
@@ -713,30 +769,6 @@ fn collect_seqs(
         }
     }
     seqs
-}
-
-/// The Level 4 case-sensitivity flag handling.
-///
-/// `[attr="value" i]`: compare the ASCII-lowercased attribute (via XPath
-/// `translate()`) against the ASCII-lowercased value. An empty value needs
-/// no lowercasing, and skipping it keeps the existence tests exact. The `s`
-/// flag, the no-flag default, and Servo's HTML-legacy-attribute default all
-/// mean the ordinary case-sensitive translation.
-fn apply_case_flag(
-    attrib: String,
-    value: &str,
-    case_sensitivity: &ParsedCaseSensitivity,
-) -> (String, String) {
-    match case_sensitivity {
-        ParsedCaseSensitivity::AsciiCaseInsensitive if !value.is_empty() => (
-            format!(
-                "translate({attrib}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
-                 'abcdefghijklmnopqrstuvwxyz')"
-            ),
-            value.to_ascii_lowercase(),
-        ),
-        _ => (attrib, value.to_owned()),
-    }
 }
 
 /// A namespace prefix that is not a valid XPath name cannot appear in a

@@ -10,7 +10,7 @@
 use crate::parser::PseudoClass;
 
 use super::error::Error;
-use super::xpath_expr::{XPathExpr, xpath_literal};
+use super::xpath_expr::{XPathExpr, ascii_lower, xpath_literal};
 use super::{Kind, Translator};
 
 /// Where a translator reads an element's language from, for `:lang()`.
@@ -76,9 +76,11 @@ impl LangSource {
 /// enumerated-attribute keywords are case-insensitive: `type` is an
 /// [enumerated attribute](https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#enumerated-attribute),
 /// so `type="RADIO"` is a radio and `type="HIDDEN"` is hidden. This is the
-/// same ASCII fold the `i` attribute flag uses (`apply_case_flag`).
-const TYPE_LC: &str = "translate(@type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
-                       'abcdefghijklmnopqrstuvwxyz')";
+/// same ASCII fold `[type=...]` itself gets (`Translator::apply_case_flag`),
+/// through the same helper.
+fn type_lc() -> String {
+    ascii_lower("@type")
+}
 
 /// Every element name in the HTML overrides is matched by `local-name()`,
 /// never by a qualified name or a bare node test. The overrides are the one
@@ -143,17 +145,18 @@ fn actually_disabled() -> String {
 /// `:optional` (HTML spec): `select`, `textarea`, and `input` except the
 /// types on which `required` has no effect — those match neither
 /// pseudo-class, whatever attributes they carry. The type keywords are
-/// matched case-insensitively (see [`TYPE_LC`]).
+/// matched case-insensitively (see [`type_lc`]).
 fn required_applies() -> String {
+    let type_lc = type_lc();
     format!(
         "((local-name() = 'input' and not(\
-         {TYPE_LC} = 'hidden' or \
-         {TYPE_LC} = 'range' or \
-         {TYPE_LC} = 'color' or \
-         {TYPE_LC} = 'submit' or \
-         {TYPE_LC} = 'image' or \
-         {TYPE_LC} = 'reset' or \
-         {TYPE_LC} = 'button')) or \
+         {type_lc} = 'hidden' or \
+         {type_lc} = 'range' or \
+         {type_lc} = 'color' or \
+         {type_lc} = 'submit' or \
+         {type_lc} = 'image' or \
+         {type_lc} = 'reset' or \
+         {type_lc} = 'button')) or \
          local-name() = 'select' or \
          local-name() = 'textarea')"
     )
@@ -185,10 +188,11 @@ impl Translator {
             }
             // HTML overrides
             (Kind::Html, PseudoClass::Checked) => {
+                let type_lc = type_lc();
                 xpath.add_or_condition(&format!(
                     "(@selected and local-name() = 'option') or \
                      (@checked and local-name() = 'input' \
-                     and ({TYPE_LC} = 'checkbox' or {TYPE_LC} = 'radio'))"
+                     and ({type_lc} = 'checkbox' or {type_lc} = 'radio'))"
                 ));
             }
             // :any-link is :link ∪ :visited. A static document has no

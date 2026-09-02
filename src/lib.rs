@@ -400,6 +400,89 @@ mod tests {
         );
     }
 
+    /// Selectors 4 defers attribute-value case sensitivity to the document
+    /// language, and HTML makes a fixed list of legacy attributes
+    /// (`type`, `rel`, `lang`, `checked`, ...) ASCII case-insensitive. Only
+    /// `Mode::Html` targets an HTML document, so only it folds them.
+    #[test]
+    fn html_case_insensitive_attribute_values() {
+        const LOWER_TYPE: &str = "translate(@type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+                                  'abcdefghijklmnopqrstuvwxyz')";
+        let html = Translator::new(Mode::Html);
+        let xhtml = Translator::new(Mode::Xhtml);
+
+        assert_eq!(
+            html.css_to_xpath("input[type=CHECKBOX]", "").unwrap(),
+            format!("input[{LOWER_TYPE} = 'checkbox']")
+        );
+        assert_eq!(
+            html.css_to_xpath("a[rel=Stylesheet]", "").unwrap(),
+            "a[translate(@rel, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+             'abcdefghijklmnopqrstuvwxyz') = 'stylesheet']"
+        );
+        // The attribute name is itself matched case-insensitively, so the
+        // classification survives a name written in any case.
+        assert_eq!(
+            html.css_to_xpath("[TYPE=CHECKBOX]", "").unwrap(),
+            format!("*[{LOWER_TYPE} = 'checkbox']")
+        );
+        // Every operator folds, exactly as under the `i` flag.
+        assert_eq!(
+            html.css_to_xpath("[type^=Check]", "").unwrap(),
+            format!("*[{LOWER_TYPE} and starts-with({LOWER_TYPE}, 'check')]")
+        );
+
+        // Attributes outside HTML's list keep the case-sensitive default.
+        assert_eq!(
+            html.css_to_xpath("[data-foo=Bar]", "").unwrap(),
+            "*[@data-foo = 'Bar']"
+        );
+        // As does an empty value, whose existence test stays exact.
+        assert_eq!(html.css_to_xpath("[type='']", "").unwrap(), "*[@type = '']");
+
+        // The `s` flag asks for case-sensitive matching in every mode.
+        for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+            let t = Translator::new(mode);
+            assert_eq!(
+                t.css_to_xpath("[type=CHECKBOX s]", "").unwrap(),
+                "*[@type = 'CHECKBOX']",
+                "{mode:?}"
+            );
+        }
+
+        // XHTML is XML: there these attributes are case-sensitive, and
+        // `Mode::Generic` knows nothing of HTML at all.
+        for mode in [Mode::Generic, Mode::Xhtml] {
+            let t = Translator::new(mode);
+            assert_eq!(
+                t.css_to_xpath("input[type=CHECKBOX]", "").unwrap(),
+                "input[@type = 'CHECKBOX']",
+                "{mode:?}"
+            );
+        }
+
+        // A namespaced attribute is not an HTML attribute, so it never
+        // folds — but `[|type]`, which means the same as `[type]`, does.
+        assert_eq!(
+            html.css_to_xpath("[svg|type=X]", "").unwrap(),
+            "*[@svg:type = 'X']"
+        );
+        assert_eq!(
+            html.css_to_xpath("[*|type=X]", "").unwrap(),
+            "*[@*[local-name() = 'type'] = 'X']"
+        );
+        assert_eq!(
+            html.css_to_xpath("[|type=X]", "").unwrap(),
+            format!("*[{LOWER_TYPE} = 'x']")
+        );
+
+        // The `i` flag still folds where the document language does not.
+        assert_eq!(
+            xhtml.css_to_xpath("input[type=CHECKBOX i]", "").unwrap(),
+            format!("input[{LOWER_TYPE} = 'checkbox']")
+        );
+    }
+
     /// Attribute values containing quote characters pick a delimiter that
     /// avoids escaping, falling back to per-character `concat(...)` when
     /// the value contains both.

@@ -20,6 +20,19 @@ pub fn is_safe_name(name: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
+/// XPath 1.0 has no case-folding function, so every case-insensitive
+/// comparison this crate emits is an ASCII fold through `translate()`:
+/// the alphabet is written here once and shared by the `i` attribute
+/// flag, HTML's legacy case-insensitive attributes, and the enumerated
+/// `type` keyword the HTML pseudo-classes compare against. Only A-Z is
+/// folded, matching CSS's and HTML's ASCII-only case-insensitivity.
+pub fn ascii_lower(subject: &str) -> String {
+    format!(
+        "translate({subject}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+         'abcdefghijklmnopqrstuvwxyz')"
+    )
+}
+
 /// Quote a string as an XPath literal.
 ///
 /// Note: each character is quoted individually in the `concat(...)`
