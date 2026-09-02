@@ -125,17 +125,17 @@ impl Translator {
                 .filter(|c| !matches!(c, Component::Scope))
                 .copied()
                 .collect();
-            let mut xp = self.compound_to_xpath(&compound)?;
+            let mut xp = self.compound_to_xpath(&compound, 0)?;
             xp.path = "self::".to_owned();
             xp
         } else {
-            self.compound_to_xpath(&seqs[leftmost].0)?
+            self.compound_to_xpath(&seqs[leftmost].0, 0)?
         };
         for i in (0..leftmost).rev() {
             let combinator = seqs[i]
                 .1
                 .ok_or_else(|| Error::Unsupported("an unexpected selector structure".into()))?;
-            let right = self.compound_to_xpath(&seqs[i].0)?;
+            let right = self.compound_to_xpath(&seqs[i].0, 0)?;
             xpath = self.apply_combinator(combinator, xpath, &right)?;
         }
 
@@ -147,9 +147,13 @@ impl Translator {
     /// Element-ish components (namespace, type) always precede condition
     /// components in a valid compound; conditions are applied in source
     /// order.
+    ///
+    /// `of_depth` is how many `An+B of S` argument lists this compound is
+    /// nested inside; see [`nth::MAX_NTH_OF_DEPTH`].
     fn compound_to_xpath(
         &self,
         components: &[&Component<CssToXpathImpl>],
+        of_depth: usize,
     ) -> Result<XPathExpr, Error> {
         let mut ns = NsConstraint::None;
         let mut element: Option<&str> = None;
@@ -183,7 +187,7 @@ impl Translator {
                             xpath.as_mut().expect("just set")
                         }
                     };
-                    self.apply_simple(xp, other)?;
+                    self.apply_simple(xp, other, of_depth)?;
                 }
             }
         }
@@ -266,6 +270,7 @@ impl Translator {
         &self,
         xpath: &mut XPathExpr,
         component: &Component<CssToXpathImpl>,
+        of_depth: usize,
     ) -> Result<(), Error> {
         match component {
             // :root
@@ -280,15 +285,15 @@ impl Translator {
             }
             // :first-child, :nth-child(an+b), :only-of-type, ... — Servo
             // collapses the whole family into NthSelectorData.
-            Component::Nth(data) => self.apply_nth(xpath, data, None),
+            Component::Nth(data) => self.apply_nth(xpath, data, None, of_depth),
             // :nth-child(an+b of S) / :nth-last-child(an+b of S)
             Component::NthOf(data) => {
-                self.apply_nth(xpath, data.nth_data(), Some(data.selectors()))
+                self.apply_nth(xpath, data.nth_data(), Some(data.selectors()), of_depth)
             }
             // :not(). Nesting inside other functional pseudo-classes is
             // allowed (Selectors Level 4).
             Component::Negation(list) => {
-                match self.arg_conditions(list.slice(), ":not()")? {
+                match self.arg_conditions(list.slice(), ":not()", of_depth)? {
                     Some(conditions) if !conditions.is_empty() => {
                         // not(...) supplies its own grouping, so the
                         // or-join needs no parentheses.
@@ -310,7 +315,7 @@ impl Translator {
                 };
                 // None means an argument matched everything, so the whole
                 // pseudo-class is a no-op constraint.
-                if let Some(conditions) = self.arg_conditions(list.slice(), context)?
+                if let Some(conditions) = self.arg_conditions(list.slice(), context, of_depth)?
                     && !conditions.is_empty()
                 {
                     xpath.push_condition(Condition::join_or(&conditions));
@@ -364,7 +369,7 @@ impl Translator {
                                 )));
                             }
                         };
-                        let mut sub = self.compound_to_xpath(&seqs[i].0)?;
+                        let mut sub = self.compound_to_xpath(&seqs[i].0, of_depth)?;
                         // A prefixed name stays in the node test
                         // (`.//svg:g`) so it resolves through the
                         // namespace map, except under `+` where the [1]
@@ -531,12 +536,13 @@ impl Translator {
         &self,
         selectors: &[Selector<CssToXpathImpl>],
         context: &str,
+        of_depth: usize,
     ) -> Result<Option<Vec<Condition>>, Error> {
         let mut conditions = Vec::new();
         let mut trivially_true = false;
         for selector in selectors {
             let seqs = collect_seqs(selector);
-            match self.argument_condition(&seqs, context)? {
+            match self.argument_condition(&seqs, context, of_depth)? {
                 None => trivially_true = true,
                 Some(condition) => conditions.push(condition),
             }
@@ -568,6 +574,7 @@ impl Translator {
         &self,
         seqs: &[(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)],
         context: &str,
+        of_depth: usize,
     ) -> Result<Option<Condition>, Error> {
         let mut subs: Vec<XPathExpr> = Vec::with_capacity(seqs.len());
         // `axes[i]` points back at where the left-hand side of `seqs[i]`'s
@@ -576,7 +583,7 @@ impl Translator {
         // there is one fewer axis than compound.
         let mut axes: Vec<&str> = Vec::with_capacity(seqs.len().saturating_sub(1));
         for (idx, (compound, combinator)) in seqs.iter().enumerate() {
-            let mut sub = self.compound_to_xpath(compound)?;
+            let mut sub = self.compound_to_xpath(compound, of_depth)?;
             if sub.element.contains(':') {
                 let element = std::mem::replace(&mut sub.element, "*".to_owned());
                 sub.add_condition(&format!("self::{element}"));

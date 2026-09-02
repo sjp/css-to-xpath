@@ -15,6 +15,37 @@ use super::error::Error;
 use super::xpath_expr::{Condition, XPathExpr};
 use crate::parser::CssToXpathImpl;
 
+/// The maximum `An+B of S` nesting depth accepted.
+///
+/// XPath 1.0 has no variables, so `S` must be written out twice: once to
+/// filter the siblings being counted, once to constrain the element being
+/// matched. An `of S` list nested inside another therefore appears in both
+/// copies, and the output doubles per level — a ~500-byte selector nesting
+/// 30 deep asks for tens of gigabytes. The duplication is inherent, so
+/// only a depth limit can bound it. At 8 levels the doubling costs at most
+/// a few hundred times the argument's own translation, and nothing
+/// hand-written nests `of S` at all.
+///
+/// This is far below [`crate::parser::MAX_NESTING_DEPTH`], which bounds
+/// *recursion* rather than output size and so can afford to be generous.
+pub(crate) const MAX_NTH_OF_DEPTH: usize = 8;
+
+/// The maximum size of one `of S` translation, a last line of defence
+/// behind [`MAX_NTH_OF_DEPTH`]: the doubling is bounded by the depth
+/// limit, but the argument it doubles is bounded only by the length of
+/// the selector, so cap the product too. Checked per nesting level, which
+/// caps the largest string ever built at roughly twice this.
+pub(crate) const MAX_NTH_OF_BYTES: usize = 1 << 20;
+
+/// A Level 4 `of S` argument list, carried together with how many other
+/// such lists it is nested inside — the two are only ever meaningful
+/// together, since the depth exists to bound this list's duplication.
+#[derive(Clone, Copy)]
+struct OfList<'a> {
+    selectors: &'a [Selector<CssToXpathImpl>],
+    depth: usize,
+}
+
 impl Translator {
     /// Route one `NthSelectorData` (with Servo's pre-parsed `(a, b)`) to
     /// the matching translation. `selector_list` carries the Level 4
@@ -24,9 +55,14 @@ impl Translator {
         xpath: &mut XPathExpr,
         data: &NthSelectorData,
         selector_list: Option<&[Selector<CssToXpathImpl>]>,
+        of_depth: usize,
     ) -> Result<(), Error> {
         let a = data.an_plus_b.0;
         let b = data.an_plus_b.1;
+        let of = selector_list.map(|selectors| OfList {
+            selectors,
+            depth: of_depth,
+        });
         match data.ty {
             // :only-child — sibling counts rather than
             // count(parent::*/child::*) = 1, so the root element (whose
@@ -56,7 +92,7 @@ impl Translator {
                 b,
                 /* last = */ data.ty == NthType::LastChild,
                 /* nodetest = */ "*",
-                selector_list,
+                of,
             ),
             // :first-of-type / :last-of-type / :nth-of-type() /
             // :nth-last-of-type() — none are implemented on the universal
@@ -73,7 +109,7 @@ impl Translator {
                     b,
                     /* last = */ data.ty == NthType::LastOfType,
                     &nodetest,
-                    selector_list,
+                    of,
                 )
             }
         }
@@ -91,7 +127,7 @@ impl Translator {
         b: i32,
         last: bool,
         nodetest: &str,
-        selector_list: Option<&[Selector<CssToXpathImpl>]>,
+        of: Option<OfList<'_>>,
     ) -> Result<(), Error> {
         // i64 throughout: `-(b-1)` / `abs(a)` must not overflow for
         // extreme i32 inputs.
@@ -103,13 +139,34 @@ impl Translator {
 
         // CSS Level 4: when a selector list is provided, the current
         // element must match it too. The same OR-joined condition is
-        // appended in every branch. A trivially-true list (it contains a
-        // universal argument) constrains nothing, like a plain :nth-child.
-        let current_element_check = match selector_list {
-            Some(list) => self
-                .arg_conditions(list, ":nth-child(... of S)")?
-                .filter(|conditions| !conditions.is_empty())
-                .map(|conditions| Condition::join_or(&conditions)),
+        // appended in every branch *and* rendered into the sibling
+        // predicate below, so each level of `of S` nesting doubles the
+        // output: both limits guard that doubling.
+        // A trivially-true list (it contains a universal argument)
+        // constrains nothing, like a plain :nth-child.
+        let current_element_check = match of {
+            Some(of) => {
+                if of.depth >= MAX_NTH_OF_DEPTH {
+                    return Err(Error::Unsupported(format!(
+                        "`An+B of S` selector lists nested more than \
+                         {MAX_NTH_OF_DEPTH} levels deep"
+                    )));
+                }
+                let check = self
+                    .arg_conditions(of.selectors, ":nth-child(... of S)", of.depth + 1)?
+                    .filter(|conditions| !conditions.is_empty())
+                    .map(|conditions| Condition::join_or(&conditions));
+                if check
+                    .as_ref()
+                    .is_some_and(|c| c.expr.len() > MAX_NTH_OF_BYTES)
+                {
+                    return Err(Error::Unsupported(format!(
+                        "an `An+B of S` selector list translating to more than \
+                         {MAX_NTH_OF_BYTES} bytes"
+                    )));
+                }
+                check
+            }
             None => None,
         };
 

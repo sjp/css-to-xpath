@@ -674,6 +674,76 @@ mod tests {
         );
     }
 
+    /// The size of an `of S` translation is bounded. XPath 1.0 has no
+    /// variables, so `S` is written out twice — into the sibling
+    /// predicate and into the current-element check — and a nested `of S`
+    /// lands in both copies, doubling the output per level. Only a limit
+    /// can fix that, so both the nesting depth and the size of one level
+    /// are capped.
+    #[test]
+    fn nth_child_of_nesting_is_bounded() {
+        let t = Translator::new(Mode::Generic);
+        let nest = |n: usize| format!("{}a{}", ":nth-child(2 of ".repeat(n), ")".repeat(n));
+        let too_deep = crate::Error::Unsupported(
+            "`An+B of S` selector lists nested more than 8 levels deep".to_owned(),
+        );
+
+        // Two levels, in full: `a` appears four times, not twice.
+        assert_eq!(
+            xpath(&nest(2)),
+            "*[count(preceding-sibling::*[count(preceding-sibling::*[name() = 'a']) = 1 \
+              and name() = 'a']) = 1 \
+              and count(preceding-sibling::*[name() = 'a']) = 1 and name() = 'a']"
+        );
+        // The doubling itself: each level is a little over twice the last.
+        assert_eq!(xpath(&nest(4)).len(), 765);
+        assert_eq!(xpath(&nest(8)).len(), 12_765);
+
+        // Past the limit it is an error, and a cheap one: the depth is
+        // checked before descending, so nothing exponential is built.
+        assert_eq!(t.css_to_xpath(&nest(9), "").unwrap_err(), too_deep);
+        assert_eq!(t.css_to_xpath(&nest(40), "").unwrap_err(), too_deep);
+        assert_eq!(
+            too_deep.into_message(&nest(9)),
+            format!(
+                "The CSS selector {:?} uses `An+B of S` selector lists nested more than \
+                 8 levels deep, which this translator does not support",
+                nest(9)
+            )
+        );
+
+        // Depth counts `of S` lists wherever they sit, including inside
+        // another functional pseudo-class.
+        let laundered =
+            |n: usize| format!("{}a{}", ":nth-child(2 of :is(".repeat(n), "))".repeat(n));
+        assert!(t.css_to_xpath(&laundered(8), "").is_ok());
+        assert_eq!(
+            t.css_to_xpath(&laundered(9), "").unwrap_err(),
+            crate::Error::Unsupported(
+                "`An+B of S` selector lists nested more than 8 levels deep".to_owned()
+            )
+        );
+
+        // The depth limit bounds the doubling, not what is doubled, so a
+        // large argument at full depth is capped by size as well.
+        let big = |k: usize| {
+            let args: Vec<String> = (0..k).map(|i| format!("a{i}")).collect();
+            format!(
+                "{}:is({}){}",
+                ":nth-child(2 of ".repeat(8),
+                args.join(","),
+                ")".repeat(8)
+            )
+        };
+        assert!(t.css_to_xpath(&big(200), "").is_ok());
+        assert_eq!(
+            t.css_to_xpath(&big(800), "").unwrap_err(),
+            crate::Error::Unsupported(
+                "an `An+B of S` selector list translating to more than 1048576 bytes".to_owned()
+            )
+        );
+    }
+
     /// Structural pseudos and the generic never-match set.
     #[test]
     fn structural_and_never_match_pseudos() {

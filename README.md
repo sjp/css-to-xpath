@@ -140,6 +140,13 @@ express them faithfully:
   a pathological selector into an error instead of a stack overflow.
   Nothing hand-written comes close; only the nesting depth is limited,
   not the length of a selector or of an argument chain.
+- `:nth-child(… of S)` / `:nth-last-child(… of S)` nested more than **8**
+  levels deep, or a single `of S` list translating to more than **1 MiB**.
+  XPath 1.0 has no variables, so `S` has to be written out twice — once to
+  filter the siblings being counted, once to constrain the element being
+  matched — and a nested `of S` lands in both copies, so the output
+  doubles per level. The duplication is inherent to the target language,
+  so only a limit can keep a ~500-byte selector from asking for gigabytes.
 
 ## Error handling
 
