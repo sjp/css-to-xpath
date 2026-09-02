@@ -639,18 +639,58 @@ impl Translator {
             }
         }
 
-        // Start from the leftmost compound and wrap outward, so each step
-        // nests the condition built so far inside its reversed axis.
-        let mut inner = subs.pop().expect("a selector has at least one compound");
-        for (mut sub, axis) in subs.into_iter().zip(axes).rev() {
-            let rev_test = match inner.condition() {
-                Some(condition) => format!("{axis}[{}]", condition.expr),
-                None => axis.to_owned(),
-            };
-            sub.add_condition(&rev_test);
-            inner = sub;
+        // A single compound imposes its own conditions and nothing else.
+        if subs.len() == 1 {
+            return Ok(subs.pop().expect("checked").condition());
         }
-        Ok(inner.condition())
+
+        // The nesting reads outward-in — `c0 and axis0[c1 and axis1[c2]]`
+        // — so write it in that order: each compound emits its own
+        // conditions and opens its axis bracket, and every bracket closes
+        // at the end. Wrapping the other way (nesting the condition built
+        // so far inside the next compound's brackets) would copy the whole
+        // accumulated condition once per compound, making a chain of n
+        // compounds cost O(n^2) bytes.
+        let innermost = subs.last().expect("more than one compound").condition();
+        let mut expr = String::new();
+        let mut open = 0usize;
+        for (idx, (sub, axis)) in subs[..subs.len() - 1].iter().zip(&axes).enumerate() {
+            // This compound's own conditions come first, conjoined with
+            // the existence test that follows; a lone or-group is
+            // parenthesized here because `and` binds tighter than `or`.
+            if let Some(condition) = sub.condition() {
+                if condition.or_group {
+                    expr.push('(');
+                    expr.push_str(&condition.expr);
+                    expr.push(')');
+                } else {
+                    expr.push_str(&condition.expr);
+                }
+                expr.push_str(" and ");
+            }
+            expr.push_str(axis);
+            // The bracket is only opened when something goes inside it:
+            // the innermost compound may impose no condition at all (a
+            // bare `*`), leaving the axis as a plain existence test.
+            if idx + 2 < subs.len() || innermost.is_some() {
+                expr.push('[');
+                open += 1;
+            }
+        }
+        // The innermost condition sits inside brackets, so a top-level
+        // `or` needs no parentheses of its own.
+        if let Some(condition) = &innermost {
+            expr.push_str(&condition.expr);
+        }
+        for _ in 0..open {
+            expr.push(']');
+        }
+        Ok(Some(Condition {
+            expr,
+            // Every compound but the innermost contributes an existence
+            // test conjoined at the top level, so the result is an `and`.
+            or_group: false,
+        }))
     }
 }
 

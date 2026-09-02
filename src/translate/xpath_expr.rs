@@ -4,9 +4,8 @@
 //! time, and only where XPath precedence requires it: an expression with a
 //! top-level `or` (a `Condition` with `or_group` set) is wrapped when it
 //! is conjoined with other conditions, since `and` binds tighter than
-//! `or`. The exact output (like `e[@foo = 'bar']`) and the `*/`-collapse
-//! guard in `join` are load-bearing for the crate's output contract and
-//! are pinned by tests.
+//! `or`. The exact output (like `e[@foo = 'bar']`) is load-bearing for
+//! the crate's output contract and is pinned by tests.
 
 /// Whether a name can be used directly in an XPath name test (no quoting
 /// needed).
@@ -100,18 +99,25 @@ impl XPathExpr {
     }
 
     pub fn str(&self) -> String {
-        let mut p = format!("{}{}", self.path, self.element);
+        let mut p = self.path.clone();
+        self.render_tail(&mut p);
+        p
+    }
+
+    /// Render everything the path is followed by — the node test, the
+    /// standalone predicates, and the combined condition — onto `out`.
+    fn render_tail(&self, out: &mut String) {
+        out.push_str(&self.element);
         for predicate in &self.predicates {
-            p.push('[');
-            p.push_str(predicate);
-            p.push(']');
+            out.push('[');
+            out.push_str(predicate);
+            out.push(']');
         }
         if let Some(condition) = self.condition() {
-            p.push('[');
-            p.push_str(&condition.expr);
-            p.push(']');
+            out.push('[');
+            out.push_str(&condition.expr);
+            out.push(']');
         }
-        p
     }
 
     /// The conjunction of every added condition: one passes through
@@ -208,14 +214,21 @@ impl XPathExpr {
         }
     }
 
-    /// Append `combiner` and `other` to this expression, collapsing a
-    /// leading `*/` in `other`'s path.
+    /// Append `combiner` and `other` to this expression, taking over
+    /// `other`'s node test, predicates and conditions.
     pub fn join(&mut self, combiner: &str, other: &XPathExpr) {
-        let mut p = format!("{}{}", self.str(), combiner);
-        if other.path != "*/" {
-            p.push_str(&other.path);
-        }
-        self.path = p;
+        // Grow the accumulated path in place rather than re-rendering it:
+        // rendering the whole expression per combinator would copy the
+        // path again for each one, so an n-compound chain would cost
+        // O(n^2) bytes.
+        let mut path = std::mem::take(&mut self.path);
+        self.render_tail(&mut path);
+        path.push_str(combiner);
+        // A compound's own path is always empty; only `join` and the
+        // `:scope` anchor ever set one, and neither result is passed here
+        // as `other`.
+        path.push_str(&other.path);
+        self.path = path;
         self.element = other.element.clone();
         self.conditions = other.conditions.clone();
         self.predicates = other.predicates.clone();

@@ -471,6 +471,31 @@ mod tests {
             .unwrap();
     }
 
+    /// Length is linear, not quadratic: every combinator appends to the
+    /// accumulated path instead of re-rendering it, so a chain far longer
+    /// than anything a person would write still translates promptly. The
+    /// assertions are on the output, not the clock — a regression to
+    /// re-rendering shows up as the test taking minutes.
+    #[test]
+    fn long_chains_translate() {
+        let t = Translator::new(Mode::Generic);
+        let chain = vec!["a"; 100_000].join(" > ");
+        let xpath = t.css_to_xpath(&chain, "//").unwrap();
+        assert_eq!(xpath, format!("//{}", vec!["a"; 100_000].join("/")));
+
+        // The same chain as an argument nests one existence test per
+        // compound, which the wrapping must likewise build in one pass.
+        let inner = t.css_to_xpath(&format!("b:is({chain})"), "//").unwrap();
+        assert_eq!(
+            inner,
+            format!(
+                "//b[{}self::a{}]",
+                "self::a and parent::*[".repeat(99_999),
+                "]".repeat(99_999)
+            )
+        );
+    }
+
     #[test]
     fn unsupported_errors() {
         let t = Translator::new(Mode::Generic);
