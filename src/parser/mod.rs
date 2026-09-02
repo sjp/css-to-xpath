@@ -36,19 +36,22 @@ impl SelectorImpl for CssToXpathImpl {
 /// The non-tree-structural pseudo-classes the translators know.
 /// Everything here is the "never matches" set under the generic
 /// translator; the HTML translator overrides `:checked`, `:link`,
-/// `:enabled`, `:disabled`, and `:lang()`. Any other pseudo name is
-/// rejected at parse time (tree-structural pseudos are parsed natively by
-/// Servo and never reach this type).
+/// `:enabled`, `:disabled`, the form-state family (`:read-only`,
+/// `:read-write`, `:default`, `:placeholder-shown`), and `:lang()`. Any
+/// other pseudo name is rejected at parse time (tree-structural pseudos
+/// are parsed natively by Servo and never reach this type).
 ///
 /// Policy for what belongs here versus erroring: pseudo-classes whose
 /// semantics rest on user or runtime state a static document cannot have
 /// (the user-action, link, and target families) parse and never match, as
 /// does `:dir()`, whose *resolved* directionality needs the bidi
 /// algorithm rather than the document tree (see `apply_pseudo_class`).
-/// Names that are unknown, or whose semantics a static translation could
-/// at least partially answer but this crate has not implemented (e.g. the
-/// form pseudo-classes `:read-only` or `:placeholder-shown`), error
-/// instead, so typos and genuinely missing features stay loud.
+/// Names that are unknown, or whose semantics rest on machinery outside
+/// the document tree that a static translation would have to guess at
+/// (`:valid` and the constraint-validation family, `:indeterminate`,
+/// whose checkbox state is IDL-only and whose radio-group arm XPath 1.0
+/// cannot express, `:defined`), error instead, so typos and genuinely
+/// missing features stay loud.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum PseudoClass {
     AnyLink,
@@ -67,6 +70,10 @@ pub(crate) enum PseudoClass {
     Checked,
     Required,
     Optional,
+    ReadOnly,
+    ReadWrite,
+    Default,
+    PlaceholderShown,
     /// The comma-separated language ranges of `:lang()`, each
     /// reassembled from the tokens it was spelled with (see
     /// [`is_valid_lang_range`]).
@@ -98,6 +105,10 @@ impl PseudoClass {
             PseudoClass::Checked => "checked",
             PseudoClass::Required => "required",
             PseudoClass::Optional => "optional",
+            PseudoClass::ReadOnly => "read-only",
+            PseudoClass::ReadWrite => "read-write",
+            PseudoClass::Default => "default",
+            PseudoClass::PlaceholderShown => "placeholder-shown",
             PseudoClass::Lang(_) => "lang",
             PseudoClass::Dir(_) => "dir",
         }
@@ -244,6 +255,10 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
             "checked" => PseudoClass::Checked,
             "required" => PseudoClass::Required,
             "optional" => PseudoClass::Optional,
+            "read-only" => PseudoClass::ReadOnly,
+            "read-write" => PseudoClass::ReadWrite,
+            "default" => PseudoClass::Default,
+            "placeholder-shown" => PseudoClass::PlaceholderShown,
             _ => {
                 return Err(location.new_custom_error(
                     SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),

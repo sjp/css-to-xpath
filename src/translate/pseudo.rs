@@ -152,19 +152,41 @@ fn actually_disabled() -> String {
 /// whole `translate()` fold (see [`type_lc`]) seven times.
 const REQUIRED_INERT_TYPES: &str = "|hidden|range|color|submit|image|reset|button|";
 
-/// Whether `@type` names one of [`REQUIRED_INERT_TYPES`].
+/// The `input` types the `readonly` attribute has no effect on, in the
+/// same `|`-delimited form. An unrecognised or missing `type` is the
+/// Text state, which `readonly` *does* apply to, so the inert types are
+/// the ones worth listing: no value outside this list is inert.
+const READONLY_INERT_TYPES: &str =
+    "|hidden|color|checkbox|radio|file|submit|image|reset|button|range|";
+
+/// The `input` types the `placeholder` attribute has no effect on, same
+/// form and same reasoning: `placeholder` applies to Text, Search, URL,
+/// Telephone, Email, Password and Number, and to whatever an invalid or
+/// missing `type` falls back to (Text).
+const PLACEHOLDER_INERT_TYPES: &str = concat!(
+    "|hidden|checkbox|radio|file|submit|image|reset|button|color|range|",
+    "date|month|week|time|datetime-local|"
+);
+
+/// Whether `@type` names one of the keywords in a `|`-delimited
+/// haystack, such as [`REQUIRED_INERT_TYPES`].
 ///
 /// `contains(haystack, concat('|', type, '|'))` on its own would also
 /// accept a value spelling out several keywords in a row
 /// (`type="hidden|range"`), so the pipe-free guard keeps the test exact:
 /// a value containing `|` is none of the keywords. The comparison folds
 /// case because `type` is an HTML enumerated attribute.
-fn required_is_inert() -> String {
+fn type_is_one_of(keywords: &str) -> String {
     let type_lc = type_lc();
     format!(
-        "contains('{REQUIRED_INERT_TYPES}', concat('|', {type_lc}, '|')) \
+        "contains('{keywords}', concat('|', {type_lc}, '|')) \
          and not(contains({type_lc}, '|'))"
     )
+}
+
+/// Whether `@type` names one of [`REQUIRED_INERT_TYPES`].
+fn required_is_inert() -> String {
+    type_is_one_of(REQUIRED_INERT_TYPES)
 }
 
 /// The elements the `required` attribute applies to, for `:required` and
@@ -178,6 +200,111 @@ fn required_applies() -> String {
          local-name() = 'select' or \
          local-name() = 'textarea')",
         required_is_inert()
+    )
+}
+
+/// HTML's "actually disabled" for a form control — everything in
+/// [`DISABLEABLE`] bar `optgroup` and `option`, whose own rules the
+/// fieldset one does not reach. Shared by `:disabled`/`:enabled` and by
+/// the mutability half of `:read-write`.
+fn control_actually_disabled() -> String {
+    format!("@disabled or {FIELDSET_DISABLED}")
+}
+
+/// The `contenteditable` values that *set* a state rather than inheriting
+/// one, `|`-delimited for the same `contains()` idiom [`type_is_one_of`]
+/// uses on `@type`. The leading `||` admits the empty value, which is the
+/// True state; every other value — `inherit`, a typo, anything — leaves
+/// the element inheriting its parent's state, so the walk must pass it by.
+const CONTENTEDITABLE_STATES: &str = "||true|plaintext-only|false|";
+
+/// Whether the element is editable: the nearest ancestor-or-self that
+/// sets a `contenteditable` state sets it to something other than
+/// `false`.
+///
+/// This is the third arm of `:read-write` — "elements that are editing
+/// hosts or editable" — and the whole of it for an element outside the
+/// form controls. It has the shape of the `:lang()` walk: a reverse-axis
+/// `[1]` picks the nearest element that settles the question, and a
+/// further predicate asks what it settled it to. `designMode`, the other
+/// way a document becomes editable, is not in the markup.
+fn editable() -> String {
+    let ce_lc = ascii_lower("@contenteditable");
+    format!(
+        "ancestor-or-self::*[@contenteditable and \
+         contains('{CONTENTEDITABLE_STATES}', concat('|', {ce_lc}, '|')) \
+         and not(contains(@contenteditable, '|'))][1]\
+         [not({ce_lc} = 'false')]"
+    )
+}
+
+/// `:read-write` for an `input`: `readonly` applies to its type (an
+/// invalid or missing `type` is Text, which it applies to), and the
+/// control is neither read-only nor disabled.
+fn input_mutable() -> String {
+    format!(
+        "not({}) and not(@readonly) and not({})",
+        type_is_one_of(READONLY_INERT_TYPES),
+        control_actually_disabled()
+    )
+}
+
+/// `:read-write` for a `textarea`: no type to consider, so just neither
+/// read-only nor disabled.
+fn textarea_mutable() -> String {
+    format!("not(@readonly) and not({})", control_actually_disabled())
+}
+
+/// `:read-write` — a mutable `input` or `textarea`, or an editable
+/// element. `:read-only` is Selectors 4's complement of it, so both are
+/// built from this one expression and the two partition every element.
+fn read_write(name: Option<&str>) -> Condition {
+    let editable = editable();
+    match name {
+        Some("input") => or_group(&format!("({}) or {editable}", input_mutable())),
+        Some("textarea") => or_group(&format!("({}) or {editable}", textarea_mutable())),
+        // A control is not the only editable thing: any element inside a
+        // contenteditable subtree is user-alterable, whatever its name.
+        Some(_) => plain(&editable),
+        None => or_group(&format!(
+            "(local-name() = 'input' and {}) or \
+             (local-name() = 'textarea' and {}) or \
+             {editable}",
+            input_mutable(),
+            textarea_mutable()
+        )),
+    }
+}
+
+/// A submit button, as a condition on an element of unknown name: a
+/// `button` whose `type` is neither `reset` nor `button` (the missing and
+/// invalid value default is Submit), or an `input` of type `submit` or
+/// `image`.
+fn submit_button() -> String {
+    let type_lc = type_lc();
+    format!(
+        "(local-name() = 'button' and not({type_lc} = 'reset' or {type_lc} = 'button')) or \
+         (local-name() = 'input' and ({type_lc} = 'submit' or {type_lc} = 'image'))"
+    )
+}
+
+/// The tail of `:default`'s first arm, to be read after a test that the
+/// element *is* a submit button: that it is its form's default button,
+/// the first submit button in tree order whose form owner is that form.
+///
+/// The form owner is taken to be the nearest ancestor `form`, which is
+/// what it is for every control that does not carry a `form` attribute
+/// (see the README's Approximations). XPath 1.0 has no node-identity
+/// operator, so "the form's first submit button is me" is written with
+/// the union-count idiom: `count(A | B) = 1` holds exactly when the two
+/// node-sets are the same single node. The ancestor test in front of it
+/// is not redundant — with no ancestor form the union would be `.` alone,
+/// which also counts 1.
+fn is_default_button() -> String {
+    format!(
+        "ancestor::*[local-name() = 'form'] and \
+         count(. | ancestor::*[local-name() = 'form'][1]/descendant::*[{}][1]) = 1",
+        submit_button()
     )
 }
 
@@ -247,6 +374,24 @@ impl Translator {
             }
             (Kind::Html, PseudoClass::Enabled) => {
                 xpath.push_condition(disabled_condition(name, /* want_disabled = */ false));
+            }
+            // `:read-write` and `:read-only` are the same trick over a
+            // wider set: Selectors 4 defines the latter as the
+            // complement of the former, so the two partition *every*
+            // element, controls and prose alike.
+            (Kind::Html, PseudoClass::ReadWrite) => {
+                xpath.push_condition(read_write(name));
+            }
+            (Kind::Html, PseudoClass::ReadOnly) => {
+                // `not(...)` supplies its own grouping, whatever is
+                // inside it.
+                xpath.add_condition(&format!("not({})", read_write(name).expr));
+            }
+            (Kind::Html, PseudoClass::Default) => {
+                xpath.push_condition(default_condition(name));
+            }
+            (Kind::Html, PseudoClass::PlaceholderShown) => {
+                xpath.push_condition(placeholder_shown_condition(name));
             }
             // Everything else never matches.
             _ => {
@@ -321,6 +466,56 @@ fn checked_condition(name: Option<&str>) -> Condition {
     }
 }
 
+/// `:default` — a checked checkbox/radio `input`, a selected `option`,
+/// or a form's default submit button. The first two arms are `:checked`
+/// read off the same attributes; only the third is new.
+fn default_condition(name: Option<&str>) -> Condition {
+    let type_lc = type_lc();
+    let default_button = is_default_button();
+    match name {
+        Some("option") => plain("@selected"),
+        Some("button") => plain(&format!(
+            "not({type_lc} = 'reset' or {type_lc} = 'button') and {default_button}"
+        )),
+        Some("input") => or_group(&format!(
+            "(@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
+             (({type_lc} = 'submit' or {type_lc} = 'image') and {default_button})"
+        )),
+        Some(_) => plain("0"),
+        None => or_group(&format!(
+            "(@selected and local-name() = 'option') or \
+             (@checked and local-name() = 'input' \
+             and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
+             (({}) and {default_button})",
+            submit_button()
+        )),
+    }
+}
+
+/// `:placeholder-shown` — an `input` or `textarea` with a non-empty
+/// `placeholder` the type allows, and no value. A document says only
+/// what the *initial* value is, so this is the state before any typing
+/// (see the README's Approximations).
+fn placeholder_shown_condition(name: Option<&str>) -> Condition {
+    // `input`'s value is the `value` attribute; a `textarea`'s is its
+    // text content, and a missing attribute has string-length 0 too, so
+    // one `not(string-length(...))` covers "absent or empty" in both.
+    let input = format!(
+        "string-length(@placeholder) > 0 and not({}) and not(string-length(@value))",
+        type_is_one_of(PLACEHOLDER_INERT_TYPES)
+    );
+    let textarea = "string-length(@placeholder) > 0 and not(string-length())";
+    match name {
+        Some("input") => plain(&input),
+        Some("textarea") => plain(textarea),
+        Some(_) => plain("0"),
+        None => or_group(&format!(
+            "(local-name() = 'input' and {input}) or \
+             (local-name() = 'textarea' and {textarea})"
+        )),
+    }
+}
+
 /// `:required` and `:optional`, which differ only in `attr` — the test on
 /// the `required` attribute itself — and share the element set.
 fn required_condition(name: Option<&str>, attr: &str) -> String {
@@ -359,7 +554,7 @@ fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
             "@disabled or parent::*[local-name() = 'optgroup'][@disabled]".to_owned(),
             true,
         ),
-        _ => (format!("@disabled or {FIELDSET_DISABLED}"), true),
+        _ => (control_actually_disabled(), true),
     };
     if want_disabled {
         Condition {

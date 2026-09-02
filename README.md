@@ -77,6 +77,17 @@ assert_eq!(
     can recognise.)
   - `:required`/`:optional` — the `required` attribute over `select`,
     `textarea` and the `input` types it applies to.
+  - `:read-write`/`:read-only` — HTML's mutability: an `input` of a type
+    `readonly` applies to (an invalid or missing `type` is `text`, which
+    it does), or a `textarea`, that is neither `readonly` nor disabled —
+    plus any element inside a `contenteditable` subtree, control or not.
+    `:read-only` is Selectors 4's complement of the whole expression, so
+    unlike `:disabled`/`:enabled` the two partition *every* element.
+  - `:default` — a checked checkbox or radio `input`, a selected
+    `option`, and a form's default button: the first submit button in it,
+    where a `button` with no `type` is one.
+  - `:placeholder-shown` — an `input` or `textarea` carrying a non-empty
+    `placeholder` its type allows, with no value in the markup.
   - `:lang()` — nearest `@lang` ancestor, case-folded prefix match.
 - **`Mode::Xhtml`** — the same HTML pseudo-class semantics as `Mode::Html`,
   but preserves case (XHTML is XML, so both names and those attribute
@@ -223,8 +234,13 @@ express them faithfully:
 - The Level 4 column combinator (`||`) and `:nth-col()`/`:nth-last-col()`.
 - Non-standard extensions: `[attr!=value]`, `:contains()`.
 - Pseudo-classes outside the never-match allow-list, such as `:valid`,
-  `:read-only`, and `:placeholder-shown` — these error instead of
-  silently matching nothing, so typos stay loud.
+  `:in-range` and `:indeterminate` — these error instead of silently
+  matching nothing, so typos stay loud. `:indeterminate` is among them
+  because only its `progress` arm is in the tree: a checkbox's
+  indeterminate flag is set through the DOM and never appears in markup,
+  and "no other radio with this name in this form" would need a predicate
+  to refer to the element being matched from inside a nested one, which
+  XPath 1.0 cannot do.
 - of-type pseudos (`:first-of-type`, `:nth-of-type()`, …) on any
   wildcard subject (`*`, `*|*`, `|*`, `ns|*`) or implicit-type compound:
   XPath 1.0 cannot compare a sibling's name against the matched
@@ -287,6 +303,22 @@ contract stays honest.
   with none marked — and only one radio per group can really be checked.
   Neither fact is visible to a translation that has only the document
   tree to work with.
+- **`:placeholder-shown` answers for the initial value.** A document
+  records the value a control *starts* with, so an `input` the user has
+  since typed into still counts as showing its placeholder. This is
+  `:checked` reading `@checked` one step further out: the markup is all
+  a static translation has.
+- **`:default` takes the form owner to be the nearest ancestor `form`.**
+  That is what it is for every control written inside its form, which the
+  default-button arm then finds by tree order. A control associated by a
+  `form="id"` attribute instead — to a form it is not inside, or to none —
+  is not followed, so in markup that uses `form=` the arm can name the
+  wrong button. The checked-`input` and selected-`option` arms are exact.
+- **Editability is read from `contenteditable` alone.** `:read-write`
+  resolves the nearest ancestor-or-self that *sets* a `contenteditable`
+  state (`inherit`, an invalid value, or no attribute leaves the element
+  inheriting), which is the whole story in markup. A document put into
+  `designMode` from script is editable with nothing in the tree to say so.
 - **`Mode::Html` lowercases foreign content too.** `svg|linearGradient`
   becomes `svg:lineargradient`, which is right for libxml2's HTML
   parser, since it lowercases every name it sees. An HTML5 parser

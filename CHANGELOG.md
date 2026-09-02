@@ -15,6 +15,14 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
 
 ### Added
 
+- The form-state pseudo-classes a static translation can answer, under
+  `Mode::Html` and `Mode::Xhtml`: `:read-write`/`:read-only` (HTML's
+  mutability over `input` and `textarea`, plus `contenteditable`
+  subtrees — the two partition every element), `:default` (checked
+  checkbox or radio, selected `option`, and a form's default button) and
+  `:placeholder-shown`. They previously failed to parse. `:valid`,
+  `:in-range` and `:indeterminate` still do, and all four join the
+  never-match set under `Mode::Generic`.
 - `Error` now implements `Display` and `std::error::Error`, so it composes with
   `?`, `anyhow`, `thiserror` and friends. `Display` is a one-line form that does
   not need the selector (`invalid CSS selector at byte 4: ...`).

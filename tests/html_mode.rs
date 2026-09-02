@@ -214,12 +214,17 @@ fn html_pseudo_overrides() {
         ":disabled",
         ":enabled",
         ":checked",
+        ":read-write",
+        ":read-only",
+        ":default",
+        "*|button:default",
+        ":placeholder-shown",
     ] {
         let out = x(css);
         assert!(!out.contains("name(.)"), "{css}: {out}");
         for name in [
             "button", "input", "select", "textarea", "optgroup", "option", "fieldset", "legend",
-            "a", "area",
+            "a", "area", "form",
         ] {
             for axis in ["ancestor::", "parent::", "preceding-sibling::", "self::"] {
                 assert!(!out.contains(&format!("{axis}{name}")), "{css}: {out}");
@@ -237,13 +242,122 @@ fn html_pseudo_overrides() {
         x("h|input:enabled"),
         format!("h:input[not(@disabled or {fd})]")
     );
-    // Form-state pseudo-classes with no exact static translation
-    // stay unknown in every mode, HTML included.
-    assert!(html.css_to_xpath("input:read-only", "").is_err());
-    assert!(html.css_to_xpath("input:read-write", "").is_err());
-    assert!(html.css_to_xpath("input:placeholder-shown", "").is_err());
-    assert!(html.css_to_xpath("input:default", "").is_err());
+    // :read-write is HTML's "mutable" over the input types `readonly`
+    // applies to and over textarea, plus any editable element; an
+    // invalid or missing `type` is the Text state, which it applies to,
+    // so the inert types are the ones listed. :read-only is Selectors
+    // 4's complement of the whole expression, `not()` and all, which is
+    // what makes the two partition every element.
+    let readonly_inert = format!(
+        "contains('|hidden|color|checkbox|radio|file|submit|image|reset|button|range|', \
+         concat('|', {t_lc}, '|')) and not(contains({t_lc}, '|'))"
+    );
+    let ce_lc = "translate(@contenteditable, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+                 'abcdefghijklmnopqrstuvwxyz')";
+    // The editing-host walk has the shape of the :lang() one: the
+    // nearest ancestor-or-self that *sets* a contenteditable state
+    // (`inherit`, a typo, or no attribute at all does not), and then
+    // what it set it to.
+    let editable = format!(
+        "ancestor-or-self::*[@contenteditable and \
+         contains('||true|plaintext-only|false|', concat('|', {ce_lc}, '|')) \
+         and not(contains(@contenteditable, '|'))][1][not({ce_lc} = 'false')]"
+    );
+    let input_mutable =
+        format!("not({readonly_inert}) and not(@readonly) and not(@disabled or {fd})");
+    let textarea_mutable = format!("not(@readonly) and not(@disabled or {fd})");
+    assert_eq!(
+        h("input:read-write"),
+        format!("input[({input_mutable}) or {editable}]")
+    );
+    assert_eq!(
+        h("input:read-only"),
+        format!("input[not(({input_mutable}) or {editable})]")
+    );
+    assert_eq!(
+        h("textarea:read-write"),
+        format!("textarea[({textarea_mutable}) or {editable}]")
+    );
+    // Outside the form controls only the editing-host walk is left: an
+    // element in a contenteditable subtree is user-alterable whatever
+    // its name, so no name collapses :read-write to `0`.
+    assert_eq!(h("div:read-write"), format!("div[{editable}]"));
+    assert_eq!(h("div:read-only"), format!("div[not({editable})]"));
+    assert_eq!(
+        h(":read-write"),
+        format!(
+            "*[(local-name() = 'input' and {input_mutable}) or \
+             (local-name() = 'textarea' and {textarea_mutable}) or {editable}]"
+        )
+    );
+    // :default is :checked's two attribute arms plus the form's default
+    // button — the first submit button in tree order. XPath 1.0 has no
+    // node-identity operator, so "that button is me" is the union-count
+    // idiom; the ancestor test in front of it is what keeps a submit
+    // button with no form from matching (an empty union counts 1 too).
+    let submit_button = format!(
+        "(local-name() = 'button' and not({t_lc} = 'reset' or {t_lc} = 'button')) or \
+         (local-name() = 'input' and ({t_lc} = 'submit' or {t_lc} = 'image'))"
+    );
+    let default_button = format!(
+        "ancestor::*[local-name() = 'form'] and \
+         count(. | ancestor::*[local-name() = 'form'][1]\
+         /descendant::*[{submit_button}][1]) = 1"
+    );
+    assert_eq!(h("option:default"), "option[@selected]");
+    assert_eq!(h("div:default"), "div[0]");
+    assert_eq!(
+        h("button:default"),
+        format!("button[not({t_lc} = 'reset' or {t_lc} = 'button') and {default_button}]")
+    );
+    assert_eq!(
+        h("input:default"),
+        format!(
+            "input[(@checked and ({t_lc} = 'checkbox' or {t_lc} = 'radio')) or \
+             (({t_lc} = 'submit' or {t_lc} = 'image') and {default_button})]"
+        )
+    );
+    assert_eq!(
+        h(":default"),
+        format!(
+            "*[(@selected and local-name() = 'option') or \
+             (@checked and local-name() = 'input' \
+             and ({t_lc} = 'checkbox' or {t_lc} = 'radio')) or \
+             (({submit_button}) and {default_button})]"
+        )
+    );
+    // :placeholder-shown reads the *initial* value, the only one a
+    // document has, over the types `placeholder` applies to.
+    let placeholder_inert = format!(
+        "contains('|hidden|checkbox|radio|file|submit|image|reset|button|color|range|\
+         date|month|week|time|datetime-local|', \
+         concat('|', {t_lc}, '|')) and not(contains({t_lc}, '|'))"
+    );
+    assert_eq!(
+        h("input:placeholder-shown"),
+        format!(
+            "input[string-length(@placeholder) > 0 and not({placeholder_inert}) \
+             and not(string-length(@value))]"
+        )
+    );
+    assert_eq!(
+        h("textarea:placeholder-shown"),
+        "textarea[string-length(@placeholder) > 0 and not(string-length())]"
+    );
+    assert_eq!(h("div:placeholder-shown"), "div[0]");
+    // Xhtml shares these too.
+    assert_eq!(x("input:read-write"), h("input:read-write"));
+    assert_eq!(x("input:read-only"), h("input:read-only"));
+    assert_eq!(x("button:default"), h("button:default"));
+    assert_eq!(x("input:placeholder-shown"), h("input:placeholder-shown"));
+    // Form state no static translation can answer stays unknown in
+    // every mode, HTML included: constraint validation needs numeric
+    // parsing and the validity machinery, and :indeterminate's checkbox
+    // arm is IDL-only while its radio-group arm needs a predicate to
+    // refer to the outer context node, which XPath 1.0 cannot do.
     assert!(html.css_to_xpath("input:indeterminate", "").is_err());
+    assert!(html.css_to_xpath("input:valid", "").is_err());
+    assert!(html.css_to_xpath("input:in-range", "").is_err());
 }
 
 #[test]

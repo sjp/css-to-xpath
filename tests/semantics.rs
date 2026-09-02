@@ -50,6 +50,13 @@ fn html_fixture() -> Fixture {
     Fixture::new(include_str!("fixtures/html.xml"), &[])
 }
 
+/// The form-state fixture. It carries no mixed-case attribute value and
+/// no namespace, which is exactly what `Mode::Html` and `Mode::Xhtml`
+/// differ over, so every case below is run in both modes.
+fn editable_fixture() -> Fixture {
+    Fixture::new(include_str!("fixtures/editable.xml"), &[])
+}
+
 #[test]
 fn generic_type_class_and_attribute_selectors() {
     check(
@@ -415,6 +422,92 @@ fn html_lang() {
             ("p:lang(de)", &[]),
         ],
     );
+}
+
+/// `:read-only`/`:read-write`, `:default` and `:placeholder-shown` over
+/// a document arranged around their corners.
+#[test]
+fn form_state_pseudos() {
+    let fixture = editable_fixture();
+    let cases: &[Case] = &[
+        // i1 is disabled by its fieldset and i3 is readonly; `readonly`
+        // does not apply to a checkbox (i4), so it is read-only too,
+        // while a missing (i5) or invalid (i6) type is the Text state,
+        // which it does apply to.
+        ("input:read-write", &["i2", "i5", "i6", "i11", "i12", "i13"]),
+        (
+            "input:read-only",
+            &["i1", "i3", "i4", "i7", "i8", "i9", "i10", "i14"],
+        ),
+        ("textarea:read-write", &["ta1", "ta3", "ta4"]),
+        ("textarea:read-only", &["ta2"]),
+        // Editability is not a form-control property: everything in a
+        // contenteditable subtree is read-write, and a `false` island
+        // inside one is not.
+        ("div:read-write", &["d1", "d3", "d4"]),
+        ("div:read-only", &["d2"]),
+        ("p:read-write", &["p1", "p3", "p4"]),
+        ("p:read-only", &["p2"]),
+        (
+            ":read-write",
+            &[
+                "i2", "i5", "i6", "ta1", "d1", "p1", "d3", "p3", "d4", "p4", "i11", "i12", "i13",
+                "ta3", "ta4",
+            ],
+        ),
+        // f1's default button is bt1 — a `button` with no type is a
+        // submit button, and it comes before the submit input i7. f2's
+        // is i9: bt2 and i8 are buttons but not submit ones. bt3 has no
+        // form owner, so it is no form's default button.
+        (":default", &["bt1", "i9", "i10", "o2"]),
+        ("button:default", &["bt1"]),
+        ("input:default", &["i9", "i10"]),
+        ("option:default", &["o2"]),
+        ("p:default", &[]),
+        // i12 has a value, i13's placeholder is empty, and `placeholder`
+        // does not apply to a checkbox (i14); ta4 has text content,
+        // which is a textarea's value.
+        (":placeholder-shown", &["i11", "ta3"]),
+        ("input:placeholder-shown", &["i11"]),
+        ("textarea:placeholder-shown", &["ta3"]),
+    ];
+    for mode in [Mode::Html, Mode::Xhtml] {
+        check(&fixture, mode, cases);
+    }
+}
+
+/// Selectors 4 defines `:read-only` as the complement of `:read-write`,
+/// so unlike `:disabled`/`:enabled` the two partition *every* element of
+/// a document, not a named subset of them. Checked against the documents
+/// rather than against the argument in the comments.
+#[test]
+fn read_only_and_read_write_partition_every_element() {
+    for (fixture, mode) in [
+        (editable_fixture(), Mode::Html),
+        (editable_fixture(), Mode::Xhtml),
+        (html_fixture(), Mode::Html),
+        (xhtml_fixture(), Mode::Xhtml),
+    ] {
+        let mut everything = fixture.select("*", mode);
+        everything.sort();
+        assert!(!everything.is_empty(), "the fixture selected no elements");
+
+        let read_only = fixture.select(":read-only", mode);
+        let read_write = fixture.select(":read-write", mode);
+        for id in &read_write {
+            assert!(
+                !read_only.contains(id),
+                "{id} is both :read-only and :read-write in {mode:?} mode"
+            );
+        }
+
+        let mut union = [read_only, read_write].concat();
+        union.sort();
+        assert_eq!(
+            union, everything,
+            "in {mode:?} mode, :read-only and :read-write do not cover every element"
+        );
+    }
 }
 
 /// The README claims `:disabled` and `:enabled` *partition* the element

@@ -30,6 +30,10 @@ fn structural_and_never_match_pseudos() {
         "checked",
         "required",
         "optional",
+        "read-only",
+        "read-write",
+        "default",
+        "placeholder-shown",
     ] {
         t.check(&format!("a:{pseudo}"), "a[0]");
     }

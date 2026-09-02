@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixture for the form-state pseudo-classes: :read-only/:read-write,
+  :default and :placeholder-shown.
+
+  Written in the same shape as html.xml — lowercased names, no
+  namespaces, libxml2's HTML parse tree as XML — but with no mixed-case
+  attribute values anywhere, so Mode::Html and Mode::Xhtml (which differ
+  only in name casing and in whether HTML's legacy attribute values fold)
+  must select exactly the same elements. Every case here is run in both.
+
+  The corners it is arranged around: an input whose type `readonly` does
+  not apply to, a missing and an invalid type (both the Text state, which
+  it does apply to), a control disabled rather than read-only, a
+  contenteditable subtree with a `false` island and an inheriting one
+  inside it, two forms whose default button is found differently, and a
+  submit button with no form owner at all.
+-->
+<html id="doc">
+  <body id="body">
+    <form id="f1">
+      <fieldset id="fs1" disabled="">
+        <input id="i1" type="text"/>
+      </fieldset>
+      <input id="i2" type="text"/>
+      <input id="i3" type="text" readonly=""/>
+      <input id="i4" type="checkbox"/>
+      <!-- A missing and an invalid `type` are both the Text state, so
+           `readonly` applies to them and they are mutable. -->
+      <input id="i5"/>
+      <input id="i6" type="wat"/>
+      <textarea id="ta1"></textarea>
+      <textarea id="ta2" readonly=""></textarea>
+      <!-- The first submit button in tree order is the form's default
+           button; a `button` with no type is one. -->
+      <button id="bt1">Send</button>
+      <input id="i7" type="submit"/>
+    </form>
+    <form id="f2">
+      <button id="bt2" type="button">Nope</button>
+      <input id="i8" type="reset"/>
+      <input id="i9" type="image"/>
+      <input id="i10" type="checkbox" checked=""/>
+      <select id="se1">
+        <option id="o1">A</option>
+        <option id="o2" selected="">B</option>
+      </select>
+    </form>
+    <!-- A submit button with no form owner is no form's default. -->
+    <button id="bt3">Formless</button>
+    <div id="d1" contenteditable="">
+      <p id="p1">editable by inheritance</p>
+      <div id="d2" contenteditable="false">
+        <p id="p2">not editable</p>
+      </div>
+      <!-- `inherit` is not one of the attribute's keywords, so it is an
+           invalid value, which means the inherit state either way. -->
+      <div id="d3" contenteditable="inherit">
+        <p id="p3">editable by inheritance</p>
+      </div>
+    </div>
+    <div id="d4" contenteditable="plaintext-only">
+      <p id="p4">editable</p>
+    </div>
+    <input id="i11" type="text" placeholder="Name"/>
+    <input id="i12" type="text" placeholder="Name" value="x"/>
+    <input id="i13" type="text" placeholder=""/>
+    <input id="i14" type="checkbox" placeholder="x"/>
+    <textarea id="ta3" placeholder="Bio"></textarea>
+    <textarea id="ta4" placeholder="Bio">hi</textarea>
+  </body>
+</html>

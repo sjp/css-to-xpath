@@ -32,14 +32,20 @@ fn unsupported_errors() {
     assert!(t.css_to_xpath("a\\|\\|b", "").is_ok());
     assert!(t.css_to_xpath("a /* || */ b", "").is_ok());
     // Pseudo-classes outside the never-match policy (see PseudoClass)
-    // error rather than silently matching nothing: form validity and
-    // state could be at least partially translated some day, and
-    // erroring keeps typos loud.
+    // error rather than silently matching nothing: constraint
+    // validation and `:indeterminate`'s IDL-only state rest on
+    // machinery a document does not carry, and erroring keeps typos
+    // loud.
     assert!(t.css_to_xpath("e:valid", "").is_err());
     assert!(t.css_to_xpath("e:user-invalid", "").is_err());
-    assert!(t.css_to_xpath("e:read-only", "").is_err());
-    assert!(t.css_to_xpath("e:placeholder-shown", "").is_err());
+    assert!(t.css_to_xpath("e:in-range", "").is_err());
+    assert!(t.css_to_xpath("e:indeterminate", "").is_err());
     assert!(t.css_to_xpath("e:defined", "").is_err());
+    // The form-state pseudo-classes a static translation *can* answer
+    // are in the never-match set instead, so they translate here and
+    // carry their HTML meaning under `Mode::Html`/`Mode::Xhtml`.
+    assert!(t.css_to_xpath("e:read-only", "").is_ok());
+    assert!(t.css_to_xpath("e:placeholder-shown", "").is_ok());
     // :scope is supported in the leftmost compound only, and never
     // inside functional pseudo-class arguments (the context node is
     // unreachable from an XPath 1.0 predicate).
