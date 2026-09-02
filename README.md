@@ -409,9 +409,13 @@ cargo +nightly fuzz run translate -- -max_total_time=60 -max_len=4096
 ```
 
 The target runs all three modes on a thread with the 1 MiB stack the
-nesting limit is sized for, and asserts that no input panics and that
-output length stays proportionate to input. CI runs a two-minute pass on
-every change; `cargo-mutants` runs weekly.
+nesting limit is sized for, and asserts four properties: no input
+panics, output length stays proportionate to input, every successful
+translation parses as XPath (the validity oracle above, against inputs
+nobody wrote), and translation is deterministic and prefix-independent —
+the prefixed output is the bare one with the prefix inserted at the
+start of each branch, `:scope`-anchored branches excepted. CI runs a
+two-minute pass on every change; `cargo-mutants` runs weekly.
 
 ## Minimum supported Rust version
 

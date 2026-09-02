@@ -9,6 +9,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+# The XPath-validity oracle, the same parser `tests/xpath_validity.rs`
+# runs over the corpus.
+sxd-xpath = "0.4.2"
 
 [dependencies.css-to-xpath]
 path = ".."
