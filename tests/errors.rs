@@ -1,0 +1,550 @@
+//! Every way a translation can fail, and what the resulting `Error`
+//! says: which variant, which payload, and how it renders.
+
+use css_to_xpath::{Mode, Translator};
+
+#[test]
+fn unsupported_errors() {
+    let t = Translator::new(Mode::Generic);
+    // The non-standard [a!=b] and :contains() are not supported.
+    assert!(t.css_to_xpath("e[foo!=\"bar\"]", "").is_err());
+    assert!(t.css_to_xpath("e:contains(\"foo\")", "").is_err());
+    assert!(t.css_to_xpath("e::before", "").is_err());
+    assert!(t.css_to_xpath("e:", "").is_err());
+    assert!(t.css_to_xpath("", "").is_err());
+    // A flag requires an operator and value.
+    assert!(t.css_to_xpath("[rel i]", "").is_err());
+    assert!(t.css_to_xpath("[rel=stylesheet k]", "").is_err());
+    assert!(t.css_to_xpath("[rel=stylesheet i i]", "").is_err());
+    // Unknown pseudo-classes error.
+    assert!(t.css_to_xpath("e:unknown-pseudo", "").is_err());
+    assert!(t.css_to_xpath("e:first-line", "").is_err()); // pseudo-element
+    // The Level 4 column combinator and grid-structural pseudos have
+    // no XPath 1.0 translation: column membership rests on
+    // colspan/rowspan layout arithmetic. `||` is caught before Servo
+    // misparses it as namespace syntax...
+    assert!(t.css_to_xpath("col || td", "").is_err());
+    assert!(t.css_to_xpath("col||td", "").is_err());
+    assert!(t.css_to_xpath("e:nth-col(2)", "").is_err());
+    assert!(t.css_to_xpath("e:nth-last-col(2n)", "").is_err());
+    // ...while pipes in strings, escapes, and comments stay valid.
+    assert!(t.css_to_xpath("[foo=\"a||b\"]", "").is_ok());
+    assert!(t.css_to_xpath("a\\|\\|b", "").is_ok());
+    assert!(t.css_to_xpath("a /* || */ b", "").is_ok());
+    // Pseudo-classes outside the never-match policy (see PseudoClass)
+    // error rather than silently matching nothing: form validity and
+    // state could be at least partially translated some day, and
+    // erroring keeps typos loud.
+    assert!(t.css_to_xpath("e:valid", "").is_err());
+    assert!(t.css_to_xpath("e:user-invalid", "").is_err());
+    assert!(t.css_to_xpath("e:read-only", "").is_err());
+    assert!(t.css_to_xpath("e:placeholder-shown", "").is_err());
+    assert!(t.css_to_xpath("e:defined", "").is_err());
+    // :scope is supported in the leftmost compound only, and never
+    // inside functional pseudo-class arguments (the context node is
+    // unreachable from an XPath 1.0 predicate).
+    assert!(t.css_to_xpath("a :scope", "").is_err());
+    assert!(t.css_to_xpath("a > :scope", "").is_err());
+    assert!(t.css_to_xpath(":scope :scope", "").is_err());
+    // Inside a functional pseudo-class, the context node is
+    // unreachable from an XPath 1.0 predicate: all four entry points
+    // hit the same `describe_component` message.
+    let scope_in_functional = css_to_xpath::Error::Unsupported {
+        construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
+    };
+    assert_eq!(
+        t.css_to_xpath("e:is(:scope)", "").unwrap_err(),
+        scope_in_functional
+    );
+    assert_eq!(
+        t.css_to_xpath("e:not(:scope)", "").unwrap_err(),
+        scope_in_functional
+    );
+    assert_eq!(
+        t.css_to_xpath("e:has(:scope)", "").unwrap_err(),
+        scope_in_functional
+    );
+    assert_eq!(
+        t.css_to_xpath("e:nth-child(2 of :scope)", "").unwrap_err(),
+        scope_in_functional
+    );
+    // A leading combinator is :has()-only; dangling and doubled
+    // combinators are parse errors everywhere.
+    assert!(t.css_to_xpath("e:is(> a)", "").is_err());
+    assert!(t.css_to_xpath("e:has(> > a)", "").is_err());
+    assert!(t.css_to_xpath("e:has(>)", "").is_err());
+    assert!(t.css_to_xpath("e:has(a >)", "").is_err());
+    // Nested :has() is rejected (selectors-4).
+    assert!(t.css_to_xpath("e:has(a:has(b))", "").is_err());
+    assert!(t.css_to_xpath("e:has(> a:has(b))", "").is_err());
+    // of-type pseudos are not implemented on `*` — including compounds
+    // that leave the type implicit (`.foo` is `*.foo`) or carry it
+    // only inside a pseudo-class argument. XPath 1.0 cannot compare a
+    // sibling's name with the matched element's own name, so only a
+    // type named in the compound itself gives a sibling node test.
+    assert!(t.css_to_xpath("*:first-of-type", "").is_err());
+    assert!(t.css_to_xpath("*:last-of-type", "").is_err());
+    assert!(t.css_to_xpath("*:nth-of-type(2n)", "").is_err());
+    assert!(t.css_to_xpath("*:nth-last-of-type(2)", "").is_err());
+    assert!(t.css_to_xpath("*:only-of-type", "").is_err());
+    assert!(t.css_to_xpath(".foo:first-of-type", "").is_err());
+    assert!(t.css_to_xpath("[bar]:nth-of-type(2)", "").is_err());
+    assert!(t.css_to_xpath(":is(e):first-of-type", "").is_err());
+    // Every wildcard subject is universal for this purpose: a
+    // prefixed wildcard names a namespace, not a type, so counting
+    // `ns|*` siblings would be a position among all elements in that
+    // namespace rather than among elements of the same type.
+    assert!(t.css_to_xpath("svg|*:first-of-type", "").is_err());
+    assert!(t.css_to_xpath("svg|*:last-of-type", "").is_err());
+    assert!(t.css_to_xpath("svg|*:nth-of-type(2)", "").is_err());
+    assert!(t.css_to_xpath("svg|*:nth-last-of-type(2)", "").is_err());
+    assert!(t.css_to_xpath("svg|*:only-of-type", "").is_err());
+    assert!(t.css_to_xpath("*|*:first-of-type", "").is_err());
+    assert!(t.css_to_xpath("|*:first-of-type", "").is_err());
+    // :lang()/:dir() argument validation; a lone '-' is not a valid
+    // ident.
+    assert!(t.css_to_xpath(":lang()", "").is_err());
+    assert!(t.css_to_xpath(":lang(5)", "").is_err());
+    assert!(t.css_to_xpath(":lang(-)", "").is_err());
+    // A namespace prefix that is not a valid XPath name cannot be a
+    // node test, and XPath 1.0 cannot resolve it without the
+    // namespace URI: comparing the whole `prefix:name` against
+    // `name()` would match only documents using that very prefix.
+    let unsafe_prefix = css_to_xpath::Error::Unsupported {
+        construct: "a namespace prefix that needs quoting (`1ns`)".to_owned(),
+    };
+    assert_eq!(
+        t.css_to_xpath("\\31 ns|div", "").unwrap_err(),
+        unsafe_prefix
+    );
+    assert_eq!(t.css_to_xpath("\\31 ns|*", "").unwrap_err(), unsafe_prefix);
+    assert_eq!(
+        t.css_to_xpath("\\31 ns|di\\[v", "").unwrap_err(),
+        unsafe_prefix
+    );
+    assert_eq!(
+        t.css_to_xpath("[\\31 ns|href]", "").unwrap_err(),
+        unsafe_prefix
+    );
+    assert_eq!(
+        t.css_to_xpath("[\\31 ns|href='v']", "").unwrap_err(),
+        unsafe_prefix
+    );
+    assert_eq!(
+        t.css_to_xpath("e:is(\\31 ns|div)", "").unwrap_err(),
+        unsafe_prefix
+    );
+    assert_eq!(
+        t.css_to_xpath("e:has(> \\31 ns|div)", "").unwrap_err(),
+        unsafe_prefix
+    );
+    // An+B must be whitespace-exact and integer-valued.
+    assert!(t.css_to_xpath("e:nth-child(3 7)", "").is_err());
+    assert!(t.css_to_xpath("e:nth-child(2 n)", "").is_err());
+    assert!(t.css_to_xpath("e:nth-child(2.5)", "").is_err());
+    assert!(t.css_to_xpath("e:nth-child(2e1)", "").is_err());
+}
+
+/// CSS syntax errors on malformed selectors, ported from selectr's
+/// parse-error suite. selectr pins its own hand-written parser's
+/// exact message text; css-to-xpath parses through Servo's `selectors`
+/// crate, so only the fact of an error is asserted here (message
+/// wording is pinned separately in `error_messages`).
+#[test]
+fn parse_errors() {
+    let t = Translator::new(Mode::Generic);
+    // Dangling/missing selectors around commas and combinators.
+    assert!(t.css_to_xpath("div, ", "").is_err());
+    assert!(t.css_to_xpath(" , div", "").is_err());
+    assert!(t.css_to_xpath("p, , div", "").is_err());
+    assert!(t.css_to_xpath("div > ", "").is_err());
+    assert!(t.css_to_xpath("  > div", "").is_err());
+    assert!(t.css_to_xpath(" ", "").is_err());
+    // Malformed namespace syntax.
+    assert!(t.css_to_xpath("foo|#bar", "").is_err());
+    assert!(t.css_to_xpath("e|", "").is_err());
+    assert!(t.css_to_xpath("div .|x", "").is_err());
+    // A selector cannot start with a bare '#' or ':' before a class
+    // token, nor a bare '.' before a hash/pseudo token.
+    assert!(t.css_to_xpath("#.foo", "").is_err());
+    assert!(t.css_to_xpath(".#foo", "").is_err());
+    assert!(t.css_to_xpath(":#foo", "").is_err());
+    // Malformed attribute selectors.
+    assert!(t.css_to_xpath("[*]", "").is_err());
+    assert!(t.css_to_xpath("[foo|]", "").is_err());
+    assert!(t.css_to_xpath("[#]", "").is_err());
+    assert!(t.css_to_xpath("[foo=#]", "").is_err());
+    assert!(t.css_to_xpath("[href]a", "").is_err());
+    assert!(t.css_to_xpath("[rel:stylesheet]", "").is_err());
+    // :nth-child() requires at least one argument.
+    assert!(t.css_to_xpath(":nth-child()", "").is_err());
+    // Stray/invalid characters.
+    assert!(t.css_to_xpath("attributes(href)/html/body/a", "").is_err());
+    assert!(t.css_to_xpath("attributes(href)", "").is_err());
+    assert!(t.css_to_xpath("html/body/a", "").is_err());
+    assert!(t.css_to_xpath("foo!", "").is_err());
+    assert!(t.css_to_xpath("a[rel!=nofollow]", "").is_err());
+    assert!(t.css_to_xpath("a:not(b;)", "").is_err());
+    // Mis-placed pseudo-elements: not at the end of a selector, or
+    // anywhere inside a functional pseudo-class's argument.
+    assert!(t.css_to_xpath("a:before:empty", "").is_err());
+    assert!(t.css_to_xpath("li:before a", "").is_err());
+    assert!(t.css_to_xpath(":not(:before)", "").is_err());
+    assert!(t.css_to_xpath(":not(a,)", "").is_err());
+    assert!(t.css_to_xpath(":is(:before)", "").is_err());
+    assert!(t.css_to_xpath(":matches(:before)", "").is_err());
+    assert!(t.css_to_xpath(":is(a:before b)", "").is_err());
+    assert!(t.css_to_xpath(":is(a b:before)", "").is_err());
+    // A trailing combinator inside a functional pseudo-class's
+    // argument is still a dangling combinator.
+    assert!(t.css_to_xpath(":is(a >)", "").is_err());
+    // The corresponding well-formed selectors are valid.
+    assert!(t.css_to_xpath("[rel=stylesheet]", "").is_ok());
+    assert!(t.css_to_xpath(":lang(fr)", "").is_ok());
+}
+
+/// css-syntax-3 auto-closes open blocks, functions, and strings at
+/// EOF: the parse error is flagged, not fatal, so a selector left
+/// unclosed at end-of-input translates identically to its closed
+/// form, in every translator mode.
+#[test]
+fn eof_autocloses() {
+    fn eof(unclosed: &str, closed: &str) {
+        for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+            let t = Translator::new(mode);
+            assert_eq!(
+                t.css_to_xpath(unclosed, "").unwrap(),
+                t.css_to_xpath(closed, "").unwrap(),
+                "{unclosed:?} vs {closed:?} in {mode:?}"
+            );
+        }
+    }
+
+    eof("[rel", "[rel]");
+    eof("[rel=stylesheet", "[rel=stylesheet]");
+    eof("[rel=stylesheet i", "[rel=stylesheet i]");
+    eof("[foo=\"bar", "[foo=\"bar\"]");
+    eof("[foo=\"", "[foo=\"\"]");
+    eof(":lang(fr", ":lang(fr)");
+    eof(":nth-child(2n+1", ":nth-child(2n+1)");
+    eof(":is(a", ":is(a)");
+    eof("e:is(a, b", "e:is(a, b)");
+    eof(":not(a", ":not(a)");
+    eof(":has(> a", ":has(> a)");
+    // The unclosed string is auto-closed at parse time; the
+    // pseudo-class is then rejected at translation time either way.
+    let t = Translator::new(Mode::Generic);
+    assert!(t.css_to_xpath(":contains(\"foo", "").is_err());
+}
+
+/// `Error::message`'s wording — including the caret-pointer gutter
+/// under a `Parse` error, and the plain sentence for an
+/// `Unsupported` one — is documented in `translate::error` as part
+/// of the crate's output contract. Pin it here, alongside the
+/// one-line `Display` form and the `Parse` vs `Unsupported` variant
+/// split, which selects the message shape.
+#[test]
+fn error_messages() {
+    let t = Translator::new(Mode::Generic);
+
+    // A dangling combinator: not valid CSS, so `Error::Parse`. The
+    // caret lands one past the last character, at the EOF offset.
+    let sel = "div > ";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::DanglingCombinator,
+            offset: 6
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "invalid CSS selector at byte 6: a combinator with nothing after it"
+    );
+    assert_eq!(
+        err.message(sel),
+        "Unable to parse the CSS selector \"div > \": a combinator with nothing after it\n\
+         \x20 |\n\
+         \x20 | div > \n\
+         \x20 |       ^"
+    );
+
+    // A stray '#' where an attribute value is expected: also a
+    // `Parse` error, caret under the offending character. The token
+    // is echoed as the CSS it was written as, not as Servo's
+    // `Debug` for it.
+    let sel = "[foo=#]";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::InvalidAttributeSelector("#".to_owned()),
+            offset: 5
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "invalid CSS selector at byte 5: `#` is not valid in an attribute selector"
+    );
+    assert_eq!(
+        err.message(sel),
+        "Unable to parse the CSS selector \"[foo=#]\": \
+         `#` is not valid in an attribute selector\n\
+         \x20 |\n\
+         \x20 | [foo=#]\n\
+         \x20 |      ^"
+    );
+
+    // An invalid character ('/' is not valid CSS syntax here).
+    let sel = "html/body";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::UnexpectedToken("/".to_owned()),
+            offset: 4
+        }
+    );
+    assert_eq!(
+        err.message(sel),
+        "Unable to parse the CSS selector \"html/body\": unexpected `/`\n\
+         \x20 |\n\
+         \x20 | html/body\n\
+         \x20 |     ^"
+    );
+
+    // An unknown pseudo-class, and a pseudo-element: the name is
+    // echoed, not a `Debug` rendering of the parser's own error.
+    let sel = "a:hoverr";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::UnsupportedPseudo("hoverr".to_owned()),
+            offset: 2
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "invalid CSS selector at byte 2: \
+         `hoverr` is not a supported pseudo-class or pseudo-element"
+    );
+    assert_eq!(
+        t.css_to_xpath("p::before", "").unwrap_err(),
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::UnsupportedPseudo("before".to_owned()),
+            offset: 2
+        }
+    );
+
+    // The column combinator is valid CSS syntax but has no XPath 1.0
+    // translation, so it is `Error::Unsupported` — no caret gutter,
+    // since there is no single offending byte position.
+    let sel = "col || td";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Unsupported {
+            construct: "the `||` column combinator".to_owned()
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "unsupported CSS construct: the `||` column combinator"
+    );
+    assert_eq!(
+        err.message(sel),
+        "The CSS selector \"col || td\" uses the `||` column combinator, \
+         which this translator does not support"
+    );
+
+    // `:scope` inside a functional pseudo-class argument has no
+    // reachable context node in an XPath 1.0 predicate: also
+    // `Error::Unsupported`, and the only `describe_component` branch
+    // reachable through the public API (the other branches all
+    // require parser constructs — `::slotted()`, `::part()`, `:host`,
+    // `&`, relative-selector scoping — this crate never enables).
+    let sel = "e:is(:scope)";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Unsupported {
+            construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned()
+        }
+    );
+    assert_eq!(
+        err.message(sel),
+        "The CSS selector \"e:is(:scope)\" uses the `:scope` pseudo-class \
+         inside a functional pseudo-class, which this translator does not support"
+    );
+}
+
+/// `Error` is a `std::error::Error`, so `?` converts it into the
+/// boxed and `anyhow`-style error types callers actually propagate
+/// through, with no wrapper of their own.
+#[test]
+fn error_is_std_error() {
+    fn boxed() -> Result<(), Box<dyn std::error::Error>> {
+        css_to_xpath::css_to_xpath("a", "", Mode::Generic)?;
+        css_to_xpath::css_to_xpath("div > ", "", Mode::Generic)?;
+        Ok(())
+    }
+    let e = boxed().unwrap_err();
+    assert_eq!(
+        e.to_string(),
+        "invalid CSS selector at byte 6: a combinator with nothing after it"
+    );
+    assert!(e.source().is_none());
+}
+
+/// Neither message form echoes a dependency's `Debug` output: the
+/// wording is this crate's own, so a `selectors`/`cssparser` bump
+/// that renames an internal error variant cannot change it.
+#[test]
+fn error_messages_are_not_debug_renderings() {
+    let t = Translator::new(Mode::Generic);
+    for sel in [
+        "div > ",
+        "[foo=#]",
+        "html/body",
+        "p:before",
+        ":is(a, :before)",
+        "div.-",
+        "ns|5",
+        "",
+        "a,",
+        "a:",
+        "[foo!=bar]",
+        "col || td",
+        "e:is(:scope)",
+    ] {
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        for message in [err.to_string(), err.message(sel)] {
+            for debris in [
+                "Delim(",
+                "QuotedString(",
+                "Ident(",
+                "Number(",
+                "InvalidState",
+                "DanglingCombinator",
+                "EmptySelector",
+                "BadValueInAttr",
+                "UnsupportedPseudoClassOrElement",
+            ] {
+                assert!(!message.contains(debris), "{sel:?} -> {message:?}");
+            }
+        }
+    }
+}
+
+/// The payloads echoed from the selector are bounded and safe to
+/// print, exactly as the quoted selector and the caret gutter are: a
+/// token or pseudo-class name is elided past 40 bytes, and control
+/// characters never reach the terminal raw.
+#[test]
+fn error_payloads_are_bounded() {
+    let t = Translator::new(Mode::Generic);
+    let long = "z".repeat(100);
+    assert_eq!(
+        t.css_to_xpath(&format!("a:{long}"), "").unwrap_err(),
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::UnsupportedPseudo(format!(
+                "{}\u{2026}",
+                "z".repeat(40)
+            )),
+            offset: 2
+        }
+    );
+    assert_eq!(
+        t.css_to_xpath("[foo=\u{1}]", "").unwrap_err(),
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::InvalidAttributeSelector("\u{fffd}".to_owned()),
+            offset: 5
+        }
+    );
+}
+
+/// The caret gutter's alignment and bounds. The caret is padded by
+/// display width, not by character or byte count, and the gutter
+/// echoes a window of the *line* the error is on, so a message stays
+/// legible (and printable) whatever the selector contains.
+#[test]
+fn error_message_caret_alignment() {
+    let t = Translator::new(Mode::Generic);
+    // The gutter's echo line and caret line, without the leading
+    // `  | ` on each: what has to line up, isolated from the wording.
+    let gutter = |sel: &str| {
+        let message = t.css_to_xpath(sel, "").unwrap_err().message(sel);
+        let mut lines = message
+            .split('\n')
+            .skip(2)
+            .map(|l| l["  | ".len()..].to_owned());
+        (lines.next().unwrap(), lines.next().unwrap())
+    };
+
+    // A tab is echoed as a single space: its rendered width is the
+    // terminal's business, and the caret cannot guess the tab stops.
+    assert_eq!(
+        gutter("\tdiv >"),
+        (" div >".to_owned(), "      ^".to_owned())
+    );
+
+    // Wide characters take two columns each, so the caret needs
+    // eight spaces here and not the five characters (or eleven
+    // bytes, or six UTF-16 units) that precede the error.
+    assert_eq!(
+        gutter("日本語 >"),
+        ("日本語 >".to_owned(), "        ^".to_owned())
+    );
+    // A combining mark takes none, and a non-BMP character — two
+    // UTF-16 units — still only one.
+    assert_eq!(
+        gutter("e\u{301}\u{ff21} >"),
+        ("e\u{301}\u{ff21} >".to_owned(), "     ^".to_owned())
+    );
+    assert_eq!(
+        gutter("\u{1f600} >"),
+        ("\u{1f600} >".to_owned(), "    ^".to_owned())
+    );
+
+    // Control characters are never echoed raw into a terminal.
+    assert_eq!(
+        gutter("[foo=\u{1}]"),
+        ("[foo=\u{fffd}]".to_owned(), "     ^".to_owned())
+    );
+
+    // Only the line the error is on is echoed, so the caret's column
+    // is a column of the text above it. All of `\n`, `\r`, `\r\n`
+    // and `\f` end a line.
+    for sel in ["a,\nbbbb >", "a,\rbbbb >", "a,\r\nbbbb >", "a,\u{c}bbbb >"] {
+        assert_eq!(gutter(sel), ("bbbb >".to_owned(), "      ^".to_owned()));
+    }
+
+    // A line wider than the 72-column window is cut down to it,
+    // centred on the caret, with `…` for what was dropped.
+    let (line, caret) = gutter(&format!("{}/{}", "a".repeat(100), "b".repeat(100)));
+    assert_eq!(line, format!("…{}/{}…", "a".repeat(36), "b".repeat(35)));
+    assert_eq!(caret, format!("{}^", " ".repeat(37)));
+    assert_eq!(line.chars().count(), 74); // 72 columns plus both `…`
+    // The pad counts the leading `…` too, so the caret really is
+    // under the `/` as printed.
+    assert_eq!(line.chars().nth(caret.len() - 1), Some('/'));
+
+    // Put together: a 20 KB selector still yields a message a caller
+    // can print, with the caret intact — the selector is quoted only
+    // as far as the 120-byte elision, and echoed only as far as the
+    // window.
+    let big = format!("{}div >", "a,".repeat(10_000));
+    let message = t.css_to_xpath(&big, "").unwrap_err().message(&big);
+    assert!(message.len() < 1024, "{} bytes", message.len());
+    assert!(message.starts_with(&format!(
+        "Unable to parse the CSS selector \"{}…\":",
+        &big[..120]
+    )));
+    assert!(message.ends_with(&format!(
+        "\n  | …{}div >\n  | {}^",
+        "a,".repeat(33),
+        " ".repeat(72)
+    )));
+}

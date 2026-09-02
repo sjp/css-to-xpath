@@ -1,0 +1,147 @@
+//! Element and attribute *names*: escapes, names that cannot be an
+//! XPath name test, and what a missing namespace prefix means.
+
+mod cases;
+use cases::Cases;
+use css_to_xpath::Mode;
+
+#[test]
+fn unsafe_names_and_escapes() {
+    let mut t = Cases::new(Mode::Generic);
+    // A name that cannot be an XPath name test folds into a name()
+    // comparison, pinned to the null namespace so that it means what
+    // a name that can be one means; see
+    // `unprefixed_names_mean_the_null_namespace_everywhere`.
+    t.check("di\\[v", "*[name() = 'di[v' and namespace-uri() = '']");
+    t.check("[h\\]ref]", "*[attribute::*[name() = 'h]ref']]");
+    t.check(
+        "di\u{a0}v",
+        "*[name() = 'di\u{a0}v' and namespace-uri() = '']",
+    );
+    // Unicode escapes are decoded to the characters they represent,
+    // in idents, hashes, and strings alike.
+    t.check("#\\31 23", "*[@id = '123']");
+    t.check("\\31 23", "*[name() = '123' and namespace-uri() = '']");
+    t.check("[\\31 23]", "*[attribute::*[name() = '123']]");
+    t.check("e[foo='\\31 23']", "e[@foo = '123']");
+    t.check("e[foo='x\\79 z']", "e[@foo = 'xyz']");
+    // A single hex digit is still a valid escape.
+    t.check("e[foo='\\4a']", "e[@foo = 'J']");
+    // An escaped backslash yields a literal backslash; what follows
+    // it must not be re-processed as another escape.
+    t.check("e[foo='x\\\\79 z']", "e[@foo = 'x\\79 z']");
+    t.check("e[foo='\\\\31 23']", "e[@foo = '\\31 23']");
+    t.check("#\\\\31 x", "*[@id = '\\31']//x");
+    // '*|' bypasses the safe-name fallback: quoting handles it.
+    t.check("*|di\\[v", "*[local-name() = 'di[v']");
+    t.check("[*|h\\]ref]", "*[@*[local-name() = 'h]ref']]");
+    // '|e' with a name needing quoting is the same translation: the
+    // explicit no-namespace constraint is what an unprefixed name
+    // already carries.
+    t.check("|di\\[v", "*[name() = 'di[v' and namespace-uri() = '']");
+    t.check("|é", "*[name() = 'é' and namespace-uri() = '']");
+    // A prefix with a name needing quoting keeps the prefix in the
+    // node test, so it still resolves through the caller's namespace
+    // map, and compares only the local part.
+    t.check("svg|di\\[v", "svg:*[local-name() = 'di[v']");
+    t.check("svg|\\31 g", "svg:*[local-name() = '1g']");
+    t.check("[svg|h\\]ref]", "*[@svg:*[local-name() = 'h]ref']]");
+    t.check(
+        "[svg|h\\]ref='v']",
+        "*[@svg:*[local-name() = 'h]ref'] = 'v']",
+    );
+    t.check(
+        "e:is(svg|di\\[v)",
+        "e[local-name() = 'di[v' and self::svg:*]",
+    );
+    t.check(
+        "e:has(> svg|di\\[v)",
+        "e[child::svg:*[local-name() = 'di[v']]",
+    );
+    t.check(
+        "e:has(+ svg|di\\[v)",
+        "e[following-sibling::*[1][local-name() = 'di[v' and self::svg:*]]",
+    );
+    t.check(
+        "e + svg|di\\[v",
+        "e/following-sibling::*[1][self::svg:*][local-name() = 'di[v']",
+    );
+    // Unprefixed, the name test the '+' position predicate needs is a
+    // name() comparison, so there is no self:: test to stack it after.
+    t.check(
+        "e + é",
+        "e/following-sibling::*[1][name() = 'é' and namespace-uri() = '']",
+    );
+    // The of-type nodetest keeps both halves.
+    t.check(
+        "svg|di\\[v:first-of-type",
+        "svg:*[local-name() = 'di[v' \
+         and count(preceding-sibling::svg:*[local-name() = 'di[v']) = 0]",
+    );
+    // A prefix that itself needs quoting errors; see
+    // `unsupported_errors` in `errors.rs`.
+}
+
+/// One policy for unprefixed type names wherever they appear: a name
+/// written without a prefix means the null namespace, and `*|e` is
+/// the escape hatch for "this name in any namespace". Inside a
+/// functional pseudo-class argument that means a `self::` test, never
+/// a bare `name()` comparison: `name()` returns the *qualified* name,
+/// so it also matches the name in a *default* namespace (XHTML, SVG,
+/// Atom, ...), and `:is(p)` would then select what `p` does not.
+#[test]
+fn unprefixed_names_mean_the_null_namespace_everywhere() {
+    let mut t = Cases::new(Mode::Generic);
+    // Top level, and the right-hand side of every combinator.
+    t.check("p", "p");
+    t.check("|p", "p");
+    t.check("body > p", "body/p");
+    t.check("p ~ p", "p/following-sibling::p");
+    t.check("p + p", "p/following-sibling::*[1][self::p]");
+    // The same name inside an argument, as a `self::` test.
+    t.check(":is(p)", "*[self::p]");
+    t.check(":where(p)", "*[self::p]");
+    t.check(":not(p)", "*[not(self::p)]");
+    t.check(":is(body > p)", "*[self::p and parent::*[self::body]]");
+    t.check(
+        ":is(p + p)",
+        "*[self::p and preceding-sibling::*[1][self::p]]",
+    );
+    t.check(
+        "e:nth-child(1 of p)",
+        "e[count(preceding-sibling::*[self::p]) = 0 and self::p]",
+    );
+    // :has() looks forward, so the name stays in the node test of the
+    // existence path — except under `+`, where the [1] position
+    // predicate has to count every sibling.
+    t.check(":has(p)", "*[.//p]");
+    t.check(":has(> p)", "*[child::p]");
+    t.check("e:has(+ p)", "e[following-sibling::*[1][self::p]]");
+
+    // A name needing quoting cannot be a node test at all, so it
+    // folds into a name() comparison — which compares the qualified
+    // name, and so needs the namespace pinned to mean the same as a
+    // name that can.
+    const E: &str = "name() = 'é' and namespace-uri() = ''";
+    t.check("é", format!("*[{E}]"));
+    t.check("|é", format!("*[{E}]"));
+    t.check("é ~ é", format!("*[{E}]/following-sibling::*[{E}]"));
+    t.check(":is(é)", format!("*[{E}]"));
+    t.check("e:is(é > é)", format!("e[{E} and parent::*[{E}]]"));
+    t.check("e:has(é)", format!("e[.//*[{E}]]"));
+    t.check("e:has(+ é)", format!("e[following-sibling::*[1][{E}]]"));
+    t.check(
+        "e:nth-child(1 of é)",
+        format!("e[count(preceding-sibling::*[{E}]) = 0 and {E}]"),
+    );
+
+    // `*|e` asks for the name in any namespace, and it too means the
+    // same thing wherever it is written.
+    t.check("*|p", "*[local-name() = 'p']");
+    t.check(":is(*|p)", "*[local-name() = 'p']");
+    t.check(":has(*|p)", "*[.//*[local-name() = 'p']]");
+    t.check(
+        ":is(*|body > *|p)",
+        "*[local-name() = 'p' and parent::*[local-name() = 'body']]",
+    );
+}

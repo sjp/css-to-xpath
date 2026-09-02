@@ -512,3 +512,9 @@ shelf:has(magazine, svg|rect)
 shelf:has(magazine, svg|rect):has(> book)
 shelf:has(magazine, svg|rect)[data-code^="cd"]
 book + *
+e + é
+e:has(+ p:last-child)
+e:has(~ p:first-of-type)
+a:has(> b)
+:is(a, b) > c
+DIV[FOO=Bar]

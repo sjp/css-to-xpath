@@ -1,13 +1,13 @@
 //! Every expression this crate emits must be syntactically valid XPath
 //! 1.0.
 //!
-//! The unit tests in `src/lib.rs` pin output strings, which pins the
-//! translation but says nothing about whether the string is an XPath at
-//! all: an unbalanced bracket, a bad literal or a precedence mistake
-//! would sail through. Here every selector in the shared corpus (which
-//! is those same unit-test selectors) is translated in all three modes,
-//! with and without a path prefix, and the result is handed to
-//! sxd-xpath's parser.
+//! The string-pinning suites (`selectors.rs`, `nth.rs`, `html_mode.rs`
+//! and the rest) pin output strings, which pins the translation but says
+//! nothing about whether the string is an XPath at all: an unbalanced
+//! bracket, a bad literal or a precedence mistake would sail through.
+//! Here every selector in the shared corpus (which is those same pinned
+//! selectors) is translated in all three modes, with and without a path
+//! prefix, and the result is handed to sxd-xpath's parser.
 
 mod common;
 

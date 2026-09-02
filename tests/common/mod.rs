@@ -26,8 +26,8 @@ pub fn mode_name(mode: Mode) -> &'static str {
     }
 }
 
-/// The shared selector corpus: every CSS selector literal that the unit
-/// tests in `src/lib.rs` translate, plus the README's examples.
+/// The shared selector corpus: every CSS selector literal that the
+/// string-pinning suites translate, plus the README's examples.
 ///
 /// One selector per line, stored raw — so a selector containing a line
 /// break cannot be represented here. That is the only gap, and the fuzz

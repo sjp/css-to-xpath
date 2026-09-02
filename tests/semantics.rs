@@ -2,8 +2,8 @@
 //! XPath against a fixture document, and compare the elements it selects
 //! against the ones the CSS selector should match.
 //!
-//! These are the tests the string-pinning unit suite in `src/lib.rs`
-//! cannot be: an expectation here is derived from the CSS semantics and
+//! These are the tests the string-pinning suites cannot be: an
+//! expectation here is derived from the CSS semantics and
 //! the document, not from the translator's own output, so a translation
 //! that is *consistently* wrong fails.
 

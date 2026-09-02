@@ -32,6 +32,9 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
 - Execution-based tests that run every translated expression against real
   documents with `sxd-xpath`, An+B property tests with `proptest`, a
   `cargo-fuzz` target, and a weekly `cargo-mutants` workflow.
+- The string-pinning tests moved out of `src/lib.rs` into per-family suites
+  under `tests/`, so they exercise only the public API. Each suite reports
+  every failing selector by name instead of aborting on the first mismatch.
 - Packaging metadata: `keywords`, `categories`, `documentation`, and an
   `include` list. The README is now the crate-level documentation.
 - An "Approximations" section in the README recording where the output is
