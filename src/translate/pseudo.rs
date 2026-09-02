@@ -1,9 +1,10 @@
 //! The non-tree-structural pseudo-class translations: the "never matches"
 //! set, the HTML overrides, and `:lang()`/`:dir()`.
 //!
-//! Both `html` and `xhtml` use the HTML overrides (they differ only in the
-//! lowercasing flags); the generic translator answers `0` (never matches)
-//! for everything except `:lang()`, which it maps to XPath's `lang()`
+//! Both `html` and `xhtml` use the HTML overrides (they differ in the
+//! lowercasing flags and in where `:lang()` reads an element's language
+//! from); the generic translator answers `0` (never matches) for
+//! everything except `:lang()`, which it maps to XPath's `lang()`
 //! function.
 
 use crate::parser::PseudoClass;
@@ -12,18 +13,64 @@ use super::error::Error;
 use super::xpath_expr::{XPathExpr, xpath_literal};
 use super::{Kind, Translator};
 
-/// The HTML translators' lang attribute. The generic translator's
-/// `:lang()` goes through XPath's `lang()` function instead, which reads
-/// `xml:lang` itself — except for the wildcard range, which `lang()`
-/// cannot express and which walks [`XML_LANG_ATTRIBUTE`] directly.
-const LANG_ATTRIBUTE: &str = "lang";
+/// Where a translator reads an element's language from, for `:lang()`.
+/// The two halves — which elements carry a language, and what that
+/// element's language string is — are the only things that differ
+/// between the flavours, so every `:lang()` condition is built from
+/// [`LangSource::nearest`] plus [`LangSource::string`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LangSource {
+    /// Generic: `xml:lang`, which is what XPath's own `lang()` reads.
+    /// Only the wildcard range needs it spelled out; every other range
+    /// goes through `lang()` itself. XML binds the `xml` prefix
+    /// implicitly, so it needs no entry in the caller's namespace map —
+    /// libxml2 pre-binds it; a processor that resolves prefixes purely
+    /// from a caller-supplied map (sxd-xpath, say) needs it registered.
+    XmlLang,
+    /// `html`: the `lang` content attribute alone. An HTML parser puts a
+    /// literal `xml:lang` in no namespace on HTML elements, and HTML's
+    /// language determination ignores it, so `@lang` is the whole story.
+    Lang,
+    /// `xhtml`: either attribute, since XHTML documents conventionally
+    /// carry `xml:lang` (often alongside `lang`). HTML's language
+    /// determination takes the nearest ancestor-or-self with either one
+    /// and prefers `xml:lang` when both sit on that element.
+    Both,
+}
 
-/// The generic translator's language attribute, used only by the `:lang(*)`
-/// walk. XML binds the `xml` prefix implicitly, so it needs no entry in
-/// the caller's namespace map — libxml2 pre-binds it; a processor that
-/// resolves prefixes purely from a caller-supplied map (sxd-xpath, say)
-/// needs it registered.
-const XML_LANG_ATTRIBUTE: &str = "xml:lang";
+impl LangSource {
+    /// The nearest ancestor-or-self carrying a language attribute (`[1]`
+    /// counts backwards along a reverse axis). An element with the
+    /// attribute but an empty value still stops the walk: an empty value
+    /// resets the language to unknown rather than deferring to a further
+    /// ancestor.
+    fn nearest(self) -> &'static str {
+        match self {
+            LangSource::XmlLang => "ancestor-or-self::*[@xml:lang][1]",
+            LangSource::Lang => "ancestor-or-self::*[@lang][1]",
+            LangSource::Both => "ancestor-or-self::*[@xml:lang or @lang][1]",
+        }
+    }
+
+    /// That element's language string, as an expression evaluated with
+    /// the element as the context node.
+    ///
+    /// For [`LangSource::Both`], `xml:lang` wins whenever it is present.
+    /// XPath 1.0 has no conditional, so the `lang` half is truncated to
+    /// zero length (`string-length(@lang) * not(@xml:lang)` multiplies
+    /// the length by 0 when `xml:lang` is there) and `concat` contributes
+    /// `""` for a missing attribute — leaving exactly one of the two.
+    fn string(self) -> &'static str {
+        match self {
+            LangSource::XmlLang => "@xml:lang",
+            LangSource::Lang => "@lang",
+            LangSource::Both => {
+                "concat(@xml:lang, \
+                 substring(@lang, 1, string-length(@lang) * not(@xml:lang)))"
+            }
+        }
+    }
+}
 
 /// The HTML `type` attribute, ASCII-lowercased so comparisons against
 /// enumerated-attribute keywords are case-insensitive: `type` is an
@@ -170,13 +217,13 @@ impl Translator {
     /// Generic `:lang()`: XPath's `lang()` does language-range prefix
     /// matching natively, so `en` and `en-*` both become `lang('en')`-style
     /// tests. A bare `*` matches elements whose language is *known*, which
-    /// `lang()` cannot express, so it walks `xml:lang` instead.
+    /// `lang()` cannot express, so it walks the language source instead.
     fn lang_generic(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_wildcard_position(value)?;
             if value == "*" {
-                conditions.push(lang_known_condition(XML_LANG_ATTRIBUTE));
+                conditions.push(lang_known_condition(self.lang_source));
             } else if let Some(prefix) = value.strip_suffix("-*") {
                 // The trailing '-' goes with the wildcard: lang('en-')
                 // would never match, since libxml2 expects the argument
@@ -190,27 +237,24 @@ impl Translator {
         Ok(())
     }
 
-    /// HTML `:lang()`: the nearest `lang`-attributed ancestor-or-self is
-    /// tested with a lowercased, dash-terminated prefix match.
+    /// HTML `:lang()`: the language of the nearest ancestor-or-self that
+    /// has one (see [`LangSource`]) is tested with a lowercased,
+    /// dash-terminated prefix match.
     fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_wildcard_position(value)?;
             if value == "*" {
-                conditions.push(lang_known_condition(LANG_ATTRIBUTE));
-            } else if let Some(prefix) = value.strip_suffix("-*") {
+                conditions.push(lang_known_condition(self.lang_source));
+            } else {
                 // A trailing wildcard ("en-*") matches the same prefix as
                 // the range without it ("en"): both stop at a subtag
                 // boundary.
-                conditions.push(lang_ancestor_condition(&format!(
-                    "{}-",
-                    prefix.to_lowercase()
-                )));
-            } else {
-                conditions.push(lang_ancestor_condition(&format!(
-                    "{}-",
-                    value.to_lowercase()
-                )));
+                let range = value.strip_suffix("-*").unwrap_or(value);
+                conditions.push(lang_ancestor_condition(
+                    self.lang_source,
+                    &format!("{}-", range.to_lowercase()),
+                ));
             }
         }
         add_lang_conditions(xpath, conditions);
@@ -248,20 +292,29 @@ fn add_lang_conditions(xpath: &mut XPathExpr, conditions: Vec<String>) {
 }
 
 /// The wildcard range `*`, which matches an element whose language is
-/// known. The language comes from the nearest ancestor-or-self carrying
-/// `attribute` (`[1]` counts backwards along a reverse axis), and an empty
-/// value there resets the language to unknown rather than deferring to a
-/// further ancestor — so the nearest one must also be non-empty.
-fn lang_known_condition(attribute: &str) -> String {
-    format!("ancestor-or-self::*[@{attribute}][1][string-length(@{attribute}) > 0]")
+/// known. The language comes from the nearest ancestor-or-self carrying a
+/// language attribute, and an empty value there resets the language to
+/// unknown rather than deferring to a further ancestor — so the nearest
+/// one must also be non-empty.
+fn lang_known_condition(source: LangSource) -> String {
+    format!(
+        "{}[string-length({}) > 0]",
+        source.nearest(),
+        source.string()
+    )
 }
 
-/// The HTML nearest-ancestor language test.
-fn lang_ancestor_condition(search_prefix: &str) -> String {
+/// The nearest-ancestor language test: the language string is ASCII-folded
+/// and dash-terminated so `en-` prefix-matches `en` and `en-NZ` but not
+/// `english`, and `search_prefix` arrives already lowercased and
+/// dash-terminated.
+fn lang_ancestor_condition(source: LangSource, search_prefix: &str) -> String {
     format!(
-        "ancestor-or-self::*[@{LANG_ATTRIBUTE}][1][starts-with(concat(\
-         translate(@{LANG_ATTRIBUTE}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+        "{}[starts-with(concat(\
+         translate({}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
          'abcdefghijklmnopqrstuvwxyz'), '-'), {})]",
+        source.nearest(),
+        source.string(),
         xpath_literal(search_prefix)
     )
 }

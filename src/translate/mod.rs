@@ -12,20 +12,22 @@ use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCa
 use selectors::parser::{Combinator, Component, Selector};
 
 use crate::parser::{self, CssToXpathImpl};
+use pseudo::LangSource;
 use xpath_expr::{Condition, XPathExpr, is_safe_name};
 
 /// Which translator family the pseudo-class overrides come from: generic
-/// or HTML (both `html` and `xhtml` use the HTML overrides; only `html`
-/// lowercases names).
+/// or HTML (both `html` and `xhtml` use the HTML overrides; they differ
+/// in name casing and in the `:lang()` language source).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     Generic,
     Html,
 }
 
-/// The translator flavour: which pseudo-class overrides and name-casing
-/// rules to apply. `Html` and `Xhtml` share the HTML overrides; only
-/// `Html` lowercases element and attribute names.
+/// The translator flavour: which pseudo-class overrides, name-casing
+/// rules, and `:lang()` language source to apply. `Html` and `Xhtml`
+/// share the HTML overrides; only `Html` lowercases element and attribute
+/// names, and only `Xhtml` reads `xml:lang`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Generic,
@@ -33,13 +35,15 @@ pub enum Mode {
     Xhtml,
 }
 
-/// One struct with a kind tag and lowercasing flags. Casing is applied
-/// here in the translator, never via Servo's parser settings, so the
-/// translator families differ only in these fields.
+/// One struct with a kind tag, lowercasing flags, and the `:lang()`
+/// language source. Casing is applied here in the translator, never via
+/// Servo's parser settings, so the translator families differ only in
+/// these fields.
 pub struct Translator {
     pub(crate) kind: Kind,
     pub(crate) lower_case_element_names: bool,
     pub(crate) lower_case_attribute_names: bool,
+    pub(crate) lang_source: LangSource,
 }
 
 /// The namespace constraint on a type or attribute selector: none
@@ -63,16 +67,19 @@ impl Translator {
                 kind: Kind::Generic,
                 lower_case_element_names: false,
                 lower_case_attribute_names: false,
+                lang_source: LangSource::XmlLang,
             },
             Mode::Html => Translator {
                 kind: Kind::Html,
                 lower_case_element_names: true,
                 lower_case_attribute_names: true,
+                lang_source: LangSource::Lang,
             },
             Mode::Xhtml => Translator {
                 kind: Kind::Html,
                 lower_case_element_names: false,
                 lower_case_attribute_names: false,
+                lang_source: LangSource::Both,
             },
         }
     }

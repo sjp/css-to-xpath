@@ -1202,6 +1202,15 @@ mod tests {
 
     #[test]
     fn lang_and_dir() {
+        /// Strip the outer `E[`…`]` predicate off a single-condition
+        /// translation, to rebuild the expected OR of a comma list.
+        fn inner(xpath: &str) -> &str {
+            xpath
+                .strip_prefix("E[")
+                .and_then(|s| s.strip_suffix(']'))
+                .unwrap()
+        }
+
         // Generic: XPath's lang() does prefix matching natively.
         assert_eq!(xpath("e:lang(en)"), "e[lang('en')]");
         assert_eq!(xpath("e:lang(\"en\")"), "e[lang('en')]");
@@ -1276,11 +1285,62 @@ mod tests {
             html.css_to_xpath("e:lang(en, fr)", "").unwrap(),
             "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')] or ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'fr-')]]"
         );
-        // xhtml shares the HTML overrides.
+        // xhtml shares the HTML overrides but reads either language
+        // attribute: XHTML documents conventionally carry xml:lang, often
+        // alongside lang, and HTML's language determination prefers
+        // xml:lang when both sit on the same element. XPath 1.0 has no
+        // conditional, so the lang half is truncated to zero length
+        // whenever xml:lang is present.
         let xhtml = Translator::new(Mode::Xhtml);
         assert_eq!(
             xhtml.css_to_xpath("E:lang(*)", "").unwrap(),
-            "E[ancestor-or-self::*[@lang][1][string-length(@lang) > 0]]"
+            "E[ancestor-or-self::*[@xml:lang or @lang][1]\
+             [string-length(concat(@xml:lang, \
+             substring(@lang, 1, string-length(@lang) * not(@xml:lang)))) > 0]]"
+        );
+        assert_eq!(
+            xhtml.css_to_xpath("E:lang(EN)", "").unwrap(),
+            "E[ancestor-or-self::*[@xml:lang or @lang][1]\
+             [starts-with(concat(translate(concat(@xml:lang, \
+             substring(@lang, 1, string-length(@lang) * not(@xml:lang))), \
+             'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), \
+             '-'), 'en-')]]"
+        );
+        // The rest of the range handling is shared with Mode::Html: a
+        // trailing wildcard matches the same prefix as the bare range, a
+        // hyphenated range keeps its full spelling, and a comma list ORs.
+        assert_eq!(
+            xhtml.css_to_xpath("E:lang(en-*)", "").unwrap(),
+            xhtml.css_to_xpath("E:lang(en)", "").unwrap()
+        );
+        assert!(
+            xhtml
+                .css_to_xpath("E:lang(en-nz)", "")
+                .unwrap()
+                .ends_with("'-'), 'en-nz-')]]")
+        );
+        assert_eq!(
+            xhtml.css_to_xpath("E:lang(en, fr)", "").unwrap(),
+            format!(
+                "E[{} or {}]",
+                inner(&xhtml.css_to_xpath("E:lang(en)", "").unwrap()),
+                inner(&xhtml.css_to_xpath("E:lang(fr)", "").unwrap()),
+            )
+        );
+        // Mode::Html stays lang-only: an HTML parser puts a literal
+        // `xml:lang` in no namespace, which HTML ignores when determining
+        // an element's language.
+        assert!(
+            !html
+                .css_to_xpath("e:lang(en)", "")
+                .unwrap()
+                .contains("xml:lang")
+        );
+        assert!(
+            !html
+                .css_to_xpath("e:lang(*)", "")
+                .unwrap()
+                .contains("xml:lang")
         );
         // Interior wildcards (RFC 4647 extended filtering) are valid CSS
         // but inexpressible in XPath 1.0, so both spellings error rather

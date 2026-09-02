@@ -64,7 +64,9 @@ assert_eq!(
   "actually disabled" carve-out), `:required`/`:optional`, and
   `:lang()` (nearest `@lang` ancestor, case-folded prefix match).
 - **`Mode::Xhtml`** — the same HTML pseudo-class semantics as `Mode::Html`,
-  but preserves case (XHTML is XML, so names are case-sensitive).
+  but preserves case (XHTML is XML, so names are case-sensitive) and
+  reads `xml:lang` as well as `lang` for `:lang()`, preferring `xml:lang`
+  when both are on the nearest ancestor (HTML's language determination).
 
 Pseudo-classes with no static equivalent (`:hover`, `:visited`,
 `:focus`, …) always translate to an unmatchable `[0]` rather than
@@ -116,9 +118,10 @@ assert_eq!(
 - `:scope`, `:root`, `:empty`, `:lang()`. Under `Mode::Generic` a range
   translates to XPath's `lang()`, except the wildcard `:lang(*)` —
   "any known language", which `lang()` cannot express — which walks
-  `@xml:lang` instead. That relies on the `xml` prefix, which XML binds
-  implicitly and so needs no entry in the caller's namespace map;
-  processors that do not pre-bind it need it registered.
+  `@xml:lang` instead. `Mode::Xhtml` reads `@xml:lang` for every range.
+  Both rely on the `xml` prefix, which XML binds implicitly and so needs
+  no entry in the caller's namespace map; processors that do not pre-bind
+  it need it registered.
 - The `Mode::Html`/`Mode::Xhtml` form and link pseudo-classes listed above.
 
 ## Not supported
