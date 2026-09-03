@@ -481,6 +481,66 @@ struct Scan {
     /// reporting `&` as an empty selector or a dangling combinator.
     /// Catching it here names the construct the caller actually wrote.
     nesting_selector: Option<usize>,
+    /// The byte offset of the first `:scope` this crate cannot
+    /// translate, and which of the two ways it is out of place. Both
+    /// are lexical facts — `:scope` is unsupported inside any
+    /// functional pseudo-class argument, and at the top level anywhere
+    /// but the leftmost compound of its group — so the walk can decide
+    /// them from the parenthesis depth and whether a combinator has
+    /// been passed, and hand the translator's own check a position it
+    /// has no way to recover. See [`ScopeSite`].
+    misplaced_scope: Option<(usize, ScopeSite)>,
+    /// The byte offset of the first `:host(`, if the selector uses one.
+    /// Shadow-DOM host selection has no XPath 1.0 translation at all,
+    /// so — like `||` — the mere presence of the construct is the
+    /// error, wherever it sits. Only the functional form is looked for:
+    /// a bare `:host` is not a pseudo-class this crate's parser accepts,
+    /// so it fails to parse and never reaches translation.
+    host: Option<usize>,
+}
+
+/// Which of the two positions a [`Scan::misplaced_scope`] was found in,
+/// since they are reported as different constructs.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ScopeSite {
+    /// Inside a functional pseudo-class argument, where an XPath 1.0
+    /// predicate cannot name the context node at all.
+    Functional,
+    /// At the top level, but not in the leftmost compound of its group
+    /// — the one place `:scope` translates, by anchoring the whole
+    /// expression on the `self::` axis instead of the caller's prefix.
+    NotLeftmost,
+}
+
+impl ScopeSite {
+    /// The construct phrase for this site, as the object of "uses …".
+    /// Worded exactly as the translator's own check words it, so the
+    /// two cannot diverge: only the position is new.
+    fn construct(self) -> &'static str {
+        match self {
+            ScopeSite::Functional => "the `:scope` pseudo-class inside a functional pseudo-class",
+            ScopeSite::NotLeftmost => "the `:scope` pseudo-class outside the leftmost compound",
+        }
+    }
+}
+
+/// How far into its selector-list group the walk has got, which is all
+/// that is needed to place a top-level `:scope`: it is supported in the
+/// leftmost compound of a group and nowhere else, so the question is
+/// only whether a combinator has been passed since the last top-level
+/// comma.
+#[derive(Default)]
+struct GroupPosition {
+    /// Whether anything that is part of a compound has been seen in
+    /// this group yet, so that leading whitespace is not a combinator.
+    content_seen: bool,
+    /// Whether whitespace has been seen after some content: a
+    /// descendant combinator if any content follows it, and nothing at
+    /// all if the group ends there.
+    space_pending: bool,
+    /// Whether a combinator — descendant, `>`, `+` or `~` — has been
+    /// passed, i.e. whether the leftmost compound is behind the walk.
+    combinator_seen: bool,
 }
 
 /// The string handling here diverges from the CSS tokenizer on one point:
@@ -501,10 +561,14 @@ fn scan(css: &str) -> Scan {
     let mut i = 0;
     let mut quote: Option<u8> = None;
     let mut depth: usize = 0;
+    let mut brackets: usize = 0;
+    let mut group = GroupPosition::default();
     let mut scan = Scan {
         column_combinator: None,
         too_deep: None,
         nesting_selector: None,
+        misplaced_scope: None,
+        host: None,
     };
     while i < bytes.len() {
         let b = bytes[i];
@@ -516,34 +580,88 @@ fn scan(css: &str) -> Scan {
                     quote = None;
                 }
             }
-            None => match b {
-                b'\\' => i += 1, // skip the escaped character
-                b'"' | b'\'' => quote = Some(b),
-                b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                    // Skip the comment body and its closing "*/".
-                    i += 2;
-                    while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+            None => {
+                // Where the walk is within its selector-list group,
+                // which only the top level has: inside a functional
+                // argument (`depth > 0`) a `:scope` is unsupported
+                // wherever it sits, and inside `[...]` nothing is a
+                // combinator — `[a~=b]`'s tilde least of all.
+                if depth == 0 && brackets == 0 {
+                    match b {
+                        b',' => group = GroupPosition::default(),
+                        b'>' | b'+' | b'~' => {
+                            group.combinator_seen = true;
+                            group.content_seen = true;
+                            group.space_pending = false;
+                        }
+                        b' ' | b'\t' | b'\n' | b'\r' | b'\x0C' => {
+                            group.space_pending |= group.content_seen;
+                        }
+                        // A comment is neither content nor whitespace:
+                        // it is removed before the selector grammar
+                        // sees it, so `a/**/b` is one compound.
+                        b'/' if bytes.get(i + 1) == Some(&b'*') => {}
+                        _ => {
+                            group.combinator_seen |= group.space_pending;
+                            group.space_pending = false;
+                            group.content_seen = true;
+                        }
+                    }
+                }
+                match b {
+                    b'\\' => i += 1, // skip the escaped character
+                    b'"' | b'\'' => quote = Some(b),
+                    b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                        // Skip the comment body and its closing "*/".
+                        i += 2;
+                        while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                            i += 1;
+                        }
                         i += 1;
                     }
-                    i += 1;
-                }
-                b'|' if bytes.get(i + 1) == Some(&b'|') => {
-                    scan.column_combinator.get_or_insert(i);
-                }
-                b'(' => {
-                    depth += 1;
-                    if depth > MAX_NESTING_DEPTH {
-                        scan.too_deep.get_or_insert(i);
+                    b'|' if bytes.get(i + 1) == Some(&b'|') => {
+                        scan.column_combinator.get_or_insert(i);
                     }
+                    b'(' => {
+                        depth += 1;
+                        if depth > MAX_NESTING_DEPTH {
+                            scan.too_deep.get_or_insert(i);
+                        }
+                    }
+                    // Unbalanced closers are Servo's to reject, not this
+                    // walk's: just never go below zero.
+                    b')' => depth = depth.saturating_sub(1),
+                    b'[' => brackets += 1,
+                    b']' => brackets = brackets.saturating_sub(1),
+                    b'&' => {
+                        scan.nesting_selector.get_or_insert(i);
+                    }
+                    // A literal `:scope` / `:host(` here is the
+                    // pseudo-class and nothing else — an escaped colon and
+                    // a quoted or commented-out one are all skipped above,
+                    // and any other ident starting with those letters
+                    // (`:scoped`, `::scope`) is a pseudo-class this crate's
+                    // parser rejects. Both findings are only ever consulted
+                    // after the parse has succeeded, which is what makes
+                    // that last part sound.
+                    b':' if bytes[i..].starts_with(b":scope") && brackets == 0 => {
+                        let site = if depth > 0 {
+                            Some(ScopeSite::Functional)
+                        } else if group.combinator_seen {
+                            Some(ScopeSite::NotLeftmost)
+                        } else {
+                            None // the leftmost compound, where it is supported
+                        };
+                        if let Some(site) = site {
+                            scan.misplaced_scope.get_or_insert((i, site));
+                        }
+                    }
+                    b':' if bytes[i..].starts_with(b":host(") => {
+                        scan.host.get_or_insert(i);
+                    }
+                    _ => {}
                 }
-                // Unbalanced closers are Servo's to reject, not this
-                // walk's: just never go below zero.
-                b')' => depth = depth.saturating_sub(1),
-                b'&' => {
-                    scan.nesting_selector.get_or_insert(i);
-                }
-                _ => {}
-            },
+            }
         }
         i += 1;
     }
@@ -583,6 +701,29 @@ pub(crate) fn parse(
     if let Some(offset) = scan.nesting_selector {
         return Err(Error::unsupported_at("the `&` nesting selector", offset));
     }
+    let list = parse_lists(css, default_namespace)?;
+    // The remaining findings are constructs Servo parses happily and
+    // the translator then rejects, so they are consulted only once the
+    // parse has succeeded: a selector that is *also* invalid CSS keeps
+    // the parse error it has always reported, and the walk never has to
+    // be right about text that never parsed. What the walk adds is the
+    // position, which the translator — handed components with no source
+    // offsets — cannot recover for itself.
+    if let Some((offset, site)) = scan.misplaced_scope {
+        return Err(Error::unsupported_at(site.construct(), offset));
+    }
+    if let Some(offset) = scan.host {
+        return Err(Error::unsupported_at("the `:host` pseudo-class", offset));
+    }
+    Ok(list)
+}
+
+/// The strict parse, and the forgiving retry that only an empty `:is()`
+/// / `:where()` argument list earns.
+fn parse_lists(
+    css: &str,
+    default_namespace: Option<&str>,
+) -> Result<SelectorList<CssToXpathImpl>, Error> {
     let strict = match parse_list(css, false, default_namespace) {
         Ok(list) => return Ok(list),
         Err(e) => e,

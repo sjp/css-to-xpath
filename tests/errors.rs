@@ -70,29 +70,54 @@ fn unsupported_errors() {
     assert!(t.css_to_xpath("a :scope", "").is_err());
     assert!(t.css_to_xpath("a > :scope", "").is_err());
     assert!(t.css_to_xpath(":scope :scope", "").is_err());
+    // The scan that places those decides "leftmost compound" from the
+    // source text, so the things that only look like combinators must
+    // not fool it: a tilde or a space inside `[...]`, a comment
+    // between two halves of one compound, and an escaped space, none
+    // of which end a compound — nor a preceding group, which a `,`
+    // starts afresh.
+    assert!(t.css_to_xpath("[foo~=bar]:scope", "").is_ok());
+    assert!(t.css_to_xpath("[foo = bar]:scope", "").is_ok());
+    assert!(t.css_to_xpath("a/* > */:scope", "").is_ok());
+    assert!(t.css_to_xpath("a\\ b:scope", "").is_ok());
+    assert!(t.css_to_xpath("a b, :scope", "").is_ok());
+    assert!(t.css_to_xpath("[foo=\" :scope\"]", "").is_ok());
+    assert!(t.css_to_xpath("a /* :scope */ b", "").is_ok());
     // Inside a functional pseudo-class, the context node is
     // unreachable from an XPath 1.0 predicate: all four entry points
-    // hit the same `describe_component` message.
-    let scope_in_functional = css_to_xpath::Error::Unsupported {
+    // report the same construct, each pointing at its own `:scope`.
+    let scope_in_functional = |offset| css_to_xpath::Error::Unsupported {
         construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
-        offset: None,
+        offset: Some(offset),
     };
     assert_eq!(
         t.css_to_xpath("e:is(:scope)", "").unwrap_err(),
-        scope_in_functional
+        scope_in_functional(5)
     );
     assert_eq!(
         t.css_to_xpath("e:not(:scope)", "").unwrap_err(),
-        scope_in_functional
+        scope_in_functional(6)
     );
     assert_eq!(
         t.css_to_xpath("e:has(:scope)", "").unwrap_err(),
-        scope_in_functional
+        scope_in_functional(6)
     );
     assert_eq!(
         t.css_to_xpath("e:nth-child(2 of :scope)", "").unwrap_err(),
-        scope_in_functional
+        scope_in_functional(17)
     );
+    // The `:host` pseudo-class is the other construct the scan places
+    // for the translator. Only its functional form gets this far: a
+    // bare `:host` is not a pseudo-class this crate's parser accepts,
+    // so it fails to parse instead.
+    assert_eq!(
+        t.css_to_xpath("e:is(:host(a))", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "the `:host` pseudo-class".to_owned(),
+            offset: Some(5),
+        }
+    );
+    assert!(t.css_to_xpath(":host", "").is_err());
     // A leading combinator is :has()-only; dangling and doubled
     // combinators are parse errors everywhere.
     assert!(t.css_to_xpath("e:is(> a)", "").is_err());
@@ -461,26 +486,82 @@ fn error_messages() {
     );
 
     // `:scope` inside a functional pseudo-class argument has no
-    // reachable context node in an XPath 1.0 predicate: also
-    // `Error::Unsupported`, but found during translation, where the
-    // parsed components carry no source offsets — so no position and no
-    // caret. It is the only `describe_component` branch
-    // reachable through the public API (the other branches all
-    // require parser constructs — `::slotted()`, `::part()`, `:host`,
-    // `&`, relative-selector scoping — this crate never enables).
+    // reachable context node in an XPath 1.0 predicate. Where it is
+    // supported is a lexical fact — the leftmost compound of a group,
+    // and nowhere deeper than the top level — so the scan decides it
+    // too, and the error carries the position the translator, handed
+    // offset-free components, could not have supplied.
     let sel = "e:is(:scope)";
     let err = t.css_to_xpath(sel, "").unwrap_err();
     assert_eq!(
         err,
         css_to_xpath::Error::Unsupported {
             construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
+            offset: Some(5),
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "unsupported CSS construct at byte 5: \
+         the `:scope` pseudo-class inside a functional pseudo-class"
+    );
+    assert_eq!(
+        err.message(sel),
+        "The CSS selector \"e:is(:scope)\" uses the `:scope` pseudo-class \
+         inside a functional pseudo-class, which this translator does not support\n\
+         \x20 |\n\
+         \x20 | e:is(:scope)\n\
+         \x20 |      ^"
+    );
+
+    // The other misplacement is its own construct, and the caret
+    // distinguishes the two `:scope`s a message otherwise could not.
+    let sel = ":scope > a :scope";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Unsupported {
+            construct: "the `:scope` pseudo-class outside the leftmost compound".to_owned(),
+            offset: Some(11),
+        }
+    );
+    assert_eq!(
+        err.message(sel),
+        "The CSS selector \":scope > a :scope\" uses the `:scope` pseudo-class \
+         outside the leftmost compound, which this translator does not support\n\
+         \x20 |\n\
+         \x20 | :scope > a :scope\n\
+         \x20 |            ^"
+    );
+
+    // Both are found after the parse, not before it, so a selector
+    // that is *also* invalid CSS keeps its parse error and its caret.
+    assert_eq!(
+        t.css_to_xpath("a > > :scope", "").unwrap_err(),
+        css_to_xpath::Error::Parse {
+            kind: css_to_xpath::ParseErrorKind::DanglingCombinator,
+            offset: 4,
+        }
+    );
+
+    // The remaining translation-time constructs stay positionless:
+    // whether an of-type pseudo-class has a type to count siblings by
+    // is not a lexical fact, and locating the compound it was written
+    // in would take a second model of the source that could point the
+    // caret at the wrong one of several identical constructs.
+    let sel = "div:first-of-type > *:first-of-type";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Unsupported {
+            construct: "an of-type pseudo-class on the universal selector `*`".to_owned(),
             offset: None,
         }
     );
     assert_eq!(
         err.message(sel),
-        "The CSS selector \"e:is(:scope)\" uses the `:scope` pseudo-class \
-         inside a functional pseudo-class, which this translator does not support"
+        "The CSS selector \"div:first-of-type > *:first-of-type\" uses an of-type \
+         pseudo-class on the universal selector `*`, which this translator does not support"
     );
 }
 
@@ -611,6 +692,24 @@ fn error_message_caret_alignment() {
     assert_eq!(
         gutter("\u{1f600} >"),
         ("\u{1f600} >".to_owned(), "    ^".to_owned())
+    );
+
+    // An `Unsupported` error the pre-parse scan placed renders the
+    // same gutter as a `Parse` one: same padding by display width,
+    // same line windowing.
+    assert_eq!(
+        gutter("日本語 :scope"),
+        ("日本語 :scope".to_owned(), "       ^".to_owned())
+    );
+    // The 107-column line is windowed to its last 72 columns — 65 of
+    // the 100 `a`s, then ` :scope` — and the caret is 66 columns into
+    // that, plus one for the leading `…`.
+    assert_eq!(
+        gutter(&format!("{} :scope", "a".repeat(100))),
+        (
+            format!("…{} :scope", "a".repeat(65)),
+            format!("{}^", " ".repeat(67))
+        )
     );
 
     // Control characters are never echoed raw into a terminal.

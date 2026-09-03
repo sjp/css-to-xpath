@@ -311,7 +311,10 @@ express them faithfully:
   wildcard subject (`*`, `*|*`, `|*`, `ns|*`) or implicit-type compound:
   XPath 1.0 cannot compare a sibling's name against the matched
   element's own.
-- Nested `:has()` and `:host`.
+- Nested `:has()`, and `:host()` — shadow-DOM host selection has nothing
+  to match against in a plain document tree. A bare `:host` is not a
+  pseudo-class this crate's parser accepts, so it fails to parse rather
+  than reaching translation.
 - The `&` nesting selector, which has no meaning without the enclosing
   rule a selector-to-XPath function never sees. Like `||`, it is caught
   before parsing and named, since a parser with nesting disabled cannot
@@ -323,7 +326,9 @@ express them faithfully:
   `svg:*[local-name() = 'di[v']`, so the prefix still resolves through the
   caller's namespace map.
 - `:scope` outside the leftmost compound, or inside a functional
-  pseudo-class argument.
+  pseudo-class argument. Both are lexical facts, so — like `||` and `&` —
+  the scan of the source text finds them and the error points a caret at
+  the offending `:scope` rather than leaving the caller to find it.
 - The empty language range `:lang("")`, which Level 4 defines as matching
   only elements whose language is *not* tagged. It is rejected with the
   other malformed ranges (`en-`, `--x`, `en*`) rather than given that
@@ -436,7 +441,8 @@ error that has travelled a few layers can still be printed:
 ```text
 invalid CSS selector at byte 6: a combinator with nothing after it
 unsupported CSS construct at byte 4: the `||` column combinator
-unsupported CSS construct: the `:scope` pseudo-class inside a functional pseudo-class
+unsupported CSS construct at byte 5: the `:scope` pseudo-class inside a functional pseudo-class
+unsupported CSS construct: an of-type pseudo-class on the universal selector `*`
 ```
 
 A caller that still holds the selector can render the fuller diagnostic
@@ -474,11 +480,18 @@ points at. `Error::Unsupported { construct, offset }` is a valid selector
 this crate declines to approximate. Both are `#[non_exhaustive]`.
 
 Only `Error::Parse` always knows a position. An `Error::Unsupported`
-knows one — and so renders a caret — for the two constructs found by the
-pre-parse scan of the source text, the `||` combinator and nesting past
-`MAX_NESTING_DEPTH`; its `offset` is `None` for everything rejected
-during translation, because the parsed selector Servo hands back carries
-no source offsets to map a component to.
+knows one — and so renders a caret — for the constructs found by the
+pre-parse scan of the source text: the `||` combinator, the `&` nesting
+selector, nesting past `MAX_NESTING_DEPTH`, `:host()`, and a `:scope`
+outside the leftmost compound or inside a functional argument. Its
+`offset` is `None` for the rest, which are rejected during translation,
+where the parsed selector Servo hands back carries no source offsets to
+map a component to. Those are the constructs whose supportability
+depends on what the compound resolved to rather than on the source text
+— an of-type pseudo-class needs a type to count siblings by, a namespace
+prefix needs to survive as an XPath name — so locating them would take a
+second, approximate model of where the compounds are, which could put
+the caret under the wrong one of several identical constructs.
 
 One class of malformed input is *not* an error: css-syntax-3 closes an
 open block, function or string implicitly at end of input, so a truncated

@@ -97,6 +97,19 @@ select the same nodes, because callers compare, cache and embed the strings.
   context, and this crate — which never sees an enclosing rule — not supporting
   it is what that variant means. A caller matching on `Error::Parse` for these
   selectors sees `Error::Unsupported` now.
+- A misplaced `:scope` and a `:host()` now carry the byte offset of the
+  construct, so `Error::message` points a caret at them and `Display` names the
+  position (`unsupported CSS construct at byte 5: the :scope pseudo-class
+  inside a functional pseudo-class`). Both were `offset: None` before. Where a
+  `:scope` is supported — the leftmost compound of its group, and no deeper
+  than the top level — is a lexical fact, as is the presence of a `:host()`, so
+  the pre-parse scan that already finds `||` and `&` decides them too and knows
+  where they are. The scan's findings are consulted only after the parse has
+  succeeded, so a selector that is *also* invalid CSS keeps the parse error it
+  reported before. The constructs left with no position are the ones that
+  depend on what the compound resolved to (an of-type pseudo-class without a
+  type, a namespace prefix that needs quoting, an `An+B of S` list over the
+  limits), which the parsed components Servo hands back cannot be located from.
 - **Breaking:** removed the `VERSION` constant; use `env!("CARGO_PKG_VERSION")`
   in your own crate, or read the dependency's version from Cargo metadata.
 - A compound whose conditions include a never-matching `0` renders as just

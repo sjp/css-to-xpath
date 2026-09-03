@@ -311,6 +311,11 @@ impl Translator {
         // replaces the prefix (`:scope > a` is `self::*/a`, the context
         // node's `a` children). Anywhere else the context node would have
         // to be named from inside a predicate, which XPath 1.0 cannot do.
+        //
+        // A written `:scope` is normally caught by the pre-parse scan,
+        // which knows where it is and so reports the same construct with
+        // a caret; this check stays as the backstop for one Servo can
+        // introduce with no source text of its own (`ImplicitScope`).
         let leftmost = seqs.len() - 1;
         for (compound, _) in &seqs[..leftmost] {
             if compound.iter().any(|c| matches!(c, Component::Scope)) {
@@ -1002,11 +1007,16 @@ fn describe_component(component: &Component<CssToXpathImpl>) -> String {
         // Top-level :scope is handled (or rejected) in selector_to_xpath,
         // so reaching this arm means :scope sits inside a functional
         // pseudo-class argument, where the context node is unreachable.
+        // A written one is rejected by the pre-parse scan first; this is
+        // the backstop for Servo's own `ImplicitScope`.
         Component::Scope | Component::ImplicitScope => {
             "the `:scope` pseudo-class inside a functional pseudo-class".into()
         }
         Component::Slotted(..) => "the `::slotted()` pseudo-element".into(),
         Component::Part(..) => "the `::part()` pseudo-element".into(),
+        // Also reached only as a backstop: `:host(...)`, the one form
+        // Servo parses without the shadow-DOM hooks this crate leaves
+        // off, is rejected by the scan with a position.
         Component::Host(..) => "the `:host` pseudo-class".into(),
         // Unreachable in practice: the pre-parse scan rejects a `&`
         // before Servo sees it, and nesting is not enabled anyway.

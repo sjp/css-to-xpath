@@ -49,12 +49,12 @@ const MAX_GUTTER_WIDTH: usize = 72;
 /// selector this crate declines to approximate.
 ///
 /// A [`Error::Parse`] always knows the offending byte position, so it
-/// always renders a caret. A [`Error::Unsupported`] knows one only for
-/// the constructs the pre-parse scan finds — the `||` combinator and
-/// excessive nesting — because Servo's parsed components carry no source
-/// offsets, so a construct rejected during translation cannot be mapped
-/// back to the selector text. Its `offset` is therefore an [`Option`],
-/// and its message grows a caret only when it is `Some`.
+/// always renders a caret. A [`Error::Unsupported`] knows one for the
+/// constructs the pre-parse scan of the source text finds, and not for
+/// the ones the translator finds, because Servo's parsed components
+/// carry no source offsets to map a component back to the selector
+/// text. Its `offset` is therefore an [`Option`], and its message grows
+/// a caret only when it is `Some`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Error {
@@ -128,6 +128,16 @@ impl Error {
     /// An [`Error::Unsupported`] naming `construct`, with no position:
     /// for the constructs found during translation, which Servo's
     /// offset-free components cannot be mapped back to the source.
+    ///
+    /// The scan takes over every construct whose supportability is a
+    /// *lexical* fact, so that it can carry a position (see `Scan`).
+    /// What is left here needs the parsed compound to decide — whether
+    /// an of-type pseudo-class has a type to count siblings by, whether
+    /// a namespace prefix survives as an XPath name — and locating
+    /// *that* would mean a second, approximate model of where the
+    /// compounds are, which could point a caret at the wrong one of
+    /// several identical-looking constructs. A missing caret is the
+    /// better failure, so these stay positionless.
     pub(crate) fn unsupported(construct: impl Into<String>) -> Self {
         Error::Unsupported {
             construct: construct.into(),

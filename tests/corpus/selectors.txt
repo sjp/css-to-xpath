@@ -186,6 +186,17 @@ e:is(:scope)
 e:not(:scope)
 e:has(:scope)
 e:nth-child(2 of :scope)
+[foo~=bar]:scope
+[foo = bar]:scope
+a/* > */:scope
+a\ b:scope
+a b, :scope
+[foo=" :scope"]
+a /* :scope */ b
+e:is(:host(a))
+:host
+:scope > a :scope
+div:first-of-type > *:first-of-type
 e:is(> a)
 e:has(> > a)
 e:has(>)
