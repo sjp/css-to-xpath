@@ -11,8 +11,6 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
-Slated for 0.3.0, the version already set in `Cargo.toml`.
-
 ### Added
 
 - The form-state pseudo-classes a static translation can answer, under

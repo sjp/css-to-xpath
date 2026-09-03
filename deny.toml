@@ -1,0 +1,32 @@
+# cargo-deny policy: licences, duplicate crates and crate sources. Run it
+# locally with `cargo deny check licenses bans sources`; CI runs it in
+# .github/workflows/security-audit.yml, beside `cargo audit`.
+#
+# RustSec advisories are left to `cargo audit`: cargo-deny's graph stops at
+# the dependencies the published crate carries, while `cargo audit` reads
+# the whole lockfile and so covers the dev-dependencies CI builds too.
+
+[licenses]
+# Everything the published crate's tree resolves to today. MPL-2.0 is
+# cssparser, selectors and dtoa-short, the crates this one is built on: it
+# is file-level copyleft, so it does not reach this crate's MIT sources.
+# Unicode-3.0 is unicode-ident's second, non-optional half.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+# The tree has no duplicates today and is small enough to keep it that
+# way; a bump that introduces one needs a `skip` entry and a reason.
+multiple-versions = "deny"
+# A `*` version requirement would make the MSRV and minimal-versions jobs
+# meaningless, since there would be no floor to check.
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

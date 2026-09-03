@@ -54,6 +54,25 @@ jobs:
       - run: cargo update
       - run: cargo test --all-features
 
+  minimal-versions:
+    name: Test (minimal direct deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Nightly resolves the lockfile; the suite itself runs on stable,
+      # which is installed second so it stays the default toolchain.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@cargo-minimal-versions
+      # `latest-deps` checks the top of each caret range and the committed
+      # lockfile checks one point inside it; this checks the bottom, which
+      # is what the MSRV claim rests on. `--direct` leaves transitive
+      # crates at their normal versions: several do not build at their own
+      # floor, and none of those floors are this crate's to claim.
+      - run: cargo minimal-versions test --all-features --direct
+
   docs:
     name: Docs
     runs-on: ubuntu-latest
@@ -102,8 +121,10 @@ jobs:
           workspaces: |
             .
             fuzz
-      # Not in install-action's tool list, so install it from source.
-      - run: cargo install cargo-fuzz --locked
+      # Not in install-action's tool list; binstall fetches a prebuilt
+      # binary rather than rebuilding it on every cache miss.
+      - uses: taiki-e/install-action@cargo-binstall
+      - run: cargo binstall --no-confirm cargo-fuzz
       # Seed from the selectors the test suite already covers, so the
       # budget goes on mutations of real syntax.
       - run: ./fuzz/seed-corpus.sh
@@ -125,8 +146,11 @@ jobs:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --all-features --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v7
+      # A floor well under the ~97% the suite reaches today: the gate is
+      # for a change that drops whole paths, not for the last few lines.
+      - run: cargo llvm-cov --all-features --fail-under-lines 90 --lcov --output-path lcov.info
+      - if: '!cancelled()'
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           fail_ci_if_error: false

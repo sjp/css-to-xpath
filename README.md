@@ -523,7 +523,9 @@ two-minute pass on every change; `cargo-mutants` runs weekly.
 ## Minimum supported Rust version
 
 Rust **1.88**, edition 2024 — set by the floor of the `cssparser`/`selectors`
-dependency versions this crate requires.
+dependency versions this crate requires. CI checks that floor rather than
+assuming it: one job builds and runs the suite on 1.88, and another runs it
+with every direct dependency resolved to the bottom of its range.
 
 ## Changelog
 

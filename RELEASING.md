@@ -20,8 +20,10 @@ Releases are cut by hand; the list below is the whole procedure.
    with a fresh empty `## [Unreleased]` above it, and update the compare links
    at the bottom of the file.
 
-4. **Bump `version` in `Cargo.toml`,** then `cargo check` so `Cargo.lock`
-   follows.
+4. **Check `version` in `Cargo.toml`.** The `semver` CI job compares the public
+   API against the released baseline on every change, so a breaking change is
+   normally bumped by the PR that makes it and the version is already right
+   here. Bump it if it is not, then `cargo check` so `Cargo.lock` follows.
 
 5. **Check the release.**
 
@@ -29,8 +31,9 @@ Releases are cut by hand; the list below is the whole procedure.
    cargo fmt --all --check
    cargo clippy --all-targets --all-features -- -D warnings
    cargo test --all-features
-   cargo semver-checks check-release   # cargo install cargo-semver-checks
-   cargo package --list                # src/, Cargo.toml, LICENSE, README, CHANGELOG
+   cargo semver-checks check-release        # cargo install cargo-semver-checks
+   cargo deny check licenses bans sources   # cargo install cargo-deny
+   cargo package --list                     # src/, Cargo.toml, LICENSE, README, CHANGELOG
    cargo publish --dry-run
    ```
 
