@@ -61,7 +61,8 @@ fn lang_and_dir() {
         "e:lang(*, fr)",
         "e[ancestor-or-self::*[@xml:lang][1][string-length(@xml:lang) > 0] or lang('fr')]",
     );
-    // HTML: nearest lang-attributed ancestor, lowercased prefix match.
+    // HTML: nearest lang-attributed ancestor, case-folded, matched by
+    // RFC 4647 extended filtering.
     let mut html = Cases::new(Mode::Html);
     html.check("e:lang(EN)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')]]");
     html.check(
@@ -74,8 +75,23 @@ fn lang_and_dir() {
     // The range is ASCII-lowercased, matching the XPath
     // translate() alphabet on the other side of the comparison.
     html.check("e:lang(T\u{dc}RK)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 't\u{dc}rk-')]]");
-    // A hyphenated range keeps its full spelling in the prefix match.
-    html.check("e:lang(en-nz)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-nz-')]]");
+    // A multi-subtag range is RFC 4647 extended filtering: the first
+    // subtag is an equality, and each later one is searched for as a
+    // whole subtag in what is left after the previous match — so
+    // `en-nz` matches `en-NZ` and also `en-Latn-NZ`.
+    html.check("e:lang(en-nz)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-') and contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')), '-nz-')]]");
+    // The chain extends a step per subtag, each searching the tail the
+    // step before it left.
+    html.check("e:lang(zh-Hant-TW)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'zh-') and contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'zh-')), '-hant-') and contains(concat('-', substring-after(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'zh-')), '-hant-')), '-tw-')]]");
+    // Subtags come from strings as well as idents, so each one is
+    // quoted as an XPath literal rather than pasted in.
+    html.check("e:lang(\"a'b-c\\\"d\")", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), \"a'b-\") and contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), \"a'b-\")), '-c\"d-')]]");
+    // A trailing wildcard is dropped whatever the range's length: RFC
+    // 4647 skips a final `*` over whatever is left of the tag.
+    html.check(
+        "e:lang(en-nz-*)",
+        html.css_to_xpath("e:lang(en-nz)", "").unwrap(),
+    );
     // A comma list ORs the per-range ancestor-or-self:: tests.
     html.check("e:lang(en, fr)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')] or ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'fr-')]]");
     // xhtml shares the HTML overrides but reads either language
@@ -100,8 +116,9 @@ fn lang_and_dir() {
          '-'), 'en-')]]",
     );
     // The rest of the range handling is shared with Mode::Html: a
-    // trailing wildcard matches the same prefix as the bare range, a
-    // hyphenated range keeps its full spelling, and a comma list ORs.
+    // trailing wildcard matches the same range as the bare one, a
+    // multi-subtag range builds the same chain over the xhtml language
+    // string, and a comma list ORs.
     xhtml.check(
         "E:lang(en-*)",
         xhtml.css_to_xpath("E:lang(en)", "").unwrap(),
@@ -110,7 +127,7 @@ fn lang_and_dir() {
         xhtml
             .css_to_xpath("E:lang(en-nz)", "")
             .unwrap()
-            .ends_with("'-'), 'en-nz-')]]")
+            .ends_with("'-'), 'en-') and contains(concat('-', substring-after(concat(translate(concat(@xml:lang, substring(@lang, 1, string-length(@lang) * not(@xml:lang))), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')), '-nz-')]]")
     );
     xhtml.check(
         "E:lang(en, fr)",
@@ -135,9 +152,11 @@ fn lang_and_dir() {
             .unwrap()
             .contains("xml:lang")
     );
-    // Interior wildcards (RFC 4647 extended filtering) are valid CSS
-    // but inexpressible in XPath 1.0, so both spellings error rather
-    // than over-match (unquoted *-CH) or never match (quoted "*-CH").
+    // Interior wildcards are valid CSS, but XPath's lang() cannot
+    // express one under Mode::Generic; a range that errors in one mode
+    // and matches in another is the worse contract, so both spellings
+    // error everywhere rather than over-match (unquoted *-CH) or never
+    // match (quoted "*-CH").
     for sel in [
         "e:lang(*-CH)",
         "e:lang(\"*-CH\")",

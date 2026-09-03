@@ -98,6 +98,17 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   `Clone`; method calls do not have to change, but code that relied on an
   implicit copy — passing a translator by value and then using it again — needs
   a borrow or a `.clone()`.
+- `:lang()` under `Mode::Html` and `Mode::Xhtml` matches a multi-subtag range by
+  RFC 4647 extended filtering rather than by a dash-terminated prefix, which is
+  what Selectors 4 asks for: `:lang(de-DE)` now also matches `de-Latn-DE`, and
+  `:lang(zh-TW)` matches `zh-Hant-TW`. The range's first subtag must still equal
+  the tag's first, and each later one must appear as a whole subtag after the
+  previous match, so `:lang(de-DE)` still does not match `de-DEUTSCH` or
+  `dede-DE`. The emitted XPath grows a `contains(…, substring-after(…))` step per
+  subtag past the first; single-subtag ranges (`en`, `en-*`, `*`) are unchanged,
+  as is `Mode::Generic`, which delegates to XPath's own prefix-matching `lang()`.
+  RFC 4647's rule that a subtag may not be skipped past a singleton is not
+  modelled — see the README's Approximations.
 - The functional-pseudo-class nesting limit is **32** levels rather than 64, so
   the recursion it bounds fits the 1 MiB stack a library does not get to choose
   — a Windows main thread, a wasm32 module, a thread pool's worker — in an

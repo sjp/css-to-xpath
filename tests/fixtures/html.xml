@@ -37,5 +37,21 @@
     </form>
     <p id="p1" lang="fr">bonjour</p>
     <p id="p2">hello</p>
+    <!-- Language tags for RFC 4647 extended filtering: a script subtag
+         between the two a range names, a private-use singleton the RFC
+         forbids skipping past (which this translation nonetheless
+         skips), and tags a range must not match a mere prefix of. l9
+         has no tag of its own and inherits the document's. -->
+    <div id="langs">
+      <span id="l1" lang="de-DE">1</span>
+      <span id="l2" lang="de-DE-1996">2</span>
+      <span id="l3" lang="de-Latn-DE">3</span>
+      <span id="l4" lang="de-x-de">4</span>
+      <span id="l5" lang="de-DEUTSCH">5</span>
+      <span id="l6" lang="de">6</span>
+      <span id="l7" lang="dede">7</span>
+      <span id="l8" lang="zh-Hant-TW">8</span>
+      <span id="l9">9</span>
+    </div>
   </body>
 </html>

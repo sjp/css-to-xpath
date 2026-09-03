@@ -425,8 +425,9 @@ impl Translator {
     }
 
     /// HTML `:lang()`: the language of the nearest ancestor-or-self that
-    /// has one (see [`LangSource`]) is tested with an ASCII-lowercased,
-    /// dash-terminated prefix match.
+    /// has one (see [`LangSource`]) is matched against the range by RFC
+    /// 4647 extended filtering, built out of ASCII-lowercased substring
+    /// tests (see [`lang_ancestor_condition`]).
     fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
@@ -434,14 +435,11 @@ impl Translator {
             if value == "*" {
                 conditions.push(lang_known_condition(self.lang_source()));
             } else {
-                // A trailing wildcard ("en-*") matches the same prefix as
-                // the range without it ("en"): both stop at a subtag
-                // boundary.
+                // A trailing wildcard ("en-*") matches the same range as
+                // the one without it ("en"): RFC 4647 skips a trailing
+                // `*` over whatever is left, and so does stopping early.
                 let range = value.strip_suffix("-*").unwrap_or(value);
-                conditions.push(lang_ancestor_condition(
-                    self.lang_source(),
-                    &format!("{}-", range.to_ascii_lowercase()),
-                ));
+                conditions.push(lang_ancestor_condition(self.lang_source(), range));
             }
         }
         add_lang_conditions(xpath, &conditions);
@@ -583,13 +581,16 @@ fn or_group(expr: &str) -> Condition {
     }
 }
 
-/// A wildcard is meaningful to the XPath 1.0 translations only as a whole
-/// range (`*`) or as the final subtag (`en-*`); RFC 4647 extended filtering
-/// also allows it in any interior position (`*-CH`, `de-*-DE`), which
-/// neither translator can express, so those ranges are rejected rather than
-/// silently over- or under-matching. (The parser has already rejected a
-/// `*` that is not a whole subtag, such as `en*`, so a range that passes
-/// here is either `*` itself or ends in `-*`.)
+/// A wildcard is accepted only as a whole range (`*`) or as the final
+/// subtag (`en-*`); RFC 4647 extended filtering also allows it in any
+/// interior position (`*-CH`, `de-*-DE`), which is rejected rather than
+/// silently over- or under-matching. `Mode::Generic` delegates to XPath's
+/// `lang()` and cannot express an interior wildcard at all; the HTML
+/// modes' subtag chain could (a `*` subtag is one the chain simply skips),
+/// but a range that is an error in one mode and a match in another is a
+/// worse contract than one that is an error everywhere. (The parser has
+/// already rejected a `*` that is not a whole subtag, such as `en*`, so a
+/// range that passes here is either `*` itself or ends in `-*`.)
 fn check_wildcard_position(range: &str) -> Result<(), Error> {
     if let Some(pos) = range.find('*')
         && pos != range.len() - 1
@@ -625,17 +626,55 @@ fn lang_known_condition(source: LangSource) -> String {
     )
 }
 
-/// The nearest-ancestor language test: the language string is ASCII-folded
-/// and dash-terminated so `en-` prefix-matches `en` and `en-NZ` but not
-/// `english`, and `search_prefix` arrives already lowercased and
-/// dash-terminated.
-fn lang_ancestor_condition(source: LangSource, search_prefix: &str) -> String {
-    format!(
-        "{}[starts-with(concat(\
-         translate({}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
-         'abcdefghijklmnopqrstuvwxyz'), '-'), {})]",
-        source.nearest(),
-        source.string(),
-        xpath_literal(search_prefix)
-    )
+/// The element's language as the comparisons below want it: ASCII-folded
+/// and dash-terminated, so every subtag — including the last — is
+/// bounded by a `-` on the right.
+fn folded_lang(source: LangSource) -> String {
+    format!("concat({}, '-')", ascii_lower(source.string()))
+}
+
+/// The nearest-ancestor language test, as RFC 4647 extended filtering
+/// over the folded language string: the language's first subtag must
+/// equal the range's first, and each later range subtag must appear as a
+/// whole subtag after the previous one matched.
+///
+/// The chain walks the language string with `substring-after`, keeping
+/// the remainder dash-bounded on both ends so `-de-` can only match a
+/// whole subtag. Each step takes the *earliest* remaining occurrence,
+/// which is the greedy choice that leaves the longest tail, so it finds a
+/// match whenever one exists. A subtag that is absent makes
+/// `substring-after` return `''`, and every later `contains` is then
+/// false — the right answer.
+///
+/// `range` arrives with any trailing `-*` already stripped and no
+/// interior wildcard (see [`check_wildcard_position`]), and is lowercased
+/// here to meet the folded language string.
+///
+/// A single-subtag range is just the `starts-with`, which is both the
+/// whole of extended filtering for that shape and the dash-terminated
+/// prefix match the translation has always emitted. The one RFC rule the
+/// chain does not model is that a subtag may not be skipped past a
+/// *singleton* (a one-character subtag, such as the `x` opening a
+/// private-use section): measuring the length of every skipped subtag is
+/// not expressible in XPath 1.0, so `:lang(de-DE)` also matches
+/// `de-x-de`. See the README's Approximations.
+fn lang_ancestor_condition(source: LangSource, range: &str) -> String {
+    let range = range.to_ascii_lowercase();
+    let mut subtags = range.split('-');
+    let lang = folded_lang(source);
+
+    // The first subtag is an equality, which on the dash-terminated
+    // string is a prefix match.
+    let first = xpath_literal(&format!("{}-", subtags.next().expect("split is non-empty")));
+    let mut conditions = format!("starts-with({lang}, {first})");
+    // Everything after it is a whole-subtag search through the tail.
+    let mut tail = format!("substring-after({lang}, {first})");
+    for subtag in subtags {
+        let needle = xpath_literal(&format!("-{subtag}-"));
+        let bounded = format!("concat('-', {tail})");
+        conditions.push_str(&format!(" and contains({bounded}, {needle})"));
+        tail = format!("substring-after({bounded}, {needle})");
+    }
+
+    format!("{}[{conditions}]", source.nearest())
 }

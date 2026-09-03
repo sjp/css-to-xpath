@@ -88,7 +88,8 @@ assert_eq!(
     where a `button` with no `type` is one.
   - `:placeholder-shown` — an `input` or `textarea` carrying a non-empty
     `placeholder` its type allows, with no value in the markup.
-  - `:lang()` — nearest `@lang` ancestor, case-folded prefix match.
+  - `:lang()` — nearest `@lang` ancestor, case-folded, matched by RFC
+    4647 extended filtering (so `:lang(de-DE)` matches `de-Latn-DE`).
 - **`Mode::Xhtml`** — the same HTML pseudo-class semantics as `Mode::Html`,
   but preserves case (XHTML is XML, so both names and those attribute
   values are case-sensitive) and reads `xml:lang` as well as `lang` for
@@ -175,8 +176,9 @@ XPath reads as a division, not a path.
   `@xml:lang` instead. `Mode::Xhtml` reads `@xml:lang` for every range.
   Both rely on the `xml` prefix, which XML binds implicitly and so needs
   no entry in the caller's namespace map; processors that do not pre-bind
-  it need it registered. `:empty` and `:lang()` both follow Level 3
-  rather than Level 4 — see [Approximations](#approximations).
+  it need it registered. `:empty` follows Level 3 rather than Level 4,
+  and `:lang()` stops short of Level 4 in the ways listed under
+  [Approximations](#approximations).
 - The `Mode::Html`/`Mode::Xhtml` form and link pseudo-classes listed above.
 
 ## Namespaces
@@ -322,16 +324,23 @@ Level 4 asks for, because XPath 1.0 — or a static translation of any
 kind — cannot reach the spec's answer. They are listed here so the
 contract stays honest.
 
-- **`:lang()` is a prefix match, not RFC 4647 extended filtering.** The
-  range is compared against the language tag up to a subtag boundary, the
-  Level 3 / `[lang|=…]` rule, so `:lang(de-DE)` matches `de-DE` and
-  `de-DE-1996` but not `de-Latn-DE`, which Level 4 requires it to match:
-  the wildcards Level 4 implies *between* subtags are not modelled. A
-  written wildcard is allowed only as the whole range (`*`) or as the
-  final subtag (`en-*`); an interior one (`de-*-DE`) errors rather than
-  quietly matching the wrong set. Single-subtag ranges — `en`, `en-*`,
-  `*`, the common case — are unaffected. Under `Mode::Generic` the test
-  is XPath's own `lang()`, which is a prefix match in the same way.
+- **`:lang()` does not honour RFC 4647's singleton rule, and under
+  `Mode::Generic` is a prefix match.** Under `Mode::Html` and
+  `Mode::Xhtml` a multi-subtag range is matched by extended filtering, as
+  Level 4 asks: the first range subtag must equal the tag's first, and
+  each later one must appear as a whole subtag after it, so `:lang(de-DE)`
+  matches `de-DE`, `de-DE-1996` and `de-Latn-DE`. The one rule not
+  modelled is that a subtag may not be skipped past a *singleton* (a
+  one-character subtag, such as the `x` opening a private-use section):
+  measuring the length of every skipped subtag is not expressible in
+  XPath 1.0, so `:lang(de-DE)` also matches `de-x-de`, which Level 4 says
+  it should not. Under `Mode::Generic` the test is XPath's own `lang()`,
+  which is the Level 3 / `[lang|=…]` prefix match — `de-DE` there matches
+  `de-DE` and `de-DE-1996` but not `de-Latn-DE`. In every mode a written
+  wildcard is allowed only as the whole range (`*`) or as the final
+  subtag (`en-*`); an interior one (`de-*-DE`) errors rather than
+  matching in one mode and erroring in another. Single-subtag ranges —
+  `en`, `en-*`, `*`, the common case — are exact everywhere.
 - **`:empty` follows Level 3, so white space counts.** `e:empty` is
   `e[not(*) and not(string-length())]`, and `<p> </p>` is therefore not
   empty. Level 4 ignores document white space; browsers still ship the

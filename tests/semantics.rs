@@ -394,6 +394,12 @@ fn xhtml_lang() {
             ("xhtml|p:lang(de)", &["p2"]),
             ("xhtml|a:lang(en)", &["a1", "a2"]),
             ("xhtml|p:lang(en)", &[]),
+            // Extended filtering over the xhtml language source too:
+            // p1 is `fr-Latn-CA`, which `fr-CA` reaches by skipping
+            // the script subtag.
+            ("xhtml|p:lang(fr-CA)", &["p1"]),
+            ("xhtml|p:lang(fr-Latn)", &["p1"]),
+            ("xhtml|p:lang(fr-DE)", &[]),
         ],
     );
 }
@@ -489,6 +495,45 @@ fn html_lang() {
             ("p:lang(en)", &["p2"]),
             ("a:lang(en)", &["a1", "a2"]),
             ("p:lang(de)", &[]),
+        ],
+    );
+}
+
+/// `:lang()` under the HTML modes is RFC 4647 extended filtering: a
+/// range subtag may be matched by any later subtag of the tag, not just
+/// the next one, so `:lang(de-DE)` reaches `de-Latn-DE`.
+#[test]
+fn html_lang_extended_filtering() {
+    check(
+        &html_fixture(),
+        Mode::Html,
+        &[
+            // The first subtag is still an equality — `dede` (l7) is not
+            // a `de` document, and neither is `de-DEUTSCH` (l5) a
+            // `de-DE` one, since `de` has to match a whole subtag.
+            ("span:lang(de)", &["l1", "l2", "l3", "l4", "l5", "l6"]),
+            // l4 (`de-x-de`) is the documented over-match: RFC 4647
+            // forbids skipping past the singleton `x`, which measuring
+            // subtag lengths in XPath 1.0 cannot check.
+            ("span:lang(de-DE)", &["l1", "l2", "l3", "l4"]),
+            ("span:lang(de-1996)", &["l2"]),
+            ("span:lang(de-DE-1996)", &["l2"]),
+            // A range subtag that is not in the tag at all, and one
+            // that is there only before the subtag it has to follow.
+            ("span:lang(de-FR)", &[]),
+            ("span:lang(de-DE-Latn)", &[]),
+            ("span:lang(zh-TW)", &["l8"]),
+            ("span:lang(zh-Hant-TW)", &["l8"]),
+            ("span:lang(zh-Hant)", &["l8"]),
+            // A trailing wildcard adds nothing to a multi-subtag range,
+            // and the language is still inherited from the nearest
+            // ancestor that has one.
+            ("span:lang(de-DE-*)", &["l1", "l2", "l3", "l4"]),
+            ("span:lang(en)", &["l9"]),
+            (
+                "span:lang(*)",
+                &["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"],
+            ),
         ],
     );
 }
