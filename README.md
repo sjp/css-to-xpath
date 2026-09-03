@@ -551,20 +551,38 @@ Five layers, all run by `cargo test`:
 - **Properties** (`tests/nth_property.rs`) generate `An+B`, `An+B of S`
   and sibling counts with [`proptest`](https://crates.io/crates/proptest)
   and check the selected positions against the definition of `An+B`.
-- **Differential** (`tests/differential.rs`) checks the translation
-  against a second implementation rather than against an expectation
-  someone wrote down. The `selectors` crate this one parses with also
-  ships a matcher, so the test implements its `Element` trait over the
-  same fixture tree the XPath is evaluated on and requires the two
-  answers to agree. A `proptest` grammar generates the selectors —
-  compounds, the four combinators, the nth family including `of S`,
+- **Differential** (`tests/differential.rs`, `tests/differential_html.rs`)
+  checks the translation against a second implementation rather than
+  against an expectation someone wrote down. The `selectors` crate this
+  one parses with also ships a matcher, so the reference in
+  `tests/reference/mod.rs` implements its `Element` trait over the same
+  fixture tree the XPath is evaluated on, and the two answers must
+  agree. A `proptest` grammar generates the selectors — compounds, the
+  four combinators, the nth family including `of S`,
   `:is()`/`:where()`/`:not()`/`:has()`, `:root`, `:empty` — while the
   attribute and of-type shapes, being small finite cross-products, are
-  exhausted rather than sampled. `Mode::Generic` only, and only shapes
-  the translation renders exactly: the one divergence
-  (`*|e:first-of-type` counts siblings by local name, since XPath 1.0
-  cannot compare a sibling's namespace against the subject's) is pinned
-  as a test of its own.
+  exhausted rather than sampled.
+
+  The first suite is `Mode::Generic`, and only shapes the translation
+  renders exactly: the one divergence (`*|e:first-of-type` counts
+  siblings by local name, since XPath 1.0 cannot compare a sibling's
+  namespace against the subject's) is pinned as a test of its own. The
+  second adds the HTML pseudo-classes whose answer is in the document
+  tree — `:disabled`/`:enabled`, `:required`/`:optional`,
+  `:read-write`/`:read-only`, `:default`, `:checked`,
+  `:placeholder-shown`, `:link`/`:any-link` — over an XHTML fixture that
+  holds both answers for every corner of them, with the reference
+  written from the HTML standard's own definitions ("actually disabled",
+  the attribute tables' *Applies to* rows, the form owner and default
+  button algorithms) rather than from this crate's code. It evaluates
+  `Mode::Xhtml` and asserts that `Mode::Html` translates every generated
+  selector to the same string, which is what makes the answer both
+  modes'. `:lang()` is left out on purpose: extended filtering is the
+  one HTML translation that knowingly diverges from the spec (see
+  Approximations), so a reference for it would encode the divergence
+  rather than check it. The divergence it does have — the overrides
+  identify elements by `local-name()`, so an element of that name in
+  another namespace is treated as the HTML one — is pinned as a test.
 
 Fuzzing lives in `fuzz/` and needs
 [`cargo-fuzz`](https://crates.io/crates/cargo-fuzz) and a nightly

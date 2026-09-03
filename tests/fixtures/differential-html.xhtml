@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixture for the HTML-mode differential test: XHTML served as XML, so
+  every element is in the XHTML namespace and a generated type selector
+  is written xhtml|input or *|input. Every element carries a unique id,
+  which is how both the XPath harness and the reference matcher name a
+  selected node.
+
+  Where forms.xhtml and editable.xml carry one element per hand-written
+  case, this one carries both answers for every corner, so that a
+  *generated* selector can tell the two apart:
+
+    - :disabled's fieldset walk — a first legend and a later one, a
+      legend that is not a fieldset's child, a first legend preceded by
+      a non-legend sibling, a nested fieldset with and without its own
+      disabled attribute, and a disabled fieldset inside a disabled
+      fieldset's first legend (where the two carve-outs cancel);
+    - the option/optgroup rules, which the fieldset rule must not reach:
+      a select inside a disabled fieldset whose options stay enabled;
+    - `type` as an enumerated attribute: mixed-case keywords (RANGE,
+      TEXT, RADIO, SUBMIT, RESET), a missing one, an invalid one, an
+      empty one, and one spelling two keywords with a pipe between them,
+      which is neither;
+    - contenteditable set, cleared, re-set, inherited, and left
+      inheriting by `inherit`, an invalid value and a pipe;
+    - two forms whose default button is found differently, one with no
+      submit button at all, and a submit button with no form owner;
+    - an input showing its placeholder, one with a value, one whose type
+      does not take a placeholder, and the textarea counterparts.
+-->
+<html xmlns="http://www.w3.org/1999/xhtml" id="doc">
+  <head id="hd">
+    <title id="ti">Differential</title>
+    <!-- A `link` has an href but is not one of the elements :link
+         matches. -->
+    <link id="lk" href="#s"/>
+  </head>
+  <body id="body">
+    <!-- The fieldset arithmetic. -->
+    <form id="f1">
+      <fieldset id="fs1" class="two" disabled="disabled">
+        <legend id="lg1">
+          <input id="i1" type="text"/>
+          <button id="bt1">ok</button>
+        </legend>
+        <legend id="lg2"><input id="i2" type="text"/></legend>
+        <input id="i3" type="text" required="required"/>
+        <select id="se1">
+          <optgroup id="og1"><option id="o1">A</option></optgroup>
+        </select>
+        <fieldset id="fs2">
+          <legend id="lg3"><input id="i4" type="checkbox" checked="checked"/></legend>
+          <input id="i5" type="text"/>
+        </fieldset>
+        <div id="dv1"><legend id="lg4"><input id="i6" type="text"/></legend></div>
+      </fieldset>
+      <fieldset id="fs3">
+        <legend id="lg5"><input id="i7" type="text"/></legend>
+        <fieldset id="fs4" disabled="disabled">
+          <legend id="lg6">
+            <input id="i8" type="text"/>
+            <fieldset id="fs5"><input id="i9" type="text"/></fieldset>
+          </legend>
+          <input id="i10" type="text"/>
+        </fieldset>
+      </fieldset>
+      <fieldset id="fs6" disabled="disabled">
+        <p id="pp1" class="three">note</p>
+        <legend id="lg7"><input id="i11" type="text"/></legend>
+        <input id="i12" type="text"/>
+      </fieldset>
+      <fieldset id="fs7" disabled="disabled">
+        <legend id="lg8">
+          <fieldset id="fs8" disabled="disabled">
+            <legend id="lg9"><input id="i13" type="text"/></legend>
+            <input id="i14" type="text"/>
+          </fieldset>
+        </legend>
+      </fieldset>
+    </form>
+
+    <!-- The type states `required`, `readonly` and `placeholder` do and
+         do not apply to. -->
+    <form id="f2">
+      <input id="i20" class="one" type="text" required="required" placeholder="n"/>
+      <input id="i21" type="hidden" required="required"/>
+      <input id="i22" type="RANGE" required="required"/>
+      <input id="i23" type="checkbox" required="required" checked="checked"/>
+      <input id="i24" required="required"/>
+      <input id="i25" type="wat" required="required"/>
+      <input id="i26" type="" required="required"/>
+      <input id="i27" type="hidden|range" required="required"/>
+      <input id="i28" type="file" required="required" readonly="readonly"/>
+      <input id="i29" class="two" type="text"/>
+      <input id="i30" type="submit"/>
+      <select id="se2" required="required"><option id="o2">A</option></select>
+      <select id="se3"><option id="o3" selected="selected">B</option></select>
+      <textarea id="ta1" required="required" readonly="readonly" placeholder="n"></textarea>
+      <textarea id="ta2" placeholder="n"> </textarea>
+      <textarea id="ta3" placeholder=""></textarea>
+      <textarea id="ta4" class="one three" placeholder="n"></textarea>
+    </form>
+
+    <!-- Default buttons: the first submit button in tree order, which
+         here is nested one level down; a form whose first is an
+         `input`; and a form with none. -->
+    <form id="f3">
+      <button id="bt2" type="button">no</button>
+      <input id="i31" type="reset"/>
+      <div id="dv2"><button id="bt3">yes</button></div>
+      <input id="i32" type="submit"/>
+    </form>
+    <form id="f4">
+      <input id="i33" type="image"/>
+      <button id="bt4" type="SUBMIT">x</button>
+    </form>
+    <form id="f5">
+      <button id="bt5" type="reset">r</button>
+      <input id="i34" type="RESET"/>
+    </form>
+    <button id="bt6">formless</button>
+
+    <!-- Editability. -->
+    <div id="d1" class="one two" contenteditable="">
+      <p id="p1" class="three">a</p>
+      <input id="i35" type="checkbox"/>
+      <div id="d2" contenteditable="false">
+        <p id="p2">b</p>
+        <div id="d3" contenteditable="TRUE"><p id="p3">c</p></div>
+      </div>
+      <div id="d4" contenteditable="inherit"><p id="p4">d</p></div>
+      <div id="d5" contenteditable="plaintext-only"><p id="p5">e</p></div>
+      <div id="d6" contenteditable="a|b"><p id="p6">f</p></div>
+    </div>
+    <div id="d7"><p id="p7">g</p></div>
+
+    <!-- Mutability outside a contenteditable subtree. -->
+    <input id="i36" class="two" type="text"/>
+    <input id="i37" type="text" readonly="readonly"/>
+    <input id="i38" type="checkbox"/>
+    <input id="i39" type="TEXT"/>
+    <input id="i40" type="number" disabled="disabled"/>
+    <textarea id="ta5"></textarea>
+    <textarea id="ta6" readonly="readonly"></textarea>
+
+    <!-- Hyperlinks. -->
+    <a id="a1" class="one" href="#x">l</a>
+    <a id="a2">n</a>
+    <area id="ar1" href="#y"/>
+    <area id="ar2"/>
+
+    <!-- Placeholders. -->
+    <input id="i41" type="text" placeholder="n"/>
+    <input id="i42" type="text" placeholder="n" value="v"/>
+    <input id="i43" type="text" placeholder="n" value=""/>
+    <input id="i44" type="date" placeholder="n"/>
+    <input id="i45" placeholder="n"/>
+    <input id="i46" type="checkbox" placeholder="n"/>
+
+    <!-- Checkedness and the optgroup rules. -->
+    <select id="se4">
+      <optgroup id="og2" disabled="disabled">
+        <option id="o4" selected="selected">A</option>
+        <option id="o5" disabled="disabled">B</option>
+      </optgroup>
+      <optgroup id="og3">
+        <option id="o6">C</option>
+        <option id="o7" disabled="disabled" selected="selected">D</option>
+      </optgroup>
+    </select>
+    <input id="i47" type="radio" checked="checked"/>
+    <input id="i48" type="RADIO" checked="checked"/>
+    <input id="i49" type="text" checked="checked"/>
+    <input id="i50" type="checkbox" checked=""/>
+
+    <!--
+      One `input` per type state, twice over, so that every row of the
+      "Applies to" tables discriminates on its own: moving a single type
+      into or out of `required`'s, `readonly`'s or `placeholder`'s list
+      changes the answer for exactly these elements. Neither carries a
+      `value` or a `readonly`, and both sit outside every form, so
+      :placeholder-shown turns on whether `placeholder` applies,
+      :read-write on whether `readonly` does, :required on whether
+      `required` does, and :checked on the type alone.
+    -->
+    <div id="types">
+      <input id="q-hidden" type="hidden" required="required" placeholder="n"/>
+      <input id="c-hidden" type="hidden" checked="checked" placeholder="n"/>
+      <input id="q-text" type="text" required="required" placeholder="n"/>
+      <input id="c-text" type="text" checked="checked" placeholder="n"/>
+      <input id="q-search" type="search" required="required" placeholder="n"/>
+      <input id="c-search" type="search" checked="checked" placeholder="n"/>
+      <input id="q-tel" type="tel" required="required" placeholder="n"/>
+      <input id="c-tel" type="tel" checked="checked" placeholder="n"/>
+      <input id="q-url" type="url" required="required" placeholder="n"/>
+      <input id="c-url" type="url" checked="checked" placeholder="n"/>
+      <input id="q-email" type="email" required="required" placeholder="n"/>
+      <input id="c-email" type="email" checked="checked" placeholder="n"/>
+      <input id="q-password" type="password" required="required" placeholder="n"/>
+      <input id="c-password" type="password" checked="checked" placeholder="n"/>
+      <input id="q-date" type="date" required="required" placeholder="n"/>
+      <input id="c-date" type="date" checked="checked" placeholder="n"/>
+      <input id="q-month" type="month" required="required" placeholder="n"/>
+      <input id="c-month" type="month" checked="checked" placeholder="n"/>
+      <input id="q-week" type="week" required="required" placeholder="n"/>
+      <input id="c-week" type="week" checked="checked" placeholder="n"/>
+      <input id="q-time" type="time" required="required" placeholder="n"/>
+      <input id="c-time" type="time" checked="checked" placeholder="n"/>
+      <input id="q-datetime-local" type="datetime-local" required="required" placeholder="n"/>
+      <input id="c-datetime-local" type="datetime-local" checked="checked" placeholder="n"/>
+      <input id="q-number" type="number" required="required" placeholder="n"/>
+      <input id="c-number" type="number" checked="checked" placeholder="n"/>
+      <input id="q-range" type="range" required="required" placeholder="n"/>
+      <input id="c-range" type="range" checked="checked" placeholder="n"/>
+      <input id="q-color" type="color" required="required" placeholder="n"/>
+      <input id="c-color" type="color" checked="checked" placeholder="n"/>
+      <input id="q-checkbox" type="checkbox" required="required" placeholder="n"/>
+      <input id="c-checkbox" type="checkbox" checked="checked" placeholder="n"/>
+      <input id="q-radio" type="radio" required="required" placeholder="n"/>
+      <input id="c-radio" type="radio" checked="checked" placeholder="n"/>
+      <input id="q-file" type="file" required="required" placeholder="n"/>
+      <input id="c-file" type="file" checked="checked" placeholder="n"/>
+      <input id="q-submit" type="submit" required="required" placeholder="n"/>
+      <input id="c-submit" type="submit" checked="checked" placeholder="n"/>
+      <input id="q-image" type="image" required="required" placeholder="n"/>
+      <input id="c-image" type="image" checked="checked" placeholder="n"/>
+      <input id="q-reset" type="reset" required="required" placeholder="n"/>
+      <input id="c-reset" type="reset" checked="checked" placeholder="n"/>
+      <input id="q-button" type="button" required="required" placeholder="n"/>
+      <input id="c-button" type="button" checked="checked" placeholder="n"/>
+    </div>
+  </body>
+</html>
