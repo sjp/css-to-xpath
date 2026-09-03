@@ -471,6 +471,16 @@ struct Scan {
     /// parenthesis, not the innermost, so the position does not move
     /// with however much deeper the rest of the selector goes.
     too_deep: Option<usize>,
+    /// The byte offset of the first `&` nesting selector, if the
+    /// selector uses one. Outside strings, escapes, and comments an `&`
+    /// can only be that selector: it appears in no other selector
+    /// production. This crate parses with nesting disabled — a `&` has
+    /// no meaning without the enclosing rule a selector-to-XPath
+    /// function never sees — so Servo does not recognise it as the
+    /// start of a compound and fails on whatever comes next instead,
+    /// reporting `&` as an empty selector or a dangling combinator.
+    /// Catching it here names the construct the caller actually wrote.
+    nesting_selector: Option<usize>,
 }
 
 /// The string handling here diverges from the CSS tokenizer on one point:
@@ -494,6 +504,7 @@ fn scan(css: &str) -> Scan {
     let mut scan = Scan {
         column_combinator: None,
         too_deep: None,
+        nesting_selector: None,
     };
     while i < bytes.len() {
         let b = bytes[i];
@@ -528,6 +539,9 @@ fn scan(css: &str) -> Scan {
                 // Unbalanced closers are Servo's to reject, not this
                 // walk's: just never go below zero.
                 b')' => depth = depth.saturating_sub(1),
+                b'&' => {
+                    scan.nesting_selector.get_or_insert(i);
+                }
                 _ => {}
             },
         }
@@ -563,6 +577,11 @@ pub(crate) fn parse(
             format!("functional pseudo-classes nested more than {MAX_NESTING_DEPTH} levels deep"),
             offset,
         ));
+    }
+    // Reported after the other two, so a selector with more than one
+    // problem keeps the message it had before this check existed.
+    if let Some(offset) = scan.nesting_selector {
+        return Err(Error::unsupported_at("the `&` nesting selector", offset));
     }
     let strict = match parse_list(css, false, default_namespace) {
         Ok(list) => return Ok(list),

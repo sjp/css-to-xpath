@@ -88,6 +88,15 @@ select the same nodes, because callers compare, cache and embed the strings.
   limit. `Display` gains the position too (`unsupported CSS construct at byte 4:
   ...`). The position is `None` for the constructs rejected during translation,
   whose parsed components carry no source offsets.
+- The `&` nesting selector is now `Error::Unsupported { construct: "the `&`
+  nesting selector", .. }` with the byte offset of the `&`, instead of whatever
+  the parse tripped over next — `"&"` and `"a:is(&)"` reported "the selector is
+  empty", and `"a > &"` "a combinator with nothing after it", all pointing at a
+  `&` the caret line showed. A pre-parse scan finds it, exactly as it finds
+  `||`. `Unsupported` is the correct variant: `&` is valid CSS in a nesting
+  context, and this crate — which never sees an enclosing rule — not supporting
+  it is what that variant means. A caller matching on `Error::Parse` for these
+  selectors sees `Error::Unsupported` now.
 - **Breaking:** removed the `VERSION` constant; use `env!("CARGO_PKG_VERSION")`
   in your own crate, or read the dependency's version from Cargo metadata.
 - A compound whose conditions include a never-matching `0` renders as just

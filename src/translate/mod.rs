@@ -1008,7 +1008,10 @@ fn describe_component(component: &Component<CssToXpathImpl>) -> String {
         Component::Slotted(..) => "the `::slotted()` pseudo-element".into(),
         Component::Part(..) => "the `::part()` pseudo-element".into(),
         Component::Host(..) => "the `:host` pseudo-class".into(),
-        Component::ParentSelector => "the `&` parent selector".into(),
+        // Unreachable in practice: the pre-parse scan rejects a `&`
+        // before Servo sees it, and nesting is not enabled anyway.
+        // Worded as the scan words it, so the two cannot diverge.
+        Component::ParentSelector => "the `&` nesting selector".into(),
         // PseudoElement carries an uninhabited type and the remaining
         // variants require parser features this crate never enables; they
         // are unreachable, but erroring beats panicking: the caller's

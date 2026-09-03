@@ -163,6 +163,17 @@ e:nth-last-col(2n)
 [foo="a||b"]
 a\|\|b
 a /* || */ b
+&
+& a
+a &
+a > &
+a&
+a:is(&)
+a:has(> &)
+[foo="a&b"]
+a\&b
+a /* & */ b
+col || &
 e:valid
 e:user-invalid
 e:read-only

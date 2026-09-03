@@ -31,6 +31,24 @@ fn unsupported_errors() {
     assert!(t.css_to_xpath("[foo=\"a||b\"]", "").is_ok());
     assert!(t.css_to_xpath("a\\|\\|b", "").is_ok());
     assert!(t.css_to_xpath("a /* || */ b", "").is_ok());
+    // The `&` nesting selector is caught by the same scan, in every
+    // position it can appear: alone, either side of a combinator,
+    // inside a compound, and inside a functional argument. Without the
+    // scan Servo — which parses with nesting disabled — blames
+    // whatever it failed on next, which for a leading `&` is "the
+    // selector is empty".
+    assert!(t.css_to_xpath("&", "").is_err());
+    assert!(t.css_to_xpath("& a", "").is_err());
+    assert!(t.css_to_xpath("a &", "").is_err());
+    assert!(t.css_to_xpath("a > &", "").is_err());
+    assert!(t.css_to_xpath("a&", "").is_err());
+    assert!(t.css_to_xpath("a:is(&)", "").is_err());
+    assert!(t.css_to_xpath("a:has(> &)", "").is_err());
+    // ...and an `&` in a string, an escape, or a comment stays valid,
+    // for the same reason a pipe there does.
+    assert!(t.css_to_xpath("[foo=\"a&b\"]", "").is_ok());
+    assert!(t.css_to_xpath("a\\&b", "").is_ok());
+    assert!(t.css_to_xpath("a /* & */ b", "").is_ok());
     // Pseudo-classes outside the never-match policy (see PseudoClass)
     // error rather than silently matching nothing: constraint
     // validation and `:indeterminate`'s IDL-only state rest on
@@ -372,6 +390,42 @@ fn error_messages() {
          \x20 |     ^"
     );
 
+    // The `&` nesting selector is the third, and the one whose
+    // pre-parse catch matters most: Servo cannot begin a compound with
+    // it, so the error that used to surface was whichever one the
+    // parse tripped over next — "the selector is empty" for a `&` that
+    // is plainly there in the caret line.
+    let sel = "a:is(&)";
+    let err = t.css_to_xpath(sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Unsupported {
+            construct: "the `&` nesting selector".to_owned(),
+            offset: Some(5),
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "unsupported CSS construct at byte 5: the `&` nesting selector"
+    );
+    assert_eq!(
+        err.message(sel),
+        "The CSS selector \"a:is(&)\" uses the `&` nesting selector, \
+         which this translator does not support\n\
+         \x20 |\n\
+         \x20 | a:is(&)\n\
+         \x20 |      ^"
+    );
+    // A selector with more than one problem keeps the message it had
+    // before the `&` check existed: the scan reports it last.
+    assert_eq!(
+        t.css_to_xpath("col || &", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "the `||` column combinator".to_owned(),
+            offset: Some(4),
+        }
+    );
+
     // Excess nesting is the other construct the scan finds, and its
     // message is bounded exactly like a `Parse` one: the quoted
     // selector is elided past 120 bytes and the gutter shows a
@@ -467,6 +521,7 @@ fn error_messages_are_not_debug_renderings() {
         "a:",
         "[foo!=bar]",
         "col || td",
+        "&",
         "e:is(:scope)",
     ] {
         let err = t.css_to_xpath(sel, "").unwrap_err();

@@ -309,7 +309,11 @@ express them faithfully:
   wildcard subject (`*`, `*|*`, `|*`, `ns|*`) or implicit-type compound:
   XPath 1.0 cannot compare a sibling's name against the matched
   element's own.
-- Nested `:has()`, `:host`, and the `&` parent selector.
+- Nested `:has()` and `:host`.
+- The `&` nesting selector, which has no meaning without the enclosing
+  rule a selector-to-XPath function never sees. Like `||`, it is caught
+  before parsing and named, since a parser with nesting disabled cannot
+  begin a compound with it and blames whatever follows instead.
 - Namespace prefixes that need quoting (`\31 ns|div`): a prefix that is
   not a valid XPath name cannot appear in a node test, and XPath 1.0
   cannot resolve one without the namespace URI, which this crate never
