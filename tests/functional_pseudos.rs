@@ -333,12 +333,12 @@ fn complex_pseudo_arguments() {
     // counted siblings and constrains the current element.
     t.check(
         "e:nth-child(2n of a b)",
-        "e[(count(preceding-sibling::*[self::b and ancestor::*[self::a]]) +1) \
+        "e[(count(preceding-sibling::*[self::b and ancestor::*[self::a]]) + 1) \
          mod 2 = 0 and self::b and ancestor::*[self::a]]",
     );
     t.check(
         "e:nth-child(2n of a > b)",
-        "e[(count(preceding-sibling::*[self::b and parent::*[self::a]]) +1) \
+        "e[(count(preceding-sibling::*[self::b and parent::*[self::a]]) + 1) \
          mod 2 = 0 and self::b and parent::*[self::a]]",
     );
     t.check(
@@ -376,6 +376,6 @@ fn repeated_argument_branches_are_folded() {
     // check of `An+B of S`.
     t.check(
         "e:nth-child(2n of a, a)",
-        "e[(count(preceding-sibling::*[self::a]) +1) mod 2 = 0 and self::a]",
+        "e[(count(preceding-sibling::*[self::a]) + 1) mod 2 = 0 and self::a]",
     );
 }

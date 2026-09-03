@@ -237,7 +237,7 @@ impl Translator {
             let b_neg = (-b_min_1).rem_euclid(a.abs());
 
             if b_neg != 0 {
-                left = format!("({left} +{b_neg})");
+                left = format!("({left} + {b_neg})");
             }
 
             expr.push(format!("{left} mod {a} = 0"));

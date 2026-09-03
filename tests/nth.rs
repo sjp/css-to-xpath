@@ -12,7 +12,7 @@ fn nth_family() {
     t.check("e:nth-child(1)", "e[count(preceding-sibling::*) = 0]");
     t.check(
         "e:nth-child(3n+2)",
-        "e[count(preceding-sibling::*) >= 1 and (count(preceding-sibling::*) +2) mod 3 = 0]",
+        "e[count(preceding-sibling::*) >= 1 and (count(preceding-sibling::*) + 2) mod 3 = 0]",
     );
     t.check(
         "e:nth-child(3n-2)",
@@ -31,7 +31,7 @@ fn nth_family() {
     t.check("e:nth-last-child(1)", "e[count(following-sibling::*) = 0]");
     t.check(
         "e:nth-last-child(2n)",
-        "e[(count(following-sibling::*) +1) mod 2 = 0]",
+        "e[(count(following-sibling::*) + 1) mod 2 = 0]",
     );
     t.check(
         "e:nth-last-child(2n+1)",
@@ -39,7 +39,7 @@ fn nth_family() {
     );
     t.check(
         "e:nth-last-child(2n+2)",
-        "e[count(following-sibling::*) >= 1 and (count(following-sibling::*) +1) mod 2 = 0]",
+        "e[count(following-sibling::*) >= 1 and (count(following-sibling::*) + 1) mod 2 = 0]",
     );
     t.check(
         "e:nth-last-child(3n+1)",
@@ -104,7 +104,7 @@ fn nth_family() {
     t.check("e:nth-child(-n+1)", "e[count(preceding-sibling::*) <= 0]");
     t.check(
         "e:nth-child(-2n+2)",
-        "e[count(preceding-sibling::*) <= 1 and (count(preceding-sibling::*) +1) mod -2 = 0]",
+        "e[count(preceding-sibling::*) <= 1 and (count(preceding-sibling::*) + 1) mod -2 = 0]",
     );
 }
 

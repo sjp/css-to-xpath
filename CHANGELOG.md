@@ -125,6 +125,10 @@ select the same nodes, because callers compare, cache and embed the strings.
   unchanged; a list that folds down to one branch is no longer an or-group, so
   it also loses the parentheses it would have been given when conjoined —
   `e[foo]:is(a, a)` is `e[@foo and self::a]`.
+- The `An+B` modulo offset is spaced like every other operator the crate
+  emits: `a:nth-last-child(2n)` is
+  `a[(count(following-sibling::*) + 1) mod 2 = 0]`, not `... +1) ...`. The
+  expression is unchanged for an XPath engine; only the string differs.
 - Class selectors no longer emit the redundant `@class and` guard:
   `div.warning` is
   `div[contains(concat(' ', normalize-space(@class), ' '), ' warning ')]`.
