@@ -360,6 +360,27 @@ fn html_pseudo_overrides() {
     assert!(html.css_to_xpath("input:in-range", "").is_err());
 }
 
+/// A compound's conjunction is simplified where the redundancy is
+/// visible in the string itself: a never-matching `0` absorbs the rest,
+/// and a condition collected twice is written once. Both are
+/// simplifications of a boolean conjunction, so the node-set is
+/// unchanged — `:hover` never matches a static document either way.
+#[test]
+fn redundant_conditions_are_folded() {
+    let mut html = Cases::new(Mode::Html);
+    // Two never-matching pseudo-classes, and one alongside a condition
+    // that could have matched.
+    html.check("a:hover:focus", "a[0]");
+    html.check("a:hover[x]", "a[0]");
+    // :any-link on an `a` re-adds the @href the attribute selector
+    // already asked for.
+    html.check("a[href]:any-link", "a[@href]");
+    // Standalone predicates are left alone: the `+` combinator's
+    // position test and the name test it pins still get their own
+    // brackets, ahead of the never-matching condition.
+    html.check("p + a:hover", "p/following-sibling::*[1][self::a][0]");
+}
+
 #[test]
 fn html_translator_lowercases_names_not_values() {
     let mut html = Cases::new(Mode::Html);

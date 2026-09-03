@@ -266,10 +266,9 @@ fn complex_pseudo_arguments() {
         "e:is(a:first-child b)",
         "e[self::b and ancestor::*[count(preceding-sibling::*) = 0 and self::a]]",
     );
-    t.check(
-        "e:is(a:hover b)",
-        "e[self::b and ancestor::*[0 and self::a]]",
-    );
+    // A step that can never match absorbs the rest of its own
+    // conjunction, here the `self::a` the folded element name added.
+    t.check("e:is(a:hover b)", "e[self::b and ancestor::*[0]]");
     // Nested pseudo-classes inside chain steps; an or-group condition
     // is parenthesized when conjoined with the chain test.
     t.check(

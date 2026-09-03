@@ -118,11 +118,9 @@ fn nth_child_of() {
         "li:nth-child(n of .item)",
         "li[contains(concat(' ', normalize-space(@class), ' '), ' item ')]",
     );
-    // Impossible series keeps the current-element check after the 0.
-    t.check(
-        "li:nth-child(-n of .item)",
-        "li[0 and contains(concat(' ', normalize-space(@class), ' '), ' item ')]",
-    );
+    // An impossible series never matches, whatever the `of` list says,
+    // so the 0 absorbs the current-element check.
+    t.check("li:nth-child(-n of .item)", "li[0]");
     // An element argument folds into a self:: test.
     t.check("div:nth-child(2 of div.foo)", "div[count(preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]) = 1 and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]");
     // A universal argument makes the list match everything, like a

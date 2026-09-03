@@ -114,6 +114,12 @@ Its argument is parsed — exactly one identifier, as Selectors 4 spells
 it — but never interpreted, so `:dir(ltr)`, `:dir(rtl)` and
 `:dir(anything)` all translate alike.
 
+Such a `[0]` absorbs the rest of its compound's condition, so
+`a:hover[x]` is `a[0]` and not `a[0 and @x]`, and a condition a compound
+collects twice is written once (`a[href]:any-link` is `a[@href]`).
+Nothing beyond those two rules is folded: the output is a faithful
+translation of the selector, not a minimised expression.
+
 ## The `prefix` argument
 
 `prefix` is prepended to each translated selector-group branch — pass

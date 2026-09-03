@@ -78,6 +78,12 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   `Error::Unsupported(String)` is now `Error::Unsupported { construct: String }`.
 - **Breaking:** removed the `VERSION` constant; use `env!("CARGO_PKG_VERSION")`
   in your own crate, or read the dependency's version from Cargo metadata.
+- A compound whose conditions include a never-matching `0` renders as just
+  that `0`, and a condition collected twice renders once: `a:hover[x]` is
+  `a[0]` rather than `a[0 and @x]`, and `a[href]:any-link` is `a[@href]`
+  rather than `a[@href and @href]`. Both are simplifications of one
+  conjunction, so the selected node-set is unchanged; standalone predicates
+  (the `+` combinator's `[1]`) keep their own brackets.
 - Class selectors no longer emit the redundant `@class and` guard:
   `div.warning` is
   `div[contains(concat(' ', normalize-space(@class), ' '), ' warning ')]`.

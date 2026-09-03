@@ -515,6 +515,10 @@ area:link
 link:link
 *|a:link
 p:link
+a:hover:focus
+a:hover[x]
+a[href]:any-link
+p + a:hover
 :checked
 option:checked
 div:checked

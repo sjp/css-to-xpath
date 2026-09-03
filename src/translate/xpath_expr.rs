@@ -167,13 +167,47 @@ impl XPathExpr {
     /// untouched (brackets and `not(...)` need no parentheses around a
     /// lone or-group), several join with `and`, parenthesizing the
     /// or-groups among them.
+    ///
+    /// Two simplifications of the conjunction happen here, so that a
+    /// reader of the output does not have to reason about a boolean to
+    /// see what a compound does. Both are local to one conjunction, and
+    /// neither can change which nodes it selects:
+    ///
+    /// - a condition that is literally `0` (what a pseudo-class that
+    ///   cannot match statically emits) absorbs the rest, so
+    ///   `a:hover[x]` is `a[0]` rather than `a[0 and @x]`;
+    /// - an exactly repeated condition — same expression, same
+    ///   or-group-ness — is kept once, so `a[href]:any-link` is
+    ///   `a[@href]` rather than `a[@href and @href]`.
+    ///
+    /// The standalone predicates are deliberately untouched: they are
+    /// separate brackets because their position matters (the `+`
+    /// combinator's `[1]`), so a `0` here says nothing about them.
     pub(crate) fn condition(&self) -> Option<Condition> {
-        match self.conditions.len() {
-            0 => None,
-            1 => Some(self.conditions[0].clone()),
+        if self.conditions.is_empty() {
+            return None;
+        }
+        // Nothing conjoined with a never-matching condition can bring it
+        // back, so the whole conjunction is that condition.
+        if self.conditions.iter().any(|c| c.expr == "0") {
+            return Some(Condition {
+                expr: "0".to_owned(),
+                or_group: false,
+            });
+        }
+        let mut kept: Vec<&Condition> = Vec::new();
+        for condition in &self.conditions {
+            if !kept
+                .iter()
+                .any(|k| k.expr == condition.expr && k.or_group == condition.or_group)
+            {
+                kept.push(condition);
+            }
+        }
+        match kept.len() {
+            1 => Some(kept[0].clone()),
             _ => {
-                let parts: Vec<String> = self
-                    .conditions
+                let parts: Vec<String> = kept
                     .iter()
                     .map(|c| {
                         if c.or_group {
@@ -321,6 +355,42 @@ mod tests {
         assert_eq!(xp.render(), "e[@a or @b]");
         xp.add_condition("@c");
         assert_eq!(xp.render(), "e[(@a or @b) and @c]");
+    }
+
+    #[test]
+    fn never_matching_condition_absorbs_the_conjunction() {
+        let mut xp = XPathExpr::new("a");
+        xp.add_condition("@x");
+        xp.add_condition("0");
+        xp.add_or_condition("@a or @b");
+        assert_eq!(xp.render(), "a[0]");
+
+        // the standalone predicates keep their own brackets: `0` says
+        // nothing about a position test that applies before it
+        let mut xp = XPathExpr::new("*");
+        xp.add_predicate("1");
+        xp.add_condition("0");
+        assert_eq!(xp.render(), "*[1][0]");
+    }
+
+    #[test]
+    fn duplicate_conditions_are_kept_once() {
+        let mut xp = XPathExpr::new("a");
+        xp.add_condition("@href");
+        xp.add_condition("@href");
+        assert_eq!(xp.render(), "a[@href]");
+
+        xp.add_condition("@x");
+        xp.add_condition("@href");
+        assert_eq!(xp.render(), "a[@href and @x]");
+
+        // same expression, different or-group-ness: not a duplicate,
+        // since only one of the two is parenthesized
+        let mut xp = XPathExpr::new("a");
+        xp.add_or_condition("@a or @b");
+        xp.add_or_condition("@a or @b");
+        xp.add_condition("@c");
+        assert_eq!(xp.render(), "a[(@a or @b) and @c]");
     }
 
     #[test]
