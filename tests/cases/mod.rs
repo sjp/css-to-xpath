@@ -11,6 +11,10 @@
 //! binary uses only part of it; hence the blanket `dead_code` allow.
 #![allow(dead_code)]
 
+/// The shared selector corpus, which every pinned selector must be in.
+#[path = "../corpus/mod.rs"]
+mod corpus;
+
 use css_to_xpath::{Error, Mode, Translator};
 
 /// A translator for one [`Mode`] that accumulates mismatches instead of
@@ -21,11 +25,17 @@ use css_to_xpath::{Error, Mode, Translator};
 /// silent. Anything the translator itself can do is still reachable
 /// through [`Cases::css_to_xpath`], for the cases whose expectation is
 /// an error rather than an output string.
+///
+/// Dropping also reports any pinned selector missing from the shared
+/// corpus, which is what keeps `tests/corpus/selectors.txt` — the input
+/// to the XPath-validity oracle and to the fuzzer's seeds — in step with
+/// the suites instead of relying on the author to remember it.
 pub(crate) struct Cases {
     translator: Translator,
     prefix: &'static str,
     failures: String,
     failed: usize,
+    uncorpused: Vec<String>,
 }
 
 impl Cases {
@@ -47,6 +57,7 @@ impl Cases {
             prefix,
             failures: String::new(),
             failed: 0,
+            uncorpused: Vec::new(),
         }
     }
 
@@ -78,6 +89,9 @@ impl Cases {
     /// failure too, reported with its error.
     pub(crate) fn check(&mut self, css: &str, expected: impl AsRef<str>) {
         let expected = expected.as_ref();
+        if !corpus::contains(css) && !self.uncorpused.iter().any(|s| s == css) {
+            self.uncorpused.push(css.to_owned());
+        }
         match self.translator.css_to_xpath(css, self.prefix) {
             Ok(got) if got == expected => {}
             Ok(got) => self.fail(css, &format!("expected {expected:?}\n    got      {got:?}")),
@@ -105,11 +119,22 @@ impl Cases {
 /// test that failed some other way reports that failure alone.
 impl Drop for Cases {
     fn drop(&mut self) {
-        assert!(
-            self.failures.is_empty() || std::thread::panicking(),
-            "{} case(s) failed:{}",
-            self.failed,
-            self.failures
-        );
+        if std::thread::panicking() {
+            return;
+        }
+
+        let mut report = String::new();
+        if !self.failures.is_empty() {
+            report.push_str(&format!("{} case(s) failed:{}", self.failed, self.failures));
+        }
+        if !self.uncorpused.is_empty() {
+            report.push_str(&format!(
+                "\n{} pinned selector(s) missing from {}; add these lines:\n{}",
+                self.uncorpused.len(),
+                corpus::PATH,
+                self.uncorpused.join("\n"),
+            ));
+        }
+        assert!(report.is_empty(), "{}", report.trim_start_matches('\n'));
     }
 }

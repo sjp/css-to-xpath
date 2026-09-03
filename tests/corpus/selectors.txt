@@ -561,3 +561,165 @@ x|p
 [foo]
 [x|foo]
 input:checked
+spaces:empty
+shelf > book
+book title
+library book
+book + book
+book ~ book
+magazine + book
+book + magazine
+shelf > *
+magazine + *
+[id]
+svg
+svg > rect
+[svg|role]
+book
+:root
+|book
+|library > |shelf
+*|rect
+dc|creator
+book:lang(*)
+title:lang(*)
+book:lang(en, fr)
+book:lang(en-GB)
+book:lang(en-gb)
+book:lang(en-US)
+book:lang(en)
+book:lang(fr)
+title:lang(en)
+title:lang(fr)
+title:lang(de)
+svg|rect
+*|creator
+[dc|role]
+[*|role]
+rect
+creator
+shelf:has(magazine)
+shelf:has(> book)
+shelf:has(> svg|svg)
+book:has(+ book)
+book:not(.hardback)
+book:is(.hardback, [xml|lang])
+book:where(.paperback)
+:is(magazine, blank)
+book:nth-child(2 of book)
+book:nth-child(-n+2 of .hardback)
+p:lang(fr)
+p:lang(en)
+a:lang(en)
+p:lang(de)
+book:first-child
+book:last-child
+book:first-of-type
+book:last-of-type
+book:only-of-type
+magazine:only-of-type
+blank:empty
+book:nth-child(2)
+book:nth-child(0)
+book:nth-last-child(0)
+book:nth-of-type(0)
+title:nth-child(1)
+shelf > *:nth-child(odd)
+book:nth-of-type(2)
+book:nth-last-of-type(1)
+shelf > *:nth-last-child(1)
+input[type=checkbox]
+[TYPE=text]
+input[type=CHECKBOX s]
+input[type=checkbox s]
+input[type=TEXT s]
+input[type=text s]
+INPUT
+A
+#doc
+.Nav
+.nav
+#b1
+.hardback
+[class~="hardback"]
+[title]
+[data-code|="ab"]
+[data-code^="cd"]
+[data-code$="ef"]
+[data-code*="d-e"]
+[data-code="ab-cd"]
+[title^="Fic"]
+[title$="ion"]
+[title*="icti"]
+[title~="Fiction"]
+[title|="Fiction"]
+[data-note="it's \"q\""]
+[data-note*="'s \"q\""]
+shelf[class="nonfiction"]
+title, blank
+:any-link
+input:disabled
+a:link
+a:enabled
+input:required
+xhtml|input
+xhtml|legend > xhtml|input
+input
+xhtml|input[type="checkbox"]
+xhtml|input[type="CHECKBOX"]
+xhtml|input[type="CHECKBOX" i]
+legend > input
+body > *
+fieldset:nth-of-type(2)
+select :is(option, optgroup)
+input[type="checkbox"]
+|input
+*|input
+xhtml|p:lang(fr)
+xhtml|p:lang(de)
+xhtml|a:lang(en)
+xhtml|p:lang(en)
+xhtml|p:lang(fr-CA)
+xhtml|p:lang(fr-Latn)
+xhtml|p:lang(fr-DE)
+span:lang(de)
+span:lang(de-DE)
+span:lang(de-1996)
+span:lang(de-DE-1996)
+span:lang(de-FR)
+span:lang(de-DE-Latn)
+span:lang(zh-TW)
+span:lang(zh-Hant-TW)
+span:lang(zh-Hant)
+span:lang(de-DE-*)
+span:lang(en)
+span:lang(*)
+xhtml|fieldset:disabled
+xhtml|option:checked
+xhtml|input:enabled
+xhtml|option:disabled
+xhtml|optgroup:disabled
+xhtml|optgroup:enabled
+xhtml|input:disabled
+xhtml|button:disabled
+xhtml|input:required
+xhtml|textarea:required
+xhtml|input:optional
+xhtml|a:link
+xhtml|p:link
+xhtml|p:checked
+xhtml|a:enabled
+:nth-child(2 of :nth-child(2 of a))
+a:any-link
+a:visited
+a:hover
+a:active
+a:focus
+a:focus-within
+a:focus-visible
+a:target
+a:target-within
+a:local-link
+a:checked
+a:required
+a:optional

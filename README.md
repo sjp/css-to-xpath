@@ -472,7 +472,11 @@ Five layers, all run by `cargo test`:
   three modes, with and without a prefix, and parses the result with
   [`sxd-xpath`](https://crates.io/crates/sxd-xpath). An unbalanced
   bracket or a precedence mistake fails here even if the pinned string
-  matches.
+  matches. The corpus is recorded rather than maintained: every selector
+  the pinning suites pin and every selector the semantic suite evaluates
+  is asserted to be a line of that file, and the failure lists the lines
+  to add — so a selector added to a suite cannot quietly escape this
+  oracle or the fuzzer's seeds.
 - **Semantics** (`tests/semantics.rs`) *evaluates* the translated XPath
   against the fixture documents in `tests/fixtures/` and compares the
   selected element ids against what the CSS selector should match. The

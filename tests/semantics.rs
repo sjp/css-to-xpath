@@ -9,6 +9,7 @@
 
 mod common;
 
+use common::corpus;
 use common::{DC_NS, Fixture, SVG_NS, XHTML_NS};
 use css_to_xpath::{Mode, Translator};
 
@@ -24,10 +25,17 @@ fn check(fixture: &Fixture, mode: Mode, cases: &[Case]) {
 
 /// [`check`] with a configured translator, for the cases a bare [`Mode`]
 /// cannot express.
+///
+/// Every selector is also required to be in the shared corpus: these
+/// cases reach shapes the string-pinning suites do not, and the corpus
+/// is what feeds them to the XPath-validity oracle and the fuzzer.
 #[track_caller]
 fn check_with(fixture: &Fixture, translator: &Translator, cases: &[Case]) {
     let mut failures = String::new();
     for (css, expected) in cases {
+        if !corpus::contains(css) {
+            failures.push_str(&format!("\n  {css:?}\n    missing from {}", corpus::PATH));
+        }
         let got = fixture.select_with(css, translator);
         if got != *expected {
             failures.push_str(&format!(

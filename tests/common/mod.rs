@@ -5,6 +5,11 @@
 //! binary uses only part of it; hence the blanket `dead_code` allow.
 #![allow(dead_code)]
 
+/// The shared selector corpus, and the check that the selectors these
+/// tests exercise are all in it.
+#[path = "../corpus/mod.rs"]
+pub(crate) mod corpus;
+
 use css_to_xpath::{Mode, Translator};
 use sxd_document::Package;
 use sxd_xpath::nodeset::Node;
@@ -24,16 +29,6 @@ pub(crate) fn mode_name(mode: Mode) -> &'static str {
         Mode::Html => "html",
         Mode::Xhtml => "xhtml",
     }
-}
-
-/// The shared selector corpus: every CSS selector literal that the
-/// string-pinning suites translate, plus the README's examples.
-///
-/// One selector per line, stored raw — so a selector containing a line
-/// break cannot be represented here. That is the only gap, and the fuzz
-/// target covers arbitrary bytes anyway.
-pub(crate) fn corpus() -> impl Iterator<Item = &'static str> {
-    include_str!("../corpus/selectors.txt").lines()
 }
 
 /// A parsed fixture document plus the prefix bindings an evaluation of

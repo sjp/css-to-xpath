@@ -6,12 +6,18 @@
 //! nothing about whether the string is an XPath at all: an unbalanced
 //! bracket, a bad literal or a precedence mistake would sail through.
 //! Here every selector in the shared corpus (which is those same pinned
-//! selectors) is translated in all three modes, with and without a path
+//! selectors, plus the ones `semantics.rs` evaluates and the README's
+//! examples) is translated in all three modes, with and without a path
 //! prefix, and the result is handed to sxd-xpath's parser.
+//!
+//! The suites themselves assert that the corpus holds every selector
+//! they use — see `tests/corpus/mod.rs` — so this oracle's input cannot
+//! silently fall behind them.
 
 mod common;
 
-use common::{MODES, corpus, mode_name};
+use common::corpus::{self, selectors};
+use common::{MODES, mode_name};
 use css_to_xpath::Translator;
 use sxd_xpath::Factory;
 
@@ -26,7 +32,7 @@ fn every_translation_parses_as_xpath() {
     let factory = Factory::new();
     let mut translated = 0usize;
 
-    for css in corpus() {
+    for css in selectors() {
         for mode in MODES {
             for prefix in ["", "descendant-or-self::", "//"] {
                 let Ok(xpath) = Translator::new(mode).css_to_xpath(css, prefix) else {
@@ -63,7 +69,7 @@ fn every_default_namespace_translation_parses_as_xpath() {
     let factory = Factory::new();
     let mut translated = 0usize;
 
-    for css in corpus() {
+    for css in selectors() {
         for mode in MODES {
             let translator = Translator::new(mode).with_default_namespace_prefix("h");
             let Ok(xpath) = translator.css_to_xpath(css, "") else {
@@ -92,16 +98,36 @@ fn every_default_namespace_translation_parses_as_xpath() {
     );
 }
 
-/// The corpus is a checked-in file; guard against it being emptied or
-/// truncated by a bad edit.
+/// The corpus is a checked-in file. The suites catch a line going
+/// missing, but only for the selectors they use; this guards the file
+/// as a whole against being emptied or truncated by a bad edit.
 #[test]
 fn corpus_is_populated() {
-    let count = corpus().count();
+    let count = selectors().count();
     assert!(count >= 450, "corpus has shrunk to {count} selectors");
     assert!(
-        corpus().any(|s| s == "e:has(> .foo)"),
+        corpus::contains("e:has(> .foo)"),
         "corpus is missing the README's examples"
     );
+}
+
+/// A line is added to the corpus by pasting what a sync failure printed,
+/// so guard against the same selector being pasted twice.
+#[test]
+fn the_corpus_has_no_duplicate_lines() {
+    let mut seen = std::collections::HashSet::new();
+    let dupes: Vec<_> = selectors()
+        .filter(|css| !css.is_empty() && !seen.insert(*css))
+        .collect();
+    assert!(dupes.is_empty(), "corpus repeats {dupes:?}");
+}
+
+/// Harness self-check: the membership test the suites assert against
+/// must actually reject a selector the corpus does not hold, or the
+/// sync check proves nothing.
+#[test]
+fn corpus_membership_rejects_an_absent_selector() {
+    assert!(!corpus::contains("e:definitely-not-in-the-corpus"));
 }
 
 /// Harness self-check: sxd-xpath's parser must actually reject a
