@@ -116,8 +116,10 @@ it — but never interpreted, so `:dir(ltr)`, `:dir(rtl)` and
 
 Such a `[0]` absorbs the rest of its compound's condition, so
 `a:hover[x]` is `a[0]` and not `a[0 and @x]`, and a condition a compound
-collects twice is written once (`a[href]:any-link` is `a[@href]`).
-Nothing beyond those two rules is folded: the output is a faithful
+collects twice is written once (`a[href]:any-link` is `a[@href]`). The
+same repeat rule applies to an `:is()`/`:where()`/`:not()`/`of S`
+argument list, whose branches are OR-ed: `:is(a, a)` is `*[self::a]`.
+Nothing beyond those rules is folded: the output is a faithful
 translation of the selector, not a minimised expression.
 
 `Mode` is an ordinary enum, so a caller that has one picks it at compile

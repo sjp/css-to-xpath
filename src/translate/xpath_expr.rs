@@ -81,17 +81,29 @@ impl Condition {
     /// argument handling needs. The result is an or-group when anything
     /// was actually joined (or the single member already was one).
     ///
+    /// An exactly repeated branch is kept once, the same rule
+    /// `XPathExpr::condition` applies to a conjunction: `X or X` selects
+    /// what `X` does, so `:is(a, a)` is `*[self::a]`. The or-group is
+    /// decided by what is left after that, so a list that folds down to
+    /// one branch is no longer parenthesized when it is conjoined.
+    ///
     /// An empty list has no or-join, so the result is `None` rather than
     /// an empty expression: every caller already has to decide what an
     /// argument list that constrains nothing means (`:not()` of it is
     /// unmatchable, `:is()` of it is a no-op), and the `Option` is where
     /// that decision is made.
     pub(crate) fn join_or(conditions: &[Condition]) -> Option<Condition> {
-        let first = conditions.first()?;
-        let exprs: Vec<&str> = conditions.iter().map(|c| c.expr.as_str()).collect();
+        let mut kept: Vec<&Condition> = Vec::new();
+        for condition in conditions {
+            if !kept.iter().any(|k| k.expr == condition.expr) {
+                kept.push(condition);
+            }
+        }
+        let first = kept.first()?;
+        let exprs: Vec<&str> = kept.iter().map(|c| c.expr.as_str()).collect();
         Some(Condition {
             expr: exprs.join(" or "),
-            or_group: conditions.len() > 1 || first.or_group,
+            or_group: kept.len() > 1 || first.or_group,
         })
     }
 }

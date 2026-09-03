@@ -734,3 +734,12 @@ a:local-link
 a:checked
 a:required
 a:optional
+:is(a, a)
+:where(a, a)
+e:not(b, b)
+e:is(a, a, b)
+e:is(b, a, b)
+e:is(.x, [class~=x])
+e[foo]:is(a, b)
+e[foo]:is(a, a)
+e:nth-child(2n of a, a)

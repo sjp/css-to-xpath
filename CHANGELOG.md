@@ -105,6 +105,13 @@ select the same nodes, because callers compare, cache and embed the strings.
   rather than `a[@href and @href]`. Both are simplifications of one
   conjunction, so the selected node-set is unchanged; standalone predicates
   (the `+` combinator's `[1]`) keep their own brackets.
+- A repeated branch in an `:is()`/`:where()`/`:not()`/`of S` argument list
+  renders once, the same rule the compound's conjunction already applied to a
+  repeated condition: `:is(a, a)` is `*[self::a]` rather than
+  `*[self::a or self::a]`. `X or X` selects what `X` does, so the node-set is
+  unchanged; a list that folds down to one branch is no longer an or-group, so
+  it also loses the parentheses it would have been given when conjoined —
+  `e[foo]:is(a, a)` is `e[@foo and self::a]`.
 - Class selectors no longer emit the redundant `@class and` guard:
   `div.warning` is
   `div[contains(concat(' ', normalize-space(@class), ' '), ' warning ')]`.

@@ -347,3 +347,35 @@ fn complex_pseudo_arguments() {
          and self::b and ancestor::*[self::a]]",
     );
 }
+
+/// A repeated branch in an argument list is written once, the same rule
+/// the compound's conjunction applies to a repeated condition. `X or X`
+/// selects what `X` does, so no node-set changes; what does change is
+/// that a list folding down to one branch stops being an or-group, and
+/// so is no longer parenthesized when it is conjoined.
+#[test]
+fn repeated_argument_branches_are_folded() {
+    let mut t = Cases::new(Mode::Generic);
+    t.check(":is(a, a)", "*[self::a]");
+    t.check(":where(a, a)", "*[self::a]");
+    t.check("e:not(b, b)", "e[not(self::b)]");
+    // Only the repeats collapse; the rest of the list is untouched, in
+    // the order it was written.
+    t.check("e:is(a, a, b)", "e[self::a or self::b]");
+    t.check("e:is(b, a, b)", "e[self::b or self::a]");
+    // Two branches are the same when their translations are, not only
+    // when they are written alike.
+    t.check(
+        "e:is(.x, [class~=x])",
+        "e[contains(concat(' ', normalize-space(@class), ' '), ' x ')]",
+    );
+    // Folding to one branch drops the parentheses an or-group needs.
+    t.check("e[foo]:is(a, b)", "e[@foo and (self::a or self::b)]");
+    t.check("e[foo]:is(a, a)", "e[@foo and self::a]");
+    // The same list feeds both the sibling filter and the current-element
+    // check of `An+B of S`.
+    t.check(
+        "e:nth-child(2n of a, a)",
+        "e[(count(preceding-sibling::*[self::a]) +1) mod 2 = 0 and self::a]",
+    );
+}
