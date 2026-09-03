@@ -406,12 +406,21 @@ contract stays honest.
   parser, since it lowercases every name it sees. An HTML5 parser
   (html5ever, a browser) restores the camelCase SVG and MathML names
   instead, so `Mode::Html` is aimed at libxml2-style trees.
-- **Class matching splits on XML white space.** `.foo` is
+- **Class matching splits on XML white space, by choice.** `.foo` is
   `contains(concat(' ', normalize-space(@class), ' '), ' foo ')`, and
-  `normalize-space` counts space, tab, CR and LF, while HTML's
-  space-separated tokens also include the form feed U+000C. A `class`
-  attribute that separates two tokens with a form feed keeps them joined
-  here.
+  `normalize-space` counts space, tab, CR and LF, while CSS — and so
+  HTML's space-separated tokens — also splits on the form feed U+000C. A
+  `class` attribute that separates two tokens with a form feed keeps them
+  joined here, as does `[attr~=value]`, which shares the translation. The
+  target language could express it: wrapping the attribute in
+  `translate(@class, '<FF>', ' ')` before normalising closes the gap. But
+  XPath 1.0 string literals have no escape syntax, so the U+000C would
+  have to sit raw in the output of the most common construct there is —
+  an invisible control character in strings callers compare, cache and
+  embed — to serve a `class` attribute almost nobody writes. The value
+  side is exact either way: `[attr~=value]` folds to a never-matching
+  `[0]` when the value itself contains any CSS white space, form feed
+  included.
 - **Non-ASCII names are quoted, and non-ASCII prefixes are rejected.** A
   name is written into the node test directly only if it is ASCII
   letters, digits, `_`, `.` or `-`, so `é` folds into the conservative

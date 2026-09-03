@@ -41,8 +41,19 @@ pub(crate) fn attrib_equals(xpath: &mut XPathExpr, name: &str, value: &str) {
     xpath.add_condition(&format!("{name} = {}", xpath_literal(value)));
 }
 
-/// `[attr~=value]`. The value must be non-empty and contain no CSS
-/// whitespace (`[ \t\r\n\f]`), otherwise the condition can never match.
+/// `[attr~=value]`, and so `.class`. The value must be non-empty and
+/// contain no CSS whitespace (`[ \t\r\n\f]`), otherwise the condition
+/// can never match.
+///
+/// The attribute side splits on the narrower set `normalize-space`
+/// knows, which is XML white space: space, tab, CR and LF, but not the
+/// form feed. Tokens separated by a U+000C therefore stay joined. That
+/// is a deliberate trade, not a limit of XPath 1.0: a `translate()`
+/// mapping U+000C to a space, wrapped around the attribute before
+/// `normalize-space`, would close the gap. XPath 1.0 string literals
+/// have no escape syntax, though, so that fix means a raw control
+/// character in the output of the most common construct the crate
+/// emits. See the README's Approximations.
 pub(crate) fn attrib_includes(xpath: &mut XPathExpr, name: &str, value: &str) {
     let matchable = !value.is_empty()
         && !value

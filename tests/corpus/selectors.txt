@@ -754,3 +754,5 @@ e:is(.x, [class~=x])
 e[foo]:is(a, b)
 e[foo]:is(a, a)
 e:nth-child(2n of a, a)
+.p
+.q

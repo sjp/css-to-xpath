@@ -10,7 +10,7 @@
 mod common;
 
 use common::corpus;
-use common::{DC_NS, Fixture, SVG_NS, XHTML_NS};
+use common::{DC_NS, Fixture, MODES, SVG_NS, XHTML_NS};
 use css_to_xpath::{Mode, Translator};
 
 /// A case is a selector and the ids it must select, in document order.
@@ -104,6 +104,27 @@ fn generic_type_class_and_attribute_selectors() {
             ("title, blank", &["ti1", "bl1", "ti2", "ti3", "ti4", "ti5"]),
         ],
     );
+}
+
+/// The one place the translation knowingly parts company with CSS.
+/// `.p` is `contains(concat(' ', normalize-space(@class), ' '), ' p ')`,
+/// and `normalize-space` splits on XML white space, which excludes the
+/// form feed U+000C that CSS counts. Tokens separated by one therefore
+/// stay joined, and the element carrying them matches neither. A
+/// `translate()` around the attribute would close the gap at the price
+/// of a raw control character in the output of every class match; the
+/// README's Approximations records why that trade was declined. The
+/// expectation below is the crate's behaviour, not the CSS answer,
+/// which is why it does not sit with the cases above.
+#[test]
+fn form_feed_does_not_separate_class_tokens() {
+    let fixture = Fixture::new(
+        "<r><a id=\"space\" class=\"p q\"/><a id=\"feed\" class=\"p\u{c}q\"/></r>",
+        &[],
+    );
+    for mode in MODES {
+        check(&fixture, mode, &[(".p", &["space"]), (".q", &["space"])]);
+    }
 }
 
 #[test]

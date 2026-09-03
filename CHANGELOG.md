@@ -187,6 +187,15 @@ select the same nodes, because callers compare, cache and embed the strings.
   per-family suites under `tests/`; it now names those suites and the `Cases`
   checker that drives them, and quotes the fuzz target's actual 1 MiB stack
   rather than the 2 MiB it used before the nesting limit was resized.
+- The README called the form feed that CSS splits `class` tokens on, and
+  `normalize-space` does not, something the target language cannot express.
+  It can: a `translate()` mapping U+000C to a space, wrapped around the
+  attribute before `normalize-space`, closes the gap. The bullet now records
+  the trade that was actually made and kept — XPath 1.0 string literals have
+  no escape syntax, so the fix would put a raw control character in the output
+  of the most common construct the crate emits, to serve a `class` attribute
+  almost nobody writes — and a `tests/semantics.rs` case pins the divergence
+  so the decision cannot be reversed by accident. No behaviour changed.
 - The README did not mention that css-syntax-3 auto-closes an open block,
   function or string at end of input, so a truncated selector translates as
   its closed form (`a[b` is `a[@b]`) rather than erroring. "Error handling"
