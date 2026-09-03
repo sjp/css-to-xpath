@@ -44,6 +44,12 @@ select the same nodes, because callers compare, cache and embed the strings.
   keep their meanings. Translators built without one are unaffected, so no
   existing output moves.
 - `Translator::mode()`, and `Debug`/`PartialEq`/`Eq`/`Hash` on `Translator`.
+- `FromStr`, `Display` and `Mode::as_str()` on `Mode`, for callers that read a
+  mode from a CLI flag or a config file: `"xhtml".parse()` is `Mode::Xhtml`, the
+  three names are matched ASCII case-insensitively, and nothing else is
+  accepted. The failure is a new unit-struct `ParseModeError`, which implements
+  `Display` and `std::error::Error`. `Default` on `Mode` (`Mode::Generic`) and
+  on `Translator` (`Translator::new(Mode::Generic)`, no default namespace).
 - `DESCENDANT_OR_SELF` and `WHOLE_DOCUMENT` constants for the two `prefix`
   values worth naming.
 - `MAX_NESTING_DEPTH`, `MAX_NTH_OF_DEPTH` and `MAX_NTH_OF_BYTES`, so the limits
@@ -73,7 +79,15 @@ select the same nodes, because callers compare, cache and embed the strings.
 - **Breaking:** `Error` is `#[non_exhaustive]` and its variants are struct-like:
   `Error::Parse(String, u32)` is now
   `Error::Parse { kind: ParseErrorKind, offset: usize }`, and
-  `Error::Unsupported(String)` is now `Error::Unsupported { construct: String }`.
+  `Error::Unsupported(String)` is now
+  `Error::Unsupported { construct: String, offset: Option<usize> }`.
+- **Breaking:** `Error::Unsupported` carries the offending byte position when it
+  is known, and `Error::message` then renders the same caret gutter an
+  `Error::Parse` gets — so `"col || td"` points at the `||`, and a selector
+  nested past `MAX_NESTING_DEPTH` points at the first parenthesis over the
+  limit. `Display` gains the position too (`unsupported CSS construct at byte 4:
+  ...`). The position is `None` for the constructs rejected during translation,
+  whose parsed components carry no source offsets.
 - **Breaking:** removed the `VERSION` constant; use `env!("CARGO_PKG_VERSION")`
   in your own crate, or read the dependency's version from Cargo metadata.
 - A compound whose conditions include a never-matching `0` renders as just

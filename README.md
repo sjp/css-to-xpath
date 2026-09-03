@@ -120,6 +120,24 @@ collects twice is written once (`a[href]:any-link` is `a[@href]`).
 Nothing beyond those two rules is folded: the output is a faithful
 translation of the selector, not a minimised expression.
 
+`Mode` is an ordinary enum, so a caller that has one picks it at compile
+time. A caller that reads one at run time — from a CLI flag, a config
+file — gets `FromStr` and `Display` for the three lowercase names, so
+the three-arm `match` need not be written again in every crate:
+
+```rust
+use css_to_xpath::{Mode, ParseModeError};
+
+assert_eq!("xhtml".parse(), Ok(Mode::Xhtml));
+// ASCII case-insensitive, and nothing else is accepted.
+assert_eq!("HTML".parse(), Ok(Mode::Html));
+assert_eq!("xml".parse::<Mode>(), Err(ParseModeError));
+assert_eq!(Mode::Generic.to_string(), "generic");
+```
+
+`Mode::default()` is `Mode::Generic`, and `Translator::default()` is
+`Translator::new(Mode::Generic)` with no default namespace.
+
 ## The `prefix` argument
 
 `prefix` is prepended to each translated selector-group branch — pass
@@ -411,12 +429,13 @@ error that has travelled a few layers can still be printed:
 
 ```text
 invalid CSS selector at byte 6: a combinator with nothing after it
-unsupported CSS construct: the `||` column combinator
+unsupported CSS construct at byte 4: the `||` column combinator
+unsupported CSS construct: the `:scope` pseudo-class inside a functional pseudo-class
 ```
 
 A caller that still holds the selector can render the fuller diagnostic
-with `Error::message`, which quotes the selector and — for a parse error
-— points a caret at the offending position:
+with `Error::message`, which quotes the selector and, whenever the error
+knows a position, points a caret at it:
 
 ```rust
 use css_to_xpath::{css_to_xpath, Mode};
@@ -429,6 +448,9 @@ if let Err(e) = css_to_xpath(selector, "", Mode::Generic) {
 
 ```text
 The CSS selector "col || td" uses the `||` column combinator, which this translator does not support
+  |
+  | col || td
+  |     ^
 ```
 
 ```text
@@ -442,8 +464,15 @@ The two variants say whose rules were broken. `Error::Parse { kind,
 offset }` is a selector CSS itself rejects, with `kind` a
 `ParseErrorKind` of this crate's own — never a `Debug` rendering of a
 dependency's internal error — and `offset` the byte position the caret
-points at. `Error::Unsupported { construct }` is a valid selector this
-crate declines to approximate. Both are `#[non_exhaustive]`.
+points at. `Error::Unsupported { construct, offset }` is a valid selector
+this crate declines to approximate. Both are `#[non_exhaustive]`.
+
+Only `Error::Parse` always knows a position. An `Error::Unsupported`
+knows one — and so renders a caret — for the two constructs found by the
+pre-parse scan of the source text, the `||` combinator and nesting past
+`MAX_NESTING_DEPTH`; its `offset` is `None` for everything rejected
+during translation, because the parsed selector Servo hands back carries
+no source offsets to map a component to.
 
 One class of malformed input is *not* an error: css-syntax-3 closes an
 open block, function or string implicitly at end of input, so a truncated

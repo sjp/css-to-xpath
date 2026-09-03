@@ -10,6 +10,7 @@ pub use error::{Error, ParseErrorKind};
 pub use nth::{MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH};
 
 use std::borrow::Cow;
+use std::fmt;
 
 use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
 use selectors::parser::{Combinator, Component, RelativeSelector, Selector};
@@ -44,11 +45,15 @@ pub(crate) enum Kind {
 /// flavours CSS selector matching distinguishes, and callers benefit
 /// more from exhaustive `match` than the crate would from room to add a
 /// fourth.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum Mode {
     /// Plain CSS/XPath semantics: case-sensitive names, no
     /// HTML-specific pseudo-classes, and `:lang()` via XPath's own
     /// `lang()` function.
+    ///
+    /// This is the [`Default`], as the flavour that assumes least about
+    /// the document.
+    #[default]
     Generic,
     /// An HTML document, as an HTML parser leaves it: element and
     /// attribute names are ASCII-lowercased, HTML's legacy
@@ -66,6 +71,64 @@ pub enum Mode {
     Xhtml,
 }
 
+impl Mode {
+    /// The mode's lowercase name: `"generic"`, `"html"` or `"xhtml"`.
+    ///
+    /// The inverse of the [`FromStr`](std::str::FromStr) impl, which
+    /// accepts these three names in any ASCII case.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Mode::Generic => "generic",
+            Mode::Html => "html",
+            Mode::Xhtml => "xhtml",
+        }
+    }
+}
+
+impl fmt::Display for Mode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Mode {
+    type Err = ParseModeError;
+
+    /// Parse `"generic"`, `"html"` or `"xhtml"`, ignoring ASCII case, so
+    /// that a mode read from a CLI flag or a config file needs no
+    /// hand-written `match` in every caller.
+    ///
+    /// Nothing else is accepted — not an abbreviation, not `"xml"` — and
+    /// the name is compared as-is, so surrounding whitespace is the
+    /// caller's to trim.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+            if s.eq_ignore_ascii_case(mode.as_str()) {
+                return Ok(mode);
+            }
+        }
+        Err(ParseModeError)
+    }
+}
+
+/// The error [`Mode`]'s [`FromStr`](std::str::FromStr) impl returns: the
+/// string named no mode.
+///
+/// It carries no payload — the offending string is the one the caller
+/// just passed in, and echoing it back would only make the message
+/// unbounded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ParseModeError;
+
+impl fmt::Display for ParseModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("expected one of `generic`, `html` or `xhtml`")
+    }
+}
+
+impl std::error::Error for ParseModeError {}
+
 /// A reusable translator for one [`Mode`], optionally carrying a
 /// default namespace prefix.
 ///
@@ -73,7 +136,10 @@ pub enum Mode {
 /// whether names are ASCII-lowercased, where `:lang()` reads from — is
 /// derived from the mode by the private accessors below. Casing is
 /// applied here in the translator, never via Servo's parser settings.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// [`Default`] is [`Mode::Generic`] with no default namespace: the plain
+/// translator, the same as `Translator::new(Mode::Generic)`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Translator {
     mode: Mode,
     /// The prefix an unprefixed type selector is qualified with, set by
@@ -467,15 +533,15 @@ impl Translator {
             // :not(). Nesting inside other functional pseudo-classes is
             // allowed (Selectors Level 4).
             Component::Negation(list) => {
-                match self.arg_conditions(list.slice(), ":not()", of_depth)? {
-                    Some(conditions) if !conditions.is_empty() => {
-                        // not(...) supplies its own grouping, so the
-                        // or-join needs no parentheses.
-                        let joined = Condition::join_or(&conditions);
-                        xpath.add_condition(&format!("not({})", joined.expr));
-                    }
+                let joined = self
+                    .arg_conditions(list.slice(), ":not()", of_depth)?
+                    .and_then(|conditions| Condition::join_or(&conditions));
+                match joined {
+                    // not(...) supplies its own grouping, so the
+                    // or-join needs no parentheses.
+                    Some(joined) => xpath.add_condition(&format!("not({})", joined.expr)),
                     // A universal argument makes the negation unmatchable.
-                    _ => xpath.add_condition("0"),
+                    None => xpath.add_condition("0"),
                 }
                 Ok(())
             }
@@ -498,9 +564,9 @@ impl Translator {
                 // None means an argument matched everything, so the whole
                 // pseudo-class is a no-op constraint.
                 if let Some(conditions) = self.arg_conditions(list.slice(), context, of_depth)?
-                    && !conditions.is_empty()
+                    && let Some(joined) = Condition::join_or(&conditions)
                 {
-                    xpath.push_condition(Condition::join_or(&conditions));
+                    xpath.push_condition(joined);
                 }
                 Ok(())
             }

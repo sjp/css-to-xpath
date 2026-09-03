@@ -152,8 +152,7 @@ impl Translator {
                 }
                 let check = self
                     .arg_conditions(of.selectors, ":nth-child(... of S)", of.depth + 1)?
-                    .filter(|conditions| !conditions.is_empty())
-                    .map(|conditions| Condition::join_or(&conditions));
+                    .and_then(|conditions| Condition::join_or(&conditions));
                 if check
                     .as_ref()
                     .is_some_and(|c| c.expr.len() > MAX_NTH_OF_BYTES)

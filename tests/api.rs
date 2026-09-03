@@ -2,8 +2,8 @@
 //! traits `Translator` and `Mode` implement.
 
 use css_to_xpath::{
-    DESCENDANT_OR_SELF, MAX_NESTING_DEPTH, MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH, Mode, Translator,
-    WHOLE_DOCUMENT, css_to_xpath,
+    DESCENDANT_OR_SELF, MAX_NESTING_DEPTH, MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH, Mode,
+    ParseModeError, Translator, WHOLE_DOCUMENT, css_to_xpath,
 };
 
 /// The public surface a caller can hold on to: a `Translator` is a
@@ -70,4 +70,45 @@ fn public_api_surface() {
             .contains(&MAX_NTH_OF_DEPTH.to_string())
     );
     assert_eq!(MAX_NTH_OF_BYTES, 1 << 20);
+}
+
+/// `Mode` converts to and from the three names a CLI flag or a config
+/// file carries them as, so that a caller reading one back does not
+/// hand-write the same three-arm `match`. The round trip is exact, and
+/// the parse is ASCII case-insensitive but accepts nothing else.
+#[test]
+fn mode_string_conversions() {
+    for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+        assert_eq!(mode.to_string(), mode.as_str());
+        assert_eq!(mode.as_str().parse(), Ok(mode));
+        assert_eq!(mode.as_str().to_uppercase().parse(), Ok(mode));
+        assert_eq!(mode.to_string().parse(), Ok(mode));
+    }
+    assert_eq!(Mode::Generic.as_str(), "generic");
+    assert_eq!(Mode::Html.as_str(), "html");
+    assert_eq!(Mode::Xhtml.as_str(), "xhtml");
+    assert_eq!("XhTmL".parse(), Ok(Mode::Xhtml));
+
+    // Nothing else: not an abbreviation, not a near-miss, and not a
+    // name with whitespace around it — trimming is the caller's.
+    for bad in ["", "xml", "htm", "generic ", " html", "HTML5", "xhtml\n"] {
+        assert_eq!(bad.parse::<Mode>(), Err(ParseModeError));
+    }
+    assert_eq!(
+        ParseModeError.to_string(),
+        "expected one of `generic`, `html` or `xhtml`"
+    );
+    // The error is a `std::error::Error`, so `?` in a `main` reading a
+    // flag composes without a wrapper.
+    let boxed: Box<dyn std::error::Error> = Box::new(ParseModeError);
+    assert_eq!(boxed.to_string(), ParseModeError.to_string());
+}
+
+/// The plain translator is the default one: `Mode::Generic`, no default
+/// namespace.
+#[test]
+fn defaults_are_the_plain_translator() {
+    assert_eq!(Mode::default(), Mode::Generic);
+    assert_eq!(Translator::default(), Translator::new(Mode::Generic));
+    assert_eq!(Translator::default().css_to_xpath("A", "").unwrap(), "A");
 }

@@ -453,19 +453,24 @@ pub const MAX_NESTING_DEPTH: usize = 32;
 /// The facts about a selector that must be known before Servo is entered,
 /// gathered in one linear walk that skips strings, escapes, and comments.
 struct Scan {
-    /// Whether the selector uses the Level 4 column combinator `||`.
-    /// Outside strings, escapes, and comments a doubled pipe can only be
-    /// that combinator (a single `|` occurs in namespace prefixes and
-    /// `|=`, never doubled). Servo has no column-combinator support and
-    /// its parse error misreads the second pipe as namespace syntax
+    /// The byte offset of the first `|` of the Level 4 column combinator
+    /// `||`, if the selector uses one. Outside strings, escapes, and
+    /// comments a doubled pipe can only be that combinator (a single `|`
+    /// occurs in namespace prefixes and `|=`, never doubled). Servo has
+    /// no column-combinator support and its parse error misreads the
+    /// second pipe as namespace syntax
     /// (`ExplicitNamespaceUnexpectedToken`), so the construct is caught
     /// before parsing and named properly. Column selection has no XPath
     /// 1.0 translation anyway: column membership depends on
     /// `colspan`/`rowspan` layout arithmetic.
-    column_combinator: bool,
-    /// The deepest parenthesis nesting reached, an upper bound on how far
-    /// the parser and translator will recurse.
-    max_depth: usize,
+    column_combinator: Option<usize>,
+    /// The byte offset of the first `(` that opened a level deeper than
+    /// [`MAX_NESTING_DEPTH`], if any — the point at which the selector
+    /// went too deep for the parser and translator to recurse through
+    /// safely, and so the point to put a caret under. The *first* such
+    /// parenthesis, not the innermost, so the position does not move
+    /// with however much deeper the rest of the selector goes.
+    too_deep: Option<usize>,
 }
 
 /// The string handling here diverges from the CSS tokenizer on one point:
@@ -487,8 +492,8 @@ fn scan(css: &str) -> Scan {
     let mut quote: Option<u8> = None;
     let mut depth: usize = 0;
     let mut scan = Scan {
-        column_combinator: false,
-        max_depth: 0,
+        column_combinator: None,
+        too_deep: None,
     };
     while i < bytes.len() {
         let b = bytes[i];
@@ -511,10 +516,14 @@ fn scan(css: &str) -> Scan {
                     }
                     i += 1;
                 }
-                b'|' if bytes.get(i + 1) == Some(&b'|') => scan.column_combinator = true,
+                b'|' if bytes.get(i + 1) == Some(&b'|') => {
+                    scan.column_combinator.get_or_insert(i);
+                }
                 b'(' => {
                     depth += 1;
-                    scan.max_depth = scan.max_depth.max(depth);
+                    if depth > MAX_NESTING_DEPTH {
+                        scan.too_deep.get_or_insert(i);
+                    }
                 }
                 // Unbalanced closers are Servo's to reject, not this
                 // walk's: just never go below zero.
@@ -546,13 +555,14 @@ pub(crate) fn parse(
     default_namespace: Option<&str>,
 ) -> Result<SelectorList<CssToXpathImpl>, Error> {
     let scan = scan(css);
-    if scan.column_combinator {
-        return Err(Error::unsupported("the `||` column combinator"));
+    if let Some(offset) = scan.column_combinator {
+        return Err(Error::unsupported_at("the `||` column combinator", offset));
     }
-    if scan.max_depth > MAX_NESTING_DEPTH {
-        return Err(Error::unsupported(format!(
-            "functional pseudo-classes nested more than {MAX_NESTING_DEPTH} levels deep"
-        )));
+    if let Some(offset) = scan.too_deep {
+        return Err(Error::unsupported_at(
+            format!("functional pseudo-classes nested more than {MAX_NESTING_DEPTH} levels deep"),
+            offset,
+        ));
     }
     let strict = match parse_list(css, false, default_namespace) {
         Ok(list) => return Ok(list),

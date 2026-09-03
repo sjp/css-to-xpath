@@ -6,7 +6,9 @@ mod parser;
 mod translate;
 
 pub use parser::MAX_NESTING_DEPTH;
-pub use translate::{Error, MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH, Mode, ParseErrorKind, Translator};
+pub use translate::{
+    Error, MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH, Mode, ParseErrorKind, ParseModeError, Translator,
+};
 
 /// A `prefix` that searches the context node and its whole subtree:
 /// `"a"` becomes `descendant-or-self::a`.

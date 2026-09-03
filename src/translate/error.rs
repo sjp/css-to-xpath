@@ -4,16 +4,16 @@
 //! impl names the construct at fault without needing the selector back,
 //! so an error that has travelled through a few layers can still be
 //! printed. [`Error::message`] additionally takes the selector and
-//! renders the full diagnostic — the quoted selector and, for a parse
-//! error, a caret gutter. The exact wording of both is part of this
-//! crate's output contract and is pinned by tests.
+//! renders the full diagnostic — the quoted selector and, whenever the
+//! error knows a position, a caret gutter. The exact wording of both is
+//! part of this crate's output contract and is pinned by tests.
 //!
 //! Messages are bounded, so that a caller can print one whatever it was
 //! handed: an echoed token is elided past [`MAX_TOKEN_ECHO`] bytes, the
-//! quoted selector past [`MAX_SELECTOR_ECHO`] bytes, and a
-//! [`Error::Parse`] caret gutter shows a window of the line the error is
-//! on rather than the whole selector. A 30 KB selector therefore still
-//! yields a message of a few hundred bytes, with the caret intact.
+//! quoted selector past [`MAX_SELECTOR_ECHO`] bytes, and a caret gutter
+//! shows a window of the line the error is on rather than the whole
+//! selector. A 30 KB selector therefore still yields a message of a few
+//! hundred bytes, with the caret intact.
 //!
 //! Nothing here echoes a dependency's `Debug` output: every parse
 //! failure is mapped to a [`ParseErrorKind`] of this crate's own, so the
@@ -37,17 +37,24 @@ const MAX_SELECTOR_ECHO: usize = 120;
 const MAX_TOKEN_ECHO: usize = 40;
 
 /// Display columns of the error's line kept around the caret in a
-/// [`Error::Parse`] gutter: enough for the offending compound and its
-/// neighbours, and narrow enough to survive an 80-column terminal
-/// alongside the two-space gutter.
+/// gutter: enough for the offending compound and its neighbours, and
+/// narrow enough to survive an 80-column terminal alongside the
+/// two-space gutter.
 const MAX_GUTTER_WIDTH: usize = 72;
 
 /// Why a CSS selector could not be translated.
 ///
 /// The variants split by *whose* rules were broken: [`Error::Parse`] for
 /// a selector CSS itself rejects, [`Error::Unsupported`] for a valid
-/// selector this crate declines to approximate. Only the former has an
-/// offending byte position, so only the former renders a caret.
+/// selector this crate declines to approximate.
+///
+/// A [`Error::Parse`] always knows the offending byte position, so it
+/// always renders a caret. A [`Error::Unsupported`] knows one only for
+/// the constructs the pre-parse scan finds — the `||` combinator and
+/// excessive nesting — because Servo's parsed components carry no source
+/// offsets, so a construct rejected during translation cannot be mapped
+/// back to the selector text. Its `offset` is therefore an [`Option`],
+/// and its message grows a caret only when it is `Some`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Error {
@@ -66,13 +73,17 @@ pub enum Error {
         /// The offending construct, as a noun phrase (`` the `||` column
         /// combinator ``) that reads as the object of "uses …".
         construct: String,
+        /// The 0-indexed *byte* offset of the construct within the
+        /// selector string, when it is known; `None` when it is not.
+        /// See the variant split above for which constructs know it.
+        offset: Option<usize>,
     },
 }
 
 impl Error {
     /// Render the full user-facing message, naming the offending
-    /// selector — and, for a [`Error::Parse`], pointing a caret at the
-    /// position within it.
+    /// selector — and, whenever the error carries a position, pointing a
+    /// caret at it.
     ///
     /// [`Display`](std::fmt::Display) is the one-line form for callers
     /// that no longer hold the selector; this is the form to print when
@@ -87,7 +98,20 @@ impl Error {
                     "Unable to parse the CSS selector {quoted}: {kind}\n  |\n  | {line}\n  | {caret}"
                 )
             }
-            Error::Unsupported { construct } => format!(
+            Error::Unsupported {
+                construct,
+                offset: Some(offset),
+            } => {
+                let (line, caret) = gutter(selector, *offset);
+                format!(
+                    "The CSS selector {quoted} uses {construct}, which this translator \
+                     does not support\n  |\n  | {line}\n  | {caret}"
+                )
+            }
+            Error::Unsupported {
+                construct,
+                offset: None,
+            } => format!(
                 "The CSS selector {quoted} uses {construct}, which this translator does not support"
             ),
         }
@@ -101,10 +125,23 @@ impl Error {
         self.message(selector)
     }
 
-    /// An [`Error::Unsupported`] naming `construct`.
+    /// An [`Error::Unsupported`] naming `construct`, with no position:
+    /// for the constructs found during translation, which Servo's
+    /// offset-free components cannot be mapped back to the source.
     pub(crate) fn unsupported(construct: impl Into<String>) -> Self {
         Error::Unsupported {
             construct: construct.into(),
+            offset: None,
+        }
+    }
+
+    /// An [`Error::Unsupported`] naming `construct` at `offset`: for the
+    /// constructs the pre-parse scan finds, which walks the source text
+    /// and so knows where they are.
+    pub(crate) fn unsupported_at(construct: impl Into<String>, offset: usize) -> Self {
+        Error::Unsupported {
+            construct: construct.into(),
+            offset: Some(offset),
         }
     }
 }
@@ -117,7 +154,16 @@ impl fmt::Display for Error {
             Error::Parse { kind, offset } => {
                 write!(f, "invalid CSS selector at byte {offset}: {kind}")
             }
-            Error::Unsupported { construct } => {
+            Error::Unsupported {
+                construct,
+                offset: Some(offset),
+            } => {
+                write!(f, "unsupported CSS construct at byte {offset}: {construct}")
+            }
+            Error::Unsupported {
+                construct,
+                offset: None,
+            } => {
                 write!(f, "unsupported CSS construct: {construct}")
             }
         }
@@ -282,8 +328,8 @@ fn quote(selector: &str) -> String {
     quoted
 }
 
-/// Render a [`Error::Parse`] gutter: the line of `selector` that
-/// `offset` falls on, and a caret line whose `^` sits under it.
+/// Render a caret gutter: the line of `selector` that `offset` falls
+/// on, and a caret line whose `^` sits under it.
 ///
 /// Only that one line is echoed, so a caret on the second line of a
 /// multi-line selector does not point into the first line's text, and it

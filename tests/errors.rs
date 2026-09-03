@@ -57,6 +57,7 @@ fn unsupported_errors() {
     // hit the same `describe_component` message.
     let scope_in_functional = css_to_xpath::Error::Unsupported {
         construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
+        offset: None,
     };
     assert_eq!(
         t.css_to_xpath("e:is(:scope)", "").unwrap_err(),
@@ -118,6 +119,7 @@ fn unsupported_errors() {
     // `name()` would match only documents using that very prefix.
     let unsafe_prefix = css_to_xpath::Error::Unsupported {
         construct: "a namespace prefix that needs quoting (`1ns`)".to_owned(),
+        offset: None,
     };
     assert_eq!(
         t.css_to_xpath("\\31 ns|div", "").unwrap_err(),
@@ -345,29 +347,70 @@ fn error_messages() {
     );
 
     // The column combinator is valid CSS syntax but has no XPath 1.0
-    // translation, so it is `Error::Unsupported` — no caret gutter,
-    // since there is no single offending byte position.
+    // translation, so it is `Error::Unsupported`. The pre-parse scan
+    // finds it by walking the source text, so this one does know where
+    // it is and does render a caret.
     let sel = "col || td";
     let err = t.css_to_xpath(sel, "").unwrap_err();
     assert_eq!(
         err,
         css_to_xpath::Error::Unsupported {
-            construct: "the `||` column combinator".to_owned()
+            construct: "the `||` column combinator".to_owned(),
+            offset: Some(4),
         }
     );
     assert_eq!(
         err.to_string(),
-        "unsupported CSS construct: the `||` column combinator"
+        "unsupported CSS construct at byte 4: the `||` column combinator"
     );
     assert_eq!(
         err.message(sel),
         "The CSS selector \"col || td\" uses the `||` column combinator, \
-         which this translator does not support"
+         which this translator does not support\n\
+         \x20 |\n\
+         \x20 | col || td\n\
+         \x20 |     ^"
+    );
+
+    // Excess nesting is the other construct the scan finds, and its
+    // message is bounded exactly like a `Parse` one: the quoted
+    // selector is elided past 120 bytes and the gutter shows a
+    // 72-column window of the line around the caret, rather than all
+    // 166 bytes of a selector nobody wrote by hand.
+    let sel = format!("{}a{}", ":is(".repeat(33), ")".repeat(33));
+    let err = t.css_to_xpath(&sel, "").unwrap_err();
+    assert_eq!(
+        err,
+        css_to_xpath::Error::Unsupported {
+            construct: "functional pseudo-classes nested more than 32 levels deep".to_owned(),
+            // The 33rd `(`, one per four-byte `:is(`.
+            offset: Some(33 * 4 - 1),
+        }
+    );
+    assert_eq!(
+        err.message(&sel),
+        format!(
+            "The CSS selector \"{}\u{2026}\" uses functional pseudo-classes nested \
+             more than 32 levels deep, which this translator does not support\n\
+             \x20 |\n\
+             \x20 | \u{2026}{}\n\
+             \x20 | {}^",
+            // The quote stops at 120 bytes; the gutter window is the
+            // last 72 columns of the 166-column line, which is as far
+            // left as it can start while still holding the caret at
+            // column 131, and the caret is 131 - 94 columns into it
+            // plus one for the leading `…`.
+            &sel[..120],
+            &sel[94..],
+            " ".repeat(38),
+        )
     );
 
     // `:scope` inside a functional pseudo-class argument has no
     // reachable context node in an XPath 1.0 predicate: also
-    // `Error::Unsupported`, and the only `describe_component` branch
+    // `Error::Unsupported`, but found during translation, where the
+    // parsed components carry no source offsets — so no position and no
+    // caret. It is the only `describe_component` branch
     // reachable through the public API (the other branches all
     // require parser constructs — `::slotted()`, `::part()`, `:host`,
     // `&`, relative-selector scoping — this crate never enables).
@@ -376,7 +419,8 @@ fn error_messages() {
     assert_eq!(
         err,
         css_to_xpath::Error::Unsupported {
-            construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned()
+            construct: "the `:scope` pseudo-class inside a functional pseudo-class".to_owned(),
+            offset: None,
         }
     );
     assert_eq!(

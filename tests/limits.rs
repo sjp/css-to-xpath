@@ -23,24 +23,25 @@ fn nesting_depth_is_bounded() {
         .spawn(|| {
             let t = Translator::new(Mode::Generic);
             let nest = |open: &str, n: usize| format!("{}a{}", open.repeat(n), ")".repeat(n));
-            let too_deep = css_to_xpath::Error::Unsupported {
+            // The position reported is the 33rd `(` — the first one past
+            // the limit — so it does not move with however much deeper
+            // the rest of the selector goes: 33 levels and 10 000 levels
+            // of the same construct are the same error.
+            let too_deep = |offset: usize| css_to_xpath::Error::Unsupported {
                 construct: "functional pseudo-classes nested more than 32 levels deep".to_owned(),
+                offset: Some(offset),
             };
 
             for open in [":not(", ":is(", ":where(", ":matches("] {
+                let over_limit = too_deep(33 * open.len() - 1);
                 assert!(t.css_to_xpath(&nest(open, 32), "").is_ok());
-                assert_eq!(t.css_to_xpath(&nest(open, 33), "").unwrap_err(), too_deep);
+                assert_eq!(t.css_to_xpath(&nest(open, 33), "").unwrap_err(), over_limit);
                 // Well past the depth that used to abort the process.
                 assert_eq!(
                     t.css_to_xpath(&nest(open, 10_000), "").unwrap_err(),
-                    too_deep
+                    over_limit
                 );
             }
-            assert_eq!(
-                too_deep.message(":not(:not(a))"),
-                "The CSS selector \":not(:not(a))\" uses functional pseudo-classes \
-                 nested more than 32 levels deep, which this translator does not support"
-            );
 
             // Parens inside strings, escapes, and comments are not
             // nesting, exactly as the `||` scan treats pipes.
@@ -97,8 +98,12 @@ fn long_chains_translate() {
 fn nth_child_of_nesting_is_bounded() {
     let mut t = Cases::new(Mode::Generic);
     let nest = |n: usize| format!("{}a{}", ":nth-child(2 of ".repeat(n), ")".repeat(n));
+    // Unlike the parenthesis limit, this one is reached during
+    // translation, where Servo's components carry no source offsets:
+    // the error names the construct but no position.
     let too_deep = css_to_xpath::Error::Unsupported {
         construct: "`An+B of S` selector lists nested more than 8 levels deep".to_owned(),
+        offset: None,
     };
 
     // Two levels, in full: `a` appears four times, not twice.
@@ -123,7 +128,10 @@ fn nth_child_of_nesting_is_bounded() {
     assert_eq!(
         t.css_to_xpath(&nest(33), "").unwrap_err(),
         css_to_xpath::Error::Unsupported {
-            construct: "functional pseudo-classes nested more than 32 levels deep".to_owned()
+            construct: "functional pseudo-classes nested more than 32 levels deep".to_owned(),
+            // The 33rd `(`: one per `:nth-child(2 of ` level, whose 16
+            // bytes put it at offset 10.
+            offset: Some(32 * 16 + 10),
         }
     );
     // The selector is 154 bytes, so its quote is elided at 120
@@ -145,7 +153,8 @@ fn nth_child_of_nesting_is_bounded() {
     assert_eq!(
         t.css_to_xpath(&laundered(9), "").unwrap_err(),
         css_to_xpath::Error::Unsupported {
-            construct: "`An+B of S` selector lists nested more than 8 levels deep".to_owned()
+            construct: "`An+B of S` selector lists nested more than 8 levels deep".to_owned(),
+            offset: None,
         }
     );
 
@@ -165,7 +174,8 @@ fn nth_child_of_nesting_is_bounded() {
         t.css_to_xpath(&big(800), "").unwrap_err(),
         css_to_xpath::Error::Unsupported {
             construct: "an `An+B of S` selector list translating to more than 1048576 bytes"
-                .to_owned()
+                .to_owned(),
+            offset: None,
         }
     );
 }

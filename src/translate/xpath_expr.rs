@@ -80,12 +80,19 @@ impl Condition {
     /// OR together a list of conditions, as the `:is()`/`:not()`/`of S`
     /// argument handling needs. The result is an or-group when anything
     /// was actually joined (or the single member already was one).
-    pub(crate) fn join_or(conditions: &[Condition]) -> Condition {
+    ///
+    /// An empty list has no or-join, so the result is `None` rather than
+    /// an empty expression: every caller already has to decide what an
+    /// argument list that constrains nothing means (`:not()` of it is
+    /// unmatchable, `:is()` of it is a no-op), and the `Option` is where
+    /// that decision is made.
+    pub(crate) fn join_or(conditions: &[Condition]) -> Option<Condition> {
+        let first = conditions.first()?;
         let exprs: Vec<&str> = conditions.iter().map(|c| c.expr.as_str()).collect();
-        Condition {
+        Some(Condition {
             expr: exprs.join(" or "),
-            or_group: conditions.len() > 1 || conditions[0].or_group,
-        }
+            or_group: conditions.len() > 1 || first.or_group,
+        })
     }
 }
 
