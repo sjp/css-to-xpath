@@ -2,6 +2,7 @@
 
 pub(crate) mod error;
 mod generic;
+mod ncname;
 mod nth;
 mod pseudo;
 mod xpath_expr;
@@ -17,6 +18,7 @@ use selectors::parser::{Combinator, Component, RelativeSelector, Selector};
 
 use crate::parser::{self, CssToXpathImpl};
 use generic::{attrib_equals, attrib_includes, attrib_operator};
+use ncname::is_ncname;
 use pseudo::LangSource;
 use xpath_expr::{Condition, XPathExpr, is_safe_name};
 
@@ -476,9 +478,12 @@ impl Translator {
                 xpath.add_condition("namespace-uri() = ''");
                 return Ok(xpath);
             }
-            // Namespace prefixes are case-sensitive.
-            // https://www.w3.org/TR/css-namespaces-3/#prefixes
-            NsConstraint::Prefix(prefix) if !is_safe_name(prefix) => {
+            // A prefix is written into the node test as it stands
+            // (prefixes are case-sensitive:
+            // https://www.w3.org/TR/css-namespaces-3/#prefixes), so it
+            // has to be a name XPath can parse — a looser test than the
+            // local name's, which has the local-name() fallback.
+            NsConstraint::Prefix(prefix) if !is_ncname(prefix) => {
                 return Err(unsafe_prefix_error(prefix));
             }
             NsConstraint::Prefix(prefix) if !safe => {
@@ -760,9 +765,9 @@ impl Translator {
     }
 
     /// Attribute-name handling: ASCII-lowercase (html), safety check, namespace
-    /// qualification. Prefixes take part in the safety check, as in
-    /// `xpath_element`: one that needs quoting cannot be a node test at
-    /// all, and errors.
+    /// qualification. Prefixes are checked too, as in `xpath_element`,
+    /// but against the `NCName` production rather than the local name's
+    /// stricter test: a prefix that cannot be a node test at all errors.
     fn attrib_expr(&self, ns: NsConstraint, local_name: &str) -> Result<String, Error> {
         let name = if self.lower_case_attribute_names() {
             local_name.to_ascii_lowercase()
@@ -780,9 +785,7 @@ impl Translator {
                     xpath_expr::xpath_literal(&name)
                 ))
             }
-            NsConstraint::Prefix(prefix) if !is_safe_name(prefix) => {
-                Err(unsafe_prefix_error(prefix))
-            }
+            NsConstraint::Prefix(prefix) if !is_ncname(prefix) => Err(unsafe_prefix_error(prefix)),
             NsConstraint::Prefix(prefix) if !safe => {
                 // As in `xpath_element`: the prefix stays in the node test
                 // so it resolves through the caller's namespace map, and
@@ -989,12 +992,12 @@ fn collect_seqs(
     seqs
 }
 
-/// A namespace prefix that is not a valid XPath name cannot appear in a
-/// node test, and XPath 1.0 offers no way to resolve it without the
-/// namespace URI, which this crate never sees. Comparing the whole
-/// `prefix:name` against `name()` instead would match only documents that
-/// happen to use that very prefix, so such a prefix errors rather than
-/// approximating.
+/// A namespace prefix that is not an XML `NCName` (see [`ncname`]) cannot
+/// appear in a node test, and XPath 1.0 offers no way to resolve it
+/// without the namespace URI, which this crate never sees. Comparing the
+/// whole `prefix:name` against `name()` instead would match only
+/// documents that happen to use that very prefix, so such a prefix errors
+/// rather than approximating.
 fn unsafe_prefix_error(prefix: &str) -> Error {
     Error::unsupported(format!(
         "a namespace prefix that needs quoting (`{prefix}`)"

@@ -82,6 +82,40 @@ fn unsafe_names_and_escapes() {
     // `unsupported_errors` in `errors.rs`.
 }
 
+/// A namespace prefix is held to the XML `NCName` production rather than
+/// to the local name's stricter ASCII test. The looser rule is what the
+/// prefix position needs: a prefix has no `local-name()` fallback to
+/// approximate with, so anything the rule rejects is an error, and a
+/// non-ASCII `NCName` is a perfectly good XPath name.
+#[test]
+fn non_ascii_namespace_prefixes() {
+    let mut t = Cases::new(Mode::Generic);
+    // The prefix goes into the node test as it stands, exactly as an
+    // ASCII one does.
+    t.check("nsé|div", "nsé:div");
+    t.check("nsé|*", "nsé:*");
+    t.check("[nsé|href]", "*[@nsé:href]");
+    t.check("[nsé|href='v']", "*[@nsé:href = 'v']");
+    t.check("中文|div", "中文:div");
+    // A combining mark or an extender is a name character but not a
+    // name *start*, so it may sit inside a prefix.
+    t.check("a\u{b7}b|div", "a\u{b7}b:div");
+    // The two rules compose: the prefix stays in the node test and the
+    // local name still falls back to a local-name() comparison.
+    t.check("nsé|é", "nsé:*[local-name() = 'é']");
+    t.check("nsé|di\\[v", "nsé:*[local-name() = 'di[v']");
+    // And they compose everywhere a prefixed name can be written.
+    t.check("e:is(nsé|div)", "e[self::nsé:div]");
+    t.check("e:has(> nsé|div)", "e[child::nsé:div]");
+    t.check("e + nsé|div", "e/following-sibling::*[1][self::nsé:div]");
+    t.check(
+        "nsé|div:first-of-type",
+        "nsé:div[count(preceding-sibling::nsé:div) = 0]",
+    );
+    // What the rule still rejects is a prefix that is not a name at
+    // all; see `unsupported_errors` in `errors.rs`.
+}
+
 /// One policy for unprefixed type names wherever they appear: a name
 /// written without a prefix means the null namespace, and `*|e` is
 /// the escape hatch for "this name in any namespace". Inside a

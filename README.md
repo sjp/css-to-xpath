@@ -212,7 +212,9 @@ XPath reads as a division, not a path.
 A CSS namespace prefix is passed straight through to the XPath, so
 `svg|g` becomes `svg:g` and the *caller's* namespace map decides what
 `svg` binds to — this crate never sees namespace URLs, and a prefix that
-is not a valid XPath name is an error rather than a guess.
+is not a valid XPath name is an error rather than a guess. "Valid XPath
+name" is the XML `NCName` production, so a non-ASCII prefix is fine:
+`nsé|div` becomes `nsé:div`.
 
 An *unprefixed* type name becomes an unprefixed XPath name test, which
 matches the null namespace only. That is the rule everywhere the name can
@@ -319,10 +321,10 @@ express them faithfully:
   rule a selector-to-XPath function never sees. Like `||`, it is caught
   before parsing and named, since a parser with nesting disabled cannot
   begin a compound with it and blames whatever follows instead.
-- Namespace prefixes that need quoting (`\31 ns|div`): a prefix that is
-  not a valid XPath name cannot appear in a node test, and XPath 1.0
-  cannot resolve one without the namespace URI, which this crate never
-  sees. A *local name* needing quoting is fine — `svg|di\[v` translates to
+- Namespace prefixes that are not XML `NCName`s (`\31 ns|div`): such a
+  prefix cannot appear in a node test, and XPath 1.0 cannot resolve one
+  without the namespace URI, which this crate never sees. A *local name*
+  that cannot be a node test is fine — `svg|di\[v` translates to
   `svg:*[local-name() = 'di[v']`, so the prefix still resolves through the
   caller's namespace map.
 - `:scope` outside the leftmost compound, or inside a functional
@@ -421,12 +423,17 @@ contract stays honest.
   side is exact either way: `[attr~=value]` folds to a never-matching
   `[0]` when the value itself contains any CSS white space, form feed
   included.
-- **Non-ASCII names are quoted, and non-ASCII prefixes are rejected.** A
-  name is written into the node test directly only if it is ASCII
-  letters, digits, `_`, `.` or `-`, so `é` folds into the conservative
-  `*[name() = 'é' and namespace-uri() = '']`. A namespace *prefix* gets
-  no such fallback: `nsé|div` is an error under the rule above, even
-  though `nsé` is a valid XML `NCName` and would be a valid XPath prefix.
+- **Non-ASCII local names are quoted.** A *local* name is written into
+  the node test directly only if it is ASCII letters, digits, `_`, `.`
+  or `-`, so `é` folds into the conservative
+  `*[name() = 'é' and namespace-uri() = '']`. That is a fallback, not a
+  rejection, and it means the same thing, so the ASCII-only rule costs
+  nothing but expression length. A namespace *prefix* has no such
+  fallback and so is held to the real `NCName` production instead:
+  `nsé|div` translates to `nsé:div`. The accepted set is XML 1.0's
+  original `Name` tables — the ones XPath 1.0 cites, and a subset of the
+  Fifth Edition set later engines use — so the output parses whichever
+  definition the evaluator implements.
 
 ## Error handling
 

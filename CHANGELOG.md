@@ -73,6 +73,18 @@ select the same nodes, because callers compare, cache and embed the strings.
   form feed in class token lists, and quoted non-ASCII names. The empty
   language range `:lang("")` is listed under "Not supported". No behaviour
   changed.
+- Namespace prefixes are now held to the XML `NCName` production instead of
+  the ASCII-only test used for local names, so a non-ASCII prefix translates
+  rather than erroring: `nsé|div` becomes `nsé:div`, `[nsé|href]` becomes
+  `*[@nsé:href]`. The rule for *local* names is unchanged — one that cannot
+  be a node test still folds into `local-name()`, which is why being
+  conservative there costs nothing and being conservative about a prefix,
+  which has no such fallback, cost fidelity. A prefix that is not a name at
+  all (`\31 ns|div`) is still an `Unsupported` error, and no selector that
+  translated before translates differently. The accepted set is XML 1.0's
+  original `Name` tables, the ones XPath 1.0 cites, which are a subset of
+  the Fifth Edition set some engines use: the output parses under either
+  reading, checked through both sxd-xpath and libxml2.
 
 ### Changed
 

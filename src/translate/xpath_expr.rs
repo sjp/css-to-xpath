@@ -7,8 +7,15 @@
 //! `or`. The exact output (like `e[@foo = 'bar']`) is load-bearing for
 //! the crate's output contract and is pinned by tests.
 
-/// Whether a name can be used directly in an XPath name test (no quoting
-/// needed).
+/// Whether a *local* name can be used directly in an XPath name test (no
+/// quoting needed).
+///
+/// Deliberately ASCII-only, which is conservative rather than exact: a
+/// name that fails here folds into a `local-name()` or `name()`
+/// comparison that means the same thing, so the only cost of rejecting a
+/// name XPath would have accepted is a longer expression. A namespace
+/// *prefix* has no such fallback and is tested against the real
+/// `NCName` production instead; see [`super::ncname`].
 pub(crate) fn is_safe_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {

@@ -156,10 +156,13 @@ fn unsupported_errors() {
     assert!(t.css_to_xpath(":lang()", "").is_err());
     assert!(t.css_to_xpath(":lang(5)", "").is_err());
     assert!(t.css_to_xpath(":lang(-)", "").is_err());
-    // A namespace prefix that is not a valid XPath name cannot be a
-    // node test, and XPath 1.0 cannot resolve it without the
-    // namespace URI: comparing the whole `prefix:name` against
-    // `name()` would match only documents using that very prefix.
+    // A namespace prefix that is not an XML `NCName` cannot be a node
+    // test, and XPath 1.0 cannot resolve it without the namespace URI:
+    // comparing the whole `prefix:name` against `name()` would match
+    // only documents using that very prefix. Being an `NCName` is the
+    // whole bar, so a non-ASCII prefix translates (see
+    // `non_ascii_namespace_prefixes` in `names.rs`) and what is left
+    // here is prefixes that are not names at all.
     let unsafe_prefix = css_to_xpath::Error::Unsupported {
         construct: "a namespace prefix that needs quoting (`1ns`)".to_owned(),
         offset: None,
@@ -188,6 +191,23 @@ fn unsupported_errors() {
     assert_eq!(
         t.css_to_xpath("e:has(> \\31 ns|div)", "").unwrap_err(),
         unsafe_prefix
+    );
+    // A character outside the `NCName` tables is rejected wherever it
+    // sits: U+00A0 is not a name character, and U+00B7 is one but may
+    // not lead.
+    assert_eq!(
+        t.css_to_xpath("ns\u{a0}x|div", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "a namespace prefix that needs quoting (`ns\u{a0}x`)".to_owned(),
+            offset: None,
+        }
+    );
+    assert_eq!(
+        t.css_to_xpath("\u{b7}ns|div", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "a namespace prefix that needs quoting (`\u{b7}ns`)".to_owned(),
+            offset: None,
+        }
     );
     // An+B must be whitespace-exact and integer-valued.
     assert!(t.css_to_xpath("e:nth-child(3 7)", "").is_err());

@@ -93,6 +93,19 @@ e:has(> svg|di\[v)
 e:has(+ svg|di\[v)
 e + svg|di\[v
 svg|di\[v:first-of-type
+nsé|div
+nsé|*
+[nsé|href]
+[nsé|href='v']
+中文|div
+a·b|div
+nsé|é
+nsé|di\[v
+e:is(nsé|div)
+e:has(> nsé|div)
+e + nsé|div
+nsé|div:first-of-type
+div
 p
 |p
 body > p

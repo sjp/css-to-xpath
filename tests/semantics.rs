@@ -170,6 +170,38 @@ fn generic_namespaces() {
     );
 }
 
+/// A namespace prefix is written into the node test as it stands, so a
+/// non-ASCII one is only translatable if the evaluator will parse it as
+/// a name. That is what this checks — the string-pinning suite cannot,
+/// and an unparseable prefix would be a worse outcome than the
+/// `Unsupported` error such a prefix used to get.
+///
+/// `Fixture` evaluates through sxd-xpath, which implements XML 1.0
+/// Fifth Edition names; libxml2, which implements the original tables,
+/// was checked by hand against the same expressions. The translator
+/// emits only names both accept — see `src/translate/ncname.rs`.
+#[test]
+fn generic_non_ascii_namespace_prefix() {
+    let fixture = Fixture::new(
+        r#"<r id="r" xmlns:nsé="urn:x-css-to-xpath:test">
+             <nsé:div id="d1" nsé:href="v"/>
+             <div id="d2"/>
+           </r>"#,
+        &[("nsé", "urn:x-css-to-xpath:test")],
+    );
+    check(
+        &fixture,
+        Mode::Generic,
+        &[
+            ("nsé|div", &["d1"]),
+            ("nsé|*", &["d1"]),
+            ("[nsé|href]", &["d1"]),
+            // An unprefixed name still means the null namespace.
+            ("div", &["d2"]),
+        ],
+    );
+}
+
 #[test]
 fn generic_structural_pseudos() {
     check(
