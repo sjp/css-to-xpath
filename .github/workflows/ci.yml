@@ -128,7 +128,12 @@ jobs:
       # Seed from the selectors the test suite already covers, so the
       # budget goes on mutations of real syntax.
       - run: ./fuzz/seed-corpus.sh
-      - run: cargo fuzz run translate -- -max_total_time=120 -max_len=4096
+      # `cargo fuzz` defaults `--target` to the triple *it* was built for,
+      # and the prebuilt binary binstall fetches is a musl build. Building
+      # the target for musl fails: the sanitizer cannot be linked against a
+      # static libc, and the musl std is not installed anyway. Pin the
+      # target to the host triple instead.
+      - run: cargo fuzz run --target "$(rustc -vV | awk '/^host:/{print $2}')" translate -- -max_total_time=120 -max_len=4096
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
