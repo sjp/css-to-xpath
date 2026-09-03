@@ -9,7 +9,7 @@ Translated XPath is part of the contract: a change to the expression a given
 selector produces is listed under **Changed**, even when the two expressions
 select the same nodes, because callers compare, cache and embed the strings.
 
-## [Unreleased]
+## [0.3.0] - 2026-09-03
 
 ### Added
 
