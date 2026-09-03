@@ -310,7 +310,7 @@ fn is_default_button() -> String {
 
 impl Translator {
     pub(crate) fn apply_pseudo_class(
-        self,
+        &self,
         xpath: &mut XPathExpr,
         pc: &PseudoClass,
     ) -> Result<(), Error> {
@@ -405,7 +405,7 @@ impl Translator {
     /// matching natively, so `en` and `en-*` both become `lang('en')`-style
     /// tests. A bare `*` matches elements whose language is *known*, which
     /// `lang()` cannot express, so it walks the language source instead.
-    fn lang_generic(self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
+    fn lang_generic(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_wildcard_position(value)?;
@@ -427,7 +427,7 @@ impl Translator {
     /// HTML `:lang()`: the language of the nearest ancestor-or-self that
     /// has one (see [`LangSource`]) is tested with an ASCII-lowercased,
     /// dash-terminated prefix match.
-    fn lang_html(self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
+    fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_wildcard_position(value)?;

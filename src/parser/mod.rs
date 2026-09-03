@@ -189,15 +189,18 @@ impl PseudoElement for NeverPseudoElement {
     type Impl = CssToXpathImpl;
 }
 
-pub(crate) struct CssToXpathParser {
+pub(crate) struct CssToXpathParser<'a> {
     /// Whether Servo may recover from an invalid `:is()` / `:where()`
     /// argument instead of failing the whole parse. Only the retry in
     /// [`parse`] sets this, and it then rejects every recovery bar the
     /// empty argument list.
     forgiving: bool,
+    /// The caller's default namespace prefix, or `None` for the sentinel
+    /// (see [`CssToXpathParser::default_namespace`]).
+    default_namespace: Option<&'a str>,
 }
 
-impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
+impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
     type Impl = CssToXpathImpl;
     type Error = SelectorParseErrorKind<'i>;
 
@@ -324,15 +327,27 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser {
         Some(prefix.clone())
     }
 
-    /// A sentinel "default namespace". Without one, Servo drops the
-    /// namespace component from both `e` and `*|e` (they match identically),
-    /// but they must translate differently (`e` vs a `local-name()`
-    /// test). With it, plain `e` carries `DefaultNamespace("")` — mapped to
-    /// "no constraint" — while `*|e` keeps `ExplicitAnyNamespace`. The empty
-    /// string can never collide with a real prefix (prefixes are non-empty
-    /// idents, and `namespace_for_prefix` is the identity).
+    /// The caller's default namespace prefix, or a sentinel standing in
+    /// for "none set".
+    ///
+    /// A default namespace is always reported, because without one Servo
+    /// drops the namespace component from both `e` and `*|e` (they match
+    /// identically), and the two must translate differently (`e` vs a
+    /// `local-name()` test). So with none set, plain `e` carries
+    /// `DefaultNamespace("")` — mapped to "no constraint" — while `*|e`
+    /// keeps `ExplicitAnyNamespace`. The empty string can never collide
+    /// with a real prefix (prefixes are non-empty idents, and
+    /// `namespace_for_prefix` is the identity), which is also what makes
+    /// an empty configured prefix mean "no default namespace".
+    ///
+    /// With a prefix set, Servo applies CSS Namespaces 3 for us: the
+    /// prefix reaches `DefaultNamespace` for type selectors and for the
+    /// implicit universal of a type-less compound, but not for the
+    /// featureless compounds of an `:is()` / `:where()` / `:not()`
+    /// argument, and a written `h|e` naming the same prefix collapses
+    /// onto the same component.
     fn default_namespace(&self) -> Option<CssString> {
-        Some(CssString::from(""))
+        Some(CssString::from(self.default_namespace.unwrap_or("")))
     }
 }
 
@@ -526,7 +541,10 @@ type ParseFailure<'i> = cssparser::ParseError<'i, SelectorParseErrorKind<'i>>;
 /// the strict parse decides, and forgiving parsing is only a retry whose
 /// result is accepted when the sole thing it recovered from was an empty
 /// argument list.
-pub(crate) fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
+pub(crate) fn parse(
+    css: &str,
+    default_namespace: Option<&str>,
+) -> Result<SelectorList<CssToXpathImpl>, Error> {
     let scan = scan(css);
     if scan.column_combinator {
         return Err(Error::unsupported("the `||` column combinator"));
@@ -536,11 +554,11 @@ pub(crate) fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
             "functional pseudo-classes nested more than {MAX_NESTING_DEPTH} levels deep"
         )));
     }
-    let strict = match parse_list(css, false) {
+    let strict = match parse_list(css, false, default_namespace) {
         Ok(list) => return Ok(list),
         Err(e) => e,
     };
-    match parse_list(css, true) {
+    match parse_list(css, true, default_namespace) {
         Ok(list) if dropped_nothing(&list) => Ok(list),
         // The forgiving parse recovered from a genuinely invalid
         // argument: the strict error is the one that names it, and
@@ -556,14 +574,18 @@ pub(crate) fn parse(css: &str) -> Result<SelectorList<CssToXpathImpl>, Error> {
 }
 
 /// One parse of the whole selector list.
-fn parse_list(
-    css: &str,
+fn parse_list<'i>(
+    css: &'i str,
     forgiving: bool,
-) -> Result<SelectorList<CssToXpathImpl>, ParseFailure<'_>> {
+    default_namespace: Option<&str>,
+) -> Result<SelectorList<CssToXpathImpl>, ParseFailure<'i>> {
     let mut input = ParserInput::new(css);
     let mut parser = CssParser::new(&mut input);
     SelectorList::parse(
-        &CssToXpathParser { forgiving },
+        &CssToXpathParser {
+            forgiving,
+            default_namespace,
+        },
         &mut parser,
         ParseRelative::No,
     )

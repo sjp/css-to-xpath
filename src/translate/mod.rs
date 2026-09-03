@@ -9,6 +9,8 @@ mod xpath_expr;
 pub use error::{Error, ParseErrorKind};
 pub use nth::{MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH};
 
+use std::borrow::Cow;
+
 use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
 use selectors::parser::{Combinator, Component, RelativeSelector, Selector};
 
@@ -64,16 +66,20 @@ pub enum Mode {
     Xhtml,
 }
 
-/// A reusable translator for one [`Mode`].
+/// A reusable translator for one [`Mode`], optionally carrying a
+/// default namespace prefix.
 ///
-/// It holds nothing but the mode: every flavour difference — which
-/// pseudo-class overrides apply, whether names are ASCII-lowercased,
-/// where `:lang()` reads from — is derived from it by the private
-/// accessors below. Casing is applied here in the translator, never via
-/// Servo's parser settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Every flavour difference — which pseudo-class overrides apply,
+/// whether names are ASCII-lowercased, where `:lang()` reads from — is
+/// derived from the mode by the private accessors below. Casing is
+/// applied here in the translator, never via Servo's parser settings.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Translator {
     mode: Mode,
+    /// The prefix an unprefixed type selector is qualified with, set by
+    /// [`Translator::with_default_namespace_prefix`]. `None` leaves such
+    /// a selector unprefixed, so it matches the null namespace only.
+    default_namespace: Option<Cow<'static, str>>,
 }
 
 /// The namespace constraint on a type or attribute selector: none
@@ -91,23 +97,71 @@ enum NsConstraint<'a> {
 }
 
 impl Translator {
-    /// Build a translator for one of the three [`Mode`] flavours.
+    /// Build a translator for one of the three [`Mode`] flavours, with
+    /// no default namespace — see
+    /// [`Translator::with_default_namespace_prefix`].
     ///
     /// The result is immutable and holds no per-selector state, so a
     /// single translator can be reused for any number of translations.
     #[must_use]
     pub const fn new(mode: Mode) -> Self {
-        Translator { mode }
+        Translator {
+            mode,
+            default_namespace: None,
+        }
+    }
+
+    /// Put unprefixed type selectors in a default namespace, the way a
+    /// stylesheet's `@namespace url(…)` does.
+    ///
+    /// This crate never sees namespace URLs, so the default namespace is
+    /// named by the prefix the emitted XPath should use — one the
+    /// caller's namespace map binds, exactly as a written `h|p` prefix
+    /// would be:
+    ///
+    /// ```
+    /// use css_to_xpath::{Mode, Translator};
+    ///
+    /// let t = Translator::new(Mode::Xhtml).with_default_namespace_prefix("h");
+    /// assert_eq!(t.css_to_xpath("body > p", "").unwrap(), "h:body/h:p");
+    /// assert_eq!(t.css_to_xpath("p:is(a, b)", "").unwrap(), "h:p[self::h:a or self::h:b]");
+    /// ```
+    ///
+    /// The semantics are the CSS Namespaces 3 ones. A default namespace
+    /// applies to type selectors and to the implicit universal selector
+    /// of a compound that has none (`.c` becomes `h:*[…]`, `*` becomes
+    /// `h:*`), but never to attribute selectors — an unprefixed
+    /// attribute name has no namespace by definition. `|e` still means
+    /// "no namespace" and `*|e` still means "any namespace"; and, per
+    /// Selectors Level 4, the implicit universal selector of an
+    /// `:is()` / `:where()` / `:not()` argument is *not* qualified, so
+    /// `:is(p)` picks up the default namespace but `:is(.c)` does not.
+    ///
+    /// The prefix is checked exactly as a written one is, when the
+    /// translation reaches it: one that is not a usable XPath name is an
+    /// [`Error`] rather than a guess. An empty prefix means no default
+    /// namespace.
+    #[must_use]
+    pub fn with_default_namespace_prefix(mut self, prefix: impl Into<Cow<'static, str>>) -> Self {
+        self.default_namespace = Some(prefix.into());
+        self
     }
 
     /// The [`Mode`] this translator was built for.
     #[must_use]
-    pub const fn mode(self) -> Mode {
+    pub const fn mode(&self) -> Mode {
         self.mode
     }
 
+    /// The default namespace prefix set by
+    /// [`Translator::with_default_namespace_prefix`], if any.
+    #[must_use]
+    pub fn default_namespace_prefix(&self) -> Option<&str> {
+        self.default_namespace.as_deref()
+    }
+
     /// Which pseudo-class overrides apply: `Xhtml` shares HTML's.
-    pub(crate) const fn kind(self) -> Kind {
+    pub(crate) const fn kind(&self) -> Kind {
         match self.mode {
             Mode::Generic => Kind::Generic,
             Mode::Html | Mode::Xhtml => Kind::Html,
@@ -116,14 +170,14 @@ impl Translator {
 
     /// Whether element names are ASCII-lowercased: only an HTML parser
     /// does that, and only to elements it knows are HTML.
-    pub(crate) const fn lower_case_element_names(self) -> bool {
+    pub(crate) const fn lower_case_element_names(&self) -> bool {
         matches!(self.mode, Mode::Html)
     }
 
     /// Whether attribute names are ASCII-lowercased. Kept apart from
     /// [`Translator::lower_case_element_names`] because the two answer
     /// different questions, even though today's modes agree on both.
-    pub(crate) const fn lower_case_attribute_names(self) -> bool {
+    pub(crate) const fn lower_case_attribute_names(&self) -> bool {
         matches!(self.mode, Mode::Html)
     }
 
@@ -134,12 +188,12 @@ impl Translator {
     /// apart from [`Translator::lower_case_attribute_names`] because the
     /// two answer different questions — how a name is spelled versus how
     /// a value is compared.
-    pub(crate) const fn html_document(self) -> bool {
+    pub(crate) const fn html_document(&self) -> bool {
         matches!(self.mode, Mode::Html)
     }
 
     /// Where `:lang()` reads an element's language from.
-    pub(crate) const fn lang_source(self) -> LangSource {
+    pub(crate) const fn lang_source(&self) -> LangSource {
         match self.mode {
             Mode::Generic => LangSource::XmlLang,
             Mode::Html => LangSource::Lang,
@@ -166,8 +220,8 @@ impl Translator {
     ///
     /// Returns an [`Error`] when the selector is syntactically invalid
     /// or uses an unsupported construct.
-    pub fn css_to_xpath(self, css: &str, prefix: &str) -> Result<String, Error> {
-        let list = parser::parse(css)?;
+    pub fn css_to_xpath(&self, css: &str, prefix: &str) -> Result<String, Error> {
+        let list = parser::parse(css, self.default_namespace_prefix())?;
         let mut parts: Vec<String> = Vec::new();
         for sel in list.slice() {
             parts.push(self.selector_to_xpath(sel, prefix)?);
@@ -180,7 +234,7 @@ impl Translator {
     /// Servo's sequences + combinators, then fold from the leftmost
     /// compound.
     fn selector_to_xpath(
-        self,
+        &self,
         selector: &Selector<CssToXpathImpl>,
         prefix: &str,
     ) -> Result<String, Error> {
@@ -238,7 +292,7 @@ impl Translator {
     /// `of_depth` is how many `An+B of S` argument lists this compound is
     /// nested inside; see [`nth::MAX_NTH_OF_DEPTH`].
     fn compound_to_xpath(
-        self,
+        &self,
         components: &[&Component<CssToXpathImpl>],
         of_depth: usize,
     ) -> Result<XPathExpr, Error> {
@@ -251,10 +305,16 @@ impl Translator {
                 Component::Namespace(prefix, _) if xpath.is_none() => {
                     ns = NsConstraint::Prefix(prefix.as_str());
                 }
-                // The sentinel default namespace (see CssToXpathParser):
-                // plain `e` and type-less compounds — no constraint written.
-                Component::DefaultNamespace(_) if xpath.is_none() => {
-                    ns = NsConstraint::None;
+                // Plain `e` and the implicit universal of a type-less
+                // compound. Without a configured default namespace this
+                // is the sentinel (see `CssToXpathParser`) and means "no
+                // constraint written"; with one it is that prefix, and
+                // qualifies the name exactly as a written `h|e` would.
+                Component::DefaultNamespace(prefix) if xpath.is_none() => {
+                    ns = match prefix.as_str() {
+                        "" => NsConstraint::None,
+                        prefix => NsConstraint::Prefix(prefix),
+                    };
                 }
                 Component::ExplicitAnyNamespace if xpath.is_none() => {
                     ns = NsConstraint::Any;
@@ -287,7 +347,7 @@ impl Translator {
 
     /// Build the element part of the expression from the namespace
     /// constraint and element name.
-    fn xpath_element(self, ns: NsConstraint, element: Option<&str>) -> Result<XPathExpr, Error> {
+    fn xpath_element(&self, ns: NsConstraint, element: Option<&str>) -> Result<XPathExpr, Error> {
         let (mut name, safe) = match element {
             None => ("*".to_owned(), true),
             Some(e) => {
@@ -381,7 +441,7 @@ impl Translator {
     /// allow-list over `Component` variants. Anything outside the
     /// supported construct set errors, never approximates.
     fn apply_simple(
-        self,
+        &self,
         xpath: &mut XPathExpr,
         component: &Component<CssToXpathImpl>,
         of_depth: usize,
@@ -512,7 +572,7 @@ impl Translator {
     /// complex argument extends the existence-test path step by step,
     /// leftmost compound first.
     fn apply_has(
-        self,
+        &self,
         xpath: &mut XPathExpr,
         relatives: &[RelativeSelector<CssToXpathImpl>],
         of_depth: usize,
@@ -602,7 +662,7 @@ impl Translator {
     /// `translate()`) against the ASCII-lowercased value. An empty value needs
     /// no lowercasing, and skipping it keeps the existence tests exact.
     fn apply_case_flag(
-        self,
+        &self,
         attrib: String,
         value: &str,
         case_sensitivity: ParsedCaseSensitivity,
@@ -632,7 +692,7 @@ impl Translator {
     /// qualification. Prefixes take part in the safety check, as in
     /// `xpath_element`: one that needs quoting cannot be a node test at
     /// all, and errors.
-    fn attrib_expr(self, ns: NsConstraint, local_name: &str) -> Result<String, Error> {
+    fn attrib_expr(&self, ns: NsConstraint, local_name: &str) -> Result<String, Error> {
         let name = if self.lower_case_attribute_names() {
             local_name.to_ascii_lowercase()
         } else {
@@ -681,7 +741,7 @@ impl Translator {
     /// OR of the list is then trivially true, so callers must not constrain
     /// on the remaining arguments.
     fn arg_conditions(
-        self,
+        &self,
         selectors: &[Selector<CssToXpathImpl>],
         context: &str,
         of_depth: usize,
@@ -720,7 +780,7 @@ impl Translator {
     ///
     /// `None` means the chain imposes no condition (a bare `*` argument).
     fn argument_condition(
-        self,
+        &self,
         seqs: &[(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)],
         context: &str,
         of_depth: usize,

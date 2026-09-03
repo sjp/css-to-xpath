@@ -55,6 +55,43 @@ fn every_translation_parses_as_xpath() {
     );
 }
 
+/// The same oracle with a default namespace set, which qualifies every
+/// unprefixed type selector and every implicit universal — a name test
+/// the corpus otherwise only reaches through a written `ns|e`.
+#[test]
+fn every_default_namespace_translation_parses_as_xpath() {
+    let factory = Factory::new();
+    let mut translated = 0usize;
+
+    for css in corpus() {
+        for mode in MODES {
+            let translator = Translator::new(mode).with_default_namespace_prefix("h");
+            let Ok(xpath) = translator.css_to_xpath(css, "") else {
+                continue;
+            };
+            translated += 1;
+
+            match factory.build(&xpath) {
+                Ok(Some(_)) => {}
+                Ok(None) => panic!(
+                    "{} mode: {css:?} produced an empty XPath under a default namespace",
+                    mode_name(mode)
+                ),
+                Err(e) => panic!(
+                    "{} mode: {css:?} produced invalid XPath under a default namespace: {e}\n  {xpath}",
+                    mode_name(mode)
+                ),
+            }
+        }
+    }
+
+    assert!(
+        translated >= MIN_TRANSLATIONS / 3,
+        "only {translated} corpus entries translated, expected at least {}",
+        MIN_TRANSLATIONS / 3
+    );
+}
+
 /// The corpus is a checked-in file; guard against it being emptied or
 /// truncated by a bad edit.
 #[test]

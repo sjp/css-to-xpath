@@ -225,6 +225,44 @@ default namespace. Attribute names work the same way, except that an
 unprefixed one has no namespace by definition, so `[foo]` and `[|foo]`
 are the same test and `[*|foo]` is the any-namespace one.
 
+### A default namespace
+
+Writing `xhtml|` on every step of every selector, or paying for a
+`local-name()` test where a name test would do, is the price of that
+rule in a document that *has* a default namespace. CSS answers this with
+`@namespace url(…)`, and so does
+[`Translator::with_default_namespace_prefix`]: unprefixed type selectors
+are qualified with the prefix it is given, which the caller's namespace
+map binds exactly as a written one.
+
+```rust
+use css_to_xpath::{Mode, Translator};
+
+let t = Translator::new(Mode::Xhtml).with_default_namespace_prefix("h");
+assert_eq!(t.css_to_xpath("body > p", "").unwrap(), "h:body/h:p");
+assert_eq!(
+    t.css_to_xpath("p:is(a, b)", "").unwrap(),
+    "h:p[self::h:a or self::h:b]"
+);
+// The escape hatches are unaffected: this is still "no namespace".
+assert_eq!(t.css_to_xpath("|p", "").unwrap(), "p");
+```
+
+The semantics are CSS Namespaces 3's. The prefix qualifies type
+selectors and the implicit universal selector of a compound that has
+none — `.c` becomes `h:*[…]`, `*` becomes `h:*` — but never attribute
+selectors, since an unprefixed attribute name has no namespace by
+definition. `|e` still means "no namespace" and `*|e` still means "any
+namespace", so both escape hatches remain. Per Selectors Level 4 the
+subject of an `:is()` / `:where()` / `:not()` argument is featureless
+unless it has a type or universal selector of its own, so `:is(p)` picks
+the default namespace up and `:is(.c)` does not.
+
+The prefix is checked when the translation reaches it, exactly as a
+written one is: one that is not a usable XPath name is an error rather
+than a guess. An empty prefix means no default namespace, which is where
+a translator starts.
+
 ## Not supported
 
 These error rather than approximate, since XPath 1.0 has no way to

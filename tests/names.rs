@@ -3,7 +3,7 @@
 
 mod cases;
 use cases::Cases;
-use css_to_xpath::Mode;
+use css_to_xpath::{Mode, Translator};
 
 #[test]
 fn unsafe_names_and_escapes() {
@@ -143,5 +143,102 @@ fn unprefixed_names_mean_the_null_namespace_everywhere() {
     t.check(
         ":is(*|body > *|p)",
         "*[local-name() = 'p' and parent::*[local-name() = 'body']]",
+    );
+}
+
+/// A default namespace prefix qualifies exactly what CSS Namespaces 3
+/// says it does: type selectors, and the implicit universal selector of
+/// a compound that has none. `|e` and `*|e` keep their meanings, and
+/// attribute names — which have no namespace unless one is written —
+/// are untouched.
+#[test]
+fn default_namespace_qualifies_unprefixed_type_selectors() {
+    let mut t = Cases::with_translator(
+        Translator::new(Mode::Xhtml).with_default_namespace_prefix("h"),
+        "",
+    );
+
+    // A type selector, wherever it appears — the same policy the
+    // unprefixed case follows, one step along.
+    t.check("p", "h:p");
+    t.check("body > p", "h:body/h:p");
+    t.check("p + p", "h:p/following-sibling::*[1][self::h:p]");
+    t.check("p:is(a, b)", "h:p[self::h:a or self::h:b]");
+    t.check("p:not(a)", "h:p[not(self::h:a)]");
+    t.check("p:has(> a)", "h:p[child::h:a]");
+    t.check(
+        "e:nth-child(1 of p)",
+        "h:e[count(preceding-sibling::*[self::h:p]) = 0 and self::h:p]",
+    );
+    // The of-type family counts by the qualified node test, so the
+    // prefix reaches the sibling count too.
+    t.check("p:nth-of-type(2)", "h:p[count(preceding-sibling::h:p) = 1]");
+
+    // The implicit universal of a type-less compound, including the
+    // written `*` and `:scope`.
+    t.check(
+        ".c",
+        "h:*[contains(concat(' ', normalize-space(@class), ' '), ' c ')]",
+    );
+    t.check("*", "h:*");
+    t.check(":scope > a", "self::h:*/h:a");
+    // ... but not the subject of an `:is()` / `:where()` / `:not()`
+    // argument that has no type selector of its own: Selectors 4 makes
+    // those compounds featureless.
+    t.check(
+        "p:is(.c)",
+        "h:p[contains(concat(' ', normalize-space(@class), ' '), ' c ')]",
+    );
+
+    // The written namespace forms are unaffected. A prefix naming the
+    // default namespace is the default namespace, so `h|p` and `p` are
+    // one selector.
+    t.check("h|p", "h:p");
+    t.check("x|p", "x:p");
+    t.check("|p", "p");
+    t.check("|*", "*[namespace-uri() = '']");
+    t.check("*|p", "*[local-name() = 'p']");
+    t.check("*|*", "*");
+
+    // Attribute names have no namespace unless one is written, so the
+    // default namespace never reaches them.
+    t.check("[foo]", "h:*[@foo]");
+    t.check("[|foo]", "h:*[@foo]");
+    t.check("[x|foo]", "h:*[@x:foo]");
+    t.check("[*|foo]", "h:*[@*[local-name() = 'foo']]");
+
+    // A name that cannot be a node test keeps the prefix in the node
+    // test and compares the local part, exactly as a written prefix
+    // does — the qualified-name comparison an unprefixed name folds
+    // into would not resolve through the caller's namespace map.
+    t.check("é", "h:*[local-name() = 'é']");
+
+    // The HTML overrides identify elements by local-name(), so they are
+    // namespace-agnostic and read the same under a default namespace.
+    t.check(
+        "input:checked",
+        "h:input[@checked and (translate(@type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+         'abcdefghijklmnopqrstuvwxyz') = 'checkbox' or translate(@type, \
+         'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = 'radio')]",
+    );
+}
+
+/// The prefix a default namespace is spelled with is checked exactly as
+/// a written one is, and an empty prefix means no default namespace at
+/// all — the state a translator starts in.
+#[test]
+fn default_namespace_prefix_is_checked_like_a_written_one() {
+    let unsafe_prefix = Translator::new(Mode::Generic).with_default_namespace_prefix("1x");
+    let err = unsafe_prefix.css_to_xpath("p", "").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "unsupported CSS construct: a namespace prefix that needs quoting (`1x`)"
+    );
+
+    let empty = Translator::new(Mode::Generic).with_default_namespace_prefix("");
+    assert_eq!(empty.css_to_xpath("p", "").unwrap(), "p");
+    assert_eq!(
+        empty.css_to_xpath("*|p", "").unwrap(),
+        "*[local-name() = 'p']"
     );
 }

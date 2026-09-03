@@ -5,7 +5,7 @@
 //! binary uses only part of it; hence the blanket `dead_code` allow.
 #![allow(dead_code)]
 
-use css_to_xpath::Mode;
+use css_to_xpath::{Mode, Translator};
 use sxd_document::Package;
 use sxd_xpath::nodeset::Node;
 use sxd_xpath::{Context, Factory, Value, context, function};
@@ -71,17 +71,31 @@ impl Fixture {
     /// The `descendant-or-self::` prefix is the README's "search the
     /// whole document" form; evaluation starts at the root node.
     pub(crate) fn select(&self, css: &str, mode: Mode) -> Vec<String> {
-        self.select_from(css, mode, None)
+        self.select_from(css, &Translator::new(mode), None)
     }
 
     /// As [`Fixture::select`], but evaluated with the element carrying
     /// `scope_id` as the context node — what `:scope` refers to.
     pub(crate) fn select_scoped(&self, css: &str, mode: Mode, scope_id: &str) -> Vec<String> {
-        self.select_from(css, mode, Some(scope_id))
+        self.select_from(css, &Translator::new(mode), Some(scope_id))
     }
 
-    fn select_from(&self, css: &str, mode: Mode, scope_id: Option<&str>) -> Vec<String> {
-        let xpath_src = css_to_xpath::css_to_xpath(css, "descendant-or-self::", mode)
+    /// As [`Fixture::select`], but translating with a configured
+    /// `translator` — for what a bare [`Mode`] cannot express, namely a
+    /// default namespace prefix.
+    pub(crate) fn select_with(&self, css: &str, translator: &Translator) -> Vec<String> {
+        self.select_from(css, translator, None)
+    }
+
+    fn select_from(
+        &self,
+        css: &str,
+        translator: &Translator,
+        scope_id: Option<&str>,
+    ) -> Vec<String> {
+        let mode = translator.mode();
+        let xpath_src = translator
+            .css_to_xpath(css, "descendant-or-self::")
             .unwrap_or_else(|e| {
                 panic!("{} mode failed to translate {css:?}: {e}", mode_name(mode))
             });

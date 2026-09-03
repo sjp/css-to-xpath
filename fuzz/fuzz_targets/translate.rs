@@ -17,6 +17,10 @@
 //!    prepended to each selector-group branch and nothing else, except
 //!    on a `:scope`-anchored branch, which ignores it. Translation is
 //!    also deterministic.
+//!
+//! Every property is checked with and without a default namespace, the
+//! setting that turns every unprefixed type selector and every implicit
+//! universal into a qualified name test.
 
 #![no_main]
 
@@ -60,18 +64,23 @@ fuzz_target!(|data: &str| {
 fn translate_all(css: &str) {
     let factory = Factory::new();
     for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
-        let bare = translate(&factory, mode, css, "");
-        assert_eq!(
-            bare,
-            translate(&factory, mode, css, ""),
-            "translating {css:?} twice gave different results",
-        );
+        for translator in [
+            Translator::new(mode),
+            Translator::new(mode).with_default_namespace_prefix("h"),
+        ] {
+            let bare = translate(&factory, &translator, css, "");
+            assert_eq!(
+                bare,
+                translate(&factory, &translator, css, ""),
+                "translating {css:?} twice gave different results",
+            );
 
-        let prefixed = translate(&factory, mode, css, DESCENDANT_OR_SELF);
-        match (&bare, &prefixed) {
-            (Ok(bare), Ok(prefixed)) => check_prefix(bare, prefixed, DESCENDANT_OR_SELF),
-            (Err(_), Err(_)) => {}
-            _ => panic!("{css:?} translated under one prefix but not the other"),
+            let prefixed = translate(&factory, &translator, css, DESCENDANT_OR_SELF);
+            match (&bare, &prefixed) {
+                (Ok(bare), Ok(prefixed)) => check_prefix(bare, prefixed, DESCENDANT_OR_SELF),
+                (Err(_), Err(_)) => {}
+                _ => panic!("{css:?} translated under one prefix but not the other"),
+            }
         }
     }
 }
@@ -79,8 +88,13 @@ fn translate_all(css: &str) {
 /// Translate, and check the length bound and XPath validity of a
 /// successful result. Errors are returned as their message so that the
 /// determinism check covers them too.
-fn translate(factory: &Factory, mode: Mode, css: &str, prefix: &str) -> Result<String, String> {
-    let xpath = match Translator::new(mode).css_to_xpath(css, prefix) {
+fn translate(
+    factory: &Factory,
+    translator: &Translator,
+    css: &str,
+    prefix: &str,
+) -> Result<String, String> {
+    let xpath = match translator.css_to_xpath(css, prefix) {
         Ok(xpath) => xpath,
         Err(e) => return Err(e.to_string()),
     };

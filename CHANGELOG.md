@@ -32,6 +32,19 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   40 bytes.
 - `Error::message(&self, selector)`, the full multi-line form with the caret
   gutter, borrowing the error instead of consuming it.
+- `Translator::with_default_namespace_prefix()`, which puts unprefixed type
+  selectors in a default namespace the way a stylesheet's `@namespace url(…)`
+  does, and `Translator::default_namespace_prefix()`, which reads it back. The
+  crate still never sees a namespace URL, so the default namespace is named by
+  the prefix the output should carry: `Translator::new(Mode::Xhtml)
+  .with_default_namespace_prefix("h")` translates `body > p` to `h:body/h:p`
+  instead of leaving it in the null namespace, which in an XHTML, SVG or Atom
+  document matches nothing. The semantics are CSS Namespaces 3's: the prefix
+  reaches type selectors and the implicit universal of a compound that has none
+  (`.c` becomes `h:*[…]`), but never attribute selectors, and never the
+  featureless subject of an `:is()`/`:where()`/`:not()` argument; `|e` and `*|e`
+  keep their meanings. Translators built without one are unaffected, so no
+  existing output moves.
 - `Translator::mode()`, and `Debug`/`PartialEq`/`Eq`/`Hash` on `Translator`.
 - `DESCENDANT_OR_SELF` and `WHOLE_DOCUMENT` constants for the two `prefix`
   values worth naming.
@@ -80,8 +93,11 @@ Slated for 0.3.0, the version already set in `Cargo.toml`.
   values case-sensitive.
 - Dependencies are caret ranges (`selectors = "0.40"`) rather than exact pins,
   so they unify with other crates in a dependency graph.
-- `Translator`'s methods take `self` rather than `&self` — it is a one-byte
-  `Copy` type — which call sites do not have to change for.
+- **Breaking:** `Translator` is no longer `Copy`, since it can now own a default
+  namespace prefix, and its methods take `&self` rather than `self`. It is still
+  `Clone`; method calls do not have to change, but code that relied on an
+  implicit copy — passing a translator by value and then using it again — needs
+  a borrow or a `.clone()`.
 - The functional-pseudo-class nesting limit is **32** levels rather than 64, so
   the recursion it bounds fits the 1 MiB stack a library does not get to choose
   — a Windows main thread, a wasm32 module, a thread pool's worker — in an

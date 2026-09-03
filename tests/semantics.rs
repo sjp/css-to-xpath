@@ -10,7 +10,7 @@
 mod common;
 
 use common::{DC_NS, Fixture, SVG_NS, XHTML_NS};
-use css_to_xpath::Mode;
+use css_to_xpath::{Mode, Translator};
 
 /// A case is a selector and the ids it must select, in document order.
 type Case<'a> = (&'a str, &'a [&'a str]);
@@ -19,9 +19,16 @@ type Case<'a> = (&'a str, &'a [&'a str]);
 /// hide the rest.
 #[track_caller]
 fn check(fixture: &Fixture, mode: Mode, cases: &[Case]) {
+    check_with(fixture, &Translator::new(mode), cases);
+}
+
+/// [`check`] with a configured translator, for the cases a bare [`Mode`]
+/// cannot express.
+#[track_caller]
+fn check_with(fixture: &Fixture, translator: &Translator, cases: &[Case]) {
     let mut failures = String::new();
     for (css, expected) in cases {
-        let got = fixture.select(css, mode);
+        let got = fixture.select_with(css, translator);
         if got != *expected {
             failures.push_str(&format!(
                 "\n  {css:?}\n    expected {expected:?}\n    got      {got:?}"
@@ -309,6 +316,68 @@ fn xhtml_names_are_namespaced_and_case_sensitive() {
             ("xhtml|input[type=\"checkbox\"]", &["i4"]),
             ("xhtml|input[type=\"CHECKBOX\"]", &[]),
             ("xhtml|input[type=\"CHECKBOX\" i]", &["i4"]),
+        ],
+    );
+}
+
+/// A default namespace prefix is the answer to the case above: the
+/// unprefixed names a caller actually writes select the XHTML elements,
+/// with no `xhtml|` on every step and no `local-name()` test.
+#[test]
+fn xhtml_default_namespace_makes_unprefixed_names_match() {
+    check_with(
+        &xhtml_fixture(),
+        &Translator::new(Mode::Xhtml).with_default_namespace_prefix("xhtml"),
+        &[
+            ("input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
+            ("legend > input", &["i1", "i2"]),
+            ("body > p", &["p1", "p2"]),
+            ("body > *", &["f1", "a1", "a2", "p1", "p2"]),
+            ("fieldset:nth-of-type(2)", &["fs2"]),
+            (
+                "select :is(option, optgroup)",
+                &["og1", "o1", "o2", "og2", "o3"],
+            ),
+            ("input:required", &["i6"]),
+            ("option:checked", &["o1"]),
+            ("a:link", &["a1"]),
+            ("p:lang(fr)", &["p1"]),
+            ("input[type=\"checkbox\"]", &["i4"]),
+            (":root", &["doc"]),
+            // The written forms keep their own meanings: `|e` is still
+            // the null namespace, and `*|e` still any namespace.
+            ("|input", &[]),
+            ("*|input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
+            ("xhtml|input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
+        ],
+    );
+}
+
+/// The default namespace is a *constraint*, not a fallback: in a
+/// document whose elements are mostly outside it, an unprefixed name
+/// and the implicit universal of a type-less compound match only what
+/// is inside it.
+#[test]
+fn default_namespace_constrains_the_implicit_universal() {
+    check_with(
+        &generic_fixture(),
+        // The fixture's own elements are in no namespace, so an SVG
+        // default namespace leaves only the two `svg:` elements in it.
+        &Translator::new(Mode::Generic).with_default_namespace_prefix("svg"),
+        &[
+            ("*", &["sv1", "rc1"]),
+            ("[id]", &["sv1", "rc1"]),
+            ("svg", &["sv1"]),
+            ("svg > rect", &["rc1"]),
+            ("[svg|role]", &["rc1"]),
+            ("book", &[]),
+            (":root", &[]),
+            // `|e` names the null namespace whatever the default is,
+            // and `*|e` every namespace.
+            ("|book", &["b1", "b2", "b3", "b4"]),
+            ("|library > |shelf", &["sh1", "sh2"]),
+            ("*|rect", &["rc1"]),
+            ("dc|creator", &["cr1"]),
         ],
     );
 }

@@ -543,3 +543,14 @@ e:has(~ p:first-of-type)
 a:has(> b)
 :is(a, b) > c
 DIV[FOO=Bar]
+p:is(a, b)
+p:not(a)
+p:has(> a)
+p:nth-of-type(2)
+.c
+p:is(.c)
+h|p
+x|p
+[foo]
+[x|foo]
+input:checked

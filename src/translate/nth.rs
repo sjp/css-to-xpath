@@ -51,7 +51,7 @@ impl Translator {
     /// the matching translation. `selector_list` carries the Level 4
     /// `of S` arguments when present (`Component::NthOf`).
     pub(crate) fn apply_nth(
-        self,
+        &self,
         xpath: &mut XPathExpr,
         data: &NthSelectorData,
         selector_list: Option<&[Selector<CssToXpathImpl>]>,
@@ -119,7 +119,7 @@ impl Translator {
     /// `nodetest` selects which siblings are counted: `*` for the child
     /// pseudos, the same-type node test for the of-type pseudos.
     fn xpath_nth_child(
-        self,
+        &self,
         xpath: &mut XPathExpr,
         a: i32,
         b: i32,

@@ -36,8 +36,14 @@ impl Cases {
 
     /// A checker translating with `prefix` prepended to each branch.
     pub(crate) fn with_prefix(mode: Mode, prefix: &'static str) -> Self {
+        Self::with_translator(Translator::new(mode), prefix)
+    }
+
+    /// A checker translating with a configured `translator` — for what a
+    /// bare [`Mode`] cannot express, namely a default namespace prefix.
+    pub(crate) fn with_translator(translator: Translator, prefix: &'static str) -> Self {
         Cases {
-            translator: Translator::new(mode),
+            translator,
             prefix,
             failures: String::new(),
             failed: 0,
