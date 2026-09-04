@@ -339,6 +339,97 @@ fn empty_selector_names_what_stopped_it() {
     );
 }
 
+/// When a message echoes a token, the caret is on that token.
+///
+/// `cssparser` and `selectors` report the position the parse stopped
+/// at, which sits beside the offending token rather than on it, and on
+/// whichever side depends on where the failing parser took its location
+/// from: before reading a token (leaving the position on the whitespace
+/// in front of it) or after (leaving it past the token, or — past a
+/// function token — on that function's first argument). Both are one
+/// token from what the message names, so the caret is moved onto it.
+#[test]
+fn caret_is_on_the_token_the_message_names() {
+    let t = Translator::new(Mode::Generic);
+    let err = |sel: &str| match t.css_to_xpath(sel, "").unwrap_err() {
+        css_to_xpath::Error::Parse { kind, offset } => (kind, offset),
+        e => panic!("{sel:?} -> {e}"),
+    };
+    let unexpected = |token: &str, at| {
+        (
+            css_to_xpath::ParseErrorKind::UnexpectedToken(token.to_owned()),
+            at,
+        )
+    };
+    let pseudo = |name: &str, at| {
+        (
+            css_to_xpath::ParseErrorKind::UnsupportedPseudo(name.to_owned()),
+            at,
+        )
+    };
+
+    // Reported before the token: an attribute selector's flags, where
+    // the position lands on the space in front of the stray token.
+    // Whitespace and comments are skipped over on the way to it.
+    assert_eq!(err("[a=b c]"), unexpected("c", 5));
+    assert_eq!(err("a[b=c d]"), unexpected("d", 6));
+    assert_eq!(err("[a=b /*x*/ c]"), unexpected("c", 11));
+    assert_eq!(err(":is([a=b c])"), unexpected("c", 9));
+
+    // Reported after the token: an `An+B` argument, where the position
+    // lands past what it names.
+    assert_eq!(err(":nth-child(foo)"), unexpected("foo", 11));
+    assert_eq!(err("a:nth-of-type(+ 2)"), unexpected(" ", 15));
+
+    // A functional pseudo is reported on its first argument, or at the
+    // end of input when it has none; either way the caret goes back to
+    // the name the message quotes.
+    assert_eq!(err("a::part(b)"), pseudo("part", 3));
+    assert_eq!(err("a::slotted(b)"), pseudo("slotted", 3));
+    assert_eq!(err("a:dir("), pseudo("dir", 2));
+
+    // Positions already on the token they name stay put, including the
+    // one selectr gets wrong the other way: `div.-5` is reported on the
+    // `-5` the message echoes, not on the `.` before it. A pseudo whose
+    // name is not adjacent to the reported position — `::before`, two
+    // tokens along — is left alone rather than searched for.
+    assert_eq!(
+        err("div.-5"),
+        (
+            css_to_xpath::ParseErrorKind::ExpectedName("-5".to_owned()),
+            4
+        )
+    );
+    assert_eq!(err("e:frobnicate"), pseudo("frobnicate", 2));
+    assert_eq!(err("a::before"), pseudo("before", 2));
+    assert_eq!(err("#1abc"), unexpected("#1abc", 0));
+    assert_eq!(
+        err("[a~]"),
+        (
+            css_to_xpath::ParseErrorKind::InvalidAttributeSelector("~".to_owned()),
+            2
+        )
+    );
+
+    // The rendered gutter for one of each side.
+    let sel = "[a=b c]";
+    assert_eq!(
+        t.css_to_xpath(sel, "").unwrap_err().message(sel),
+        "Unable to parse the CSS selector \"[a=b c]\": unexpected `c`\n\
+         \x20 |\n\
+         \x20 | [a=b c]\n\
+         \x20 |      ^"
+    );
+    let sel = ":nth-child(foo)";
+    assert_eq!(
+        t.css_to_xpath(sel, "").unwrap_err().message(sel),
+        "Unable to parse the CSS selector \":nth-child(foo)\": unexpected `foo`\n\
+         \x20 |\n\
+         \x20 | :nth-child(foo)\n\
+         \x20 |            ^"
+    );
+}
+
 /// css-syntax-3 auto-closes open blocks, functions, and strings at
 /// EOF: the parse error is flagged, not fatal, so a selector left
 /// unclosed at end-of-input translates identically to its closed

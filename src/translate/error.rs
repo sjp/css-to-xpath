@@ -65,6 +65,12 @@ pub enum Error {
         /// The 0-indexed *byte* offset of the error within the selector
         /// string, used to render a caret pointer. It is
         /// `selector.len()` for an error at end of input.
+        ///
+        /// Whenever `kind` echoes a piece of the selector — a token, a
+        /// pseudo-class name — this is where that piece was written,
+        /// not merely where the parse stopped, so a caller can
+        /// highlight it rather than its neighbour. For the kinds that
+        /// echo nothing, it is the stopping point.
         offset: usize,
     },
     /// The selector is valid CSS, but uses a construct outside the
@@ -306,6 +312,34 @@ impl ParseErrorKind {
     /// are.
     pub(crate) fn unexpected_token(token: &Token<'_>) -> Self {
         ParseErrorKind::UnexpectedToken(token_text(token))
+    }
+
+    /// Whether `token` is the one this kind's message echoes.
+    ///
+    /// The parser asks this of the tokens on either side of the
+    /// position its dependencies reported, to put the caret on the
+    /// token the message names rather than next to it. The comparison
+    /// is on the payload, so a candidate matches when it spells the
+    /// same way the message does — sanitized and elided included, which
+    /// keeps the two sides exactly comparable.
+    ///
+    /// A pseudo-class name is held without its colons and can have been
+    /// written as a plain name or as a function, so it is compared
+    /// against the token's own name. The kinds that echo nothing —
+    /// there is no token for a caret to move to — never match.
+    pub(crate) fn names_token(&self, token: &Token<'_>) -> bool {
+        match self {
+            ParseErrorKind::UnexpectedToken(text)
+            | ParseErrorKind::ExpectedName(text)
+            | ParseErrorKind::InvalidAttributeSelector(text) => *text == token_text(token),
+            ParseErrorKind::UnsupportedPseudo(name) => match token {
+                Token::Ident(written) | Token::Function(written) => {
+                    *name == elide(sanitize(written))
+                }
+                _ => false,
+            },
+            _ => false,
+        }
     }
 }
 

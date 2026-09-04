@@ -13,6 +13,16 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ### Changed
 
+- The caret in a parse error's message now points at the token the message
+  names, rather than at the position the parse stopped on. `[a=b c]` reports
+  ``unexpected `c` `` at byte 5, the `c`, where it previously reported byte 4,
+  the space in front of it; `:nth-child(foo)` reports ``unexpected `foo` `` at
+  byte 11 rather than byte 14, the `)` past it; and `a::part(b)` reports
+  `` `part` is not a supported pseudo-class or pseudo-element `` at byte 3, the
+  name, rather than byte 8, the argument. `Error::Parse`'s `offset` is
+  therefore usable as a span: where the message echoes a piece of the selector,
+  the offset is where that piece was written. Positions already on what they
+  named — `div.-5`, reported on the `-5` rather than on the `.` — do not move.
 - A selector group whose first token cannot start a compound is now reported by
   that token rather than as `ParseErrorKind::EmptySelector`: `#1abc` gives
   ``unexpected `#1abc` `` where it previously gave "the selector is empty", which

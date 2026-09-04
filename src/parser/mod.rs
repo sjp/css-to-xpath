@@ -762,18 +762,99 @@ fn parse_list<'i>(
 }
 
 fn parse_error(css: &str, e: &ParseFailure<'_>) -> Error {
-    let offset = byte_offset(css, e.location);
+    let reported = byte_offset(css, e.location);
     let mut kind = ParseErrorKind::from_kind(&e.kind);
     // `EmptySelector` is what `selectors` reports whenever a compound
     // ends up with no components, which covers both "there was nothing
     // here" and "none of what was here parsed". Only the first is what
     // the name says, so the second is re-reported by its cause.
     if matches!(kind, ParseErrorKind::EmptySelector)
-        && let Some(blocked) = blocking_token(css, offset)
+        && let Some(blocked) = blocking_token(css, reported)
     {
         kind = blocked;
     }
+    let offset = named_token_offset(css, reported, &kind).unwrap_or(reported);
     Error::Parse { kind, offset }
+}
+
+/// Where the token a message echoes starts, when it is one of the two
+/// next to `reported`.
+///
+/// The position `cssparser` and `selectors` report is the parser's
+/// stopping point, which is beside the offending token rather than on
+/// it, and which of the two sides depends on where the parser that
+/// failed took its location from. Taking it before reading a token
+/// leaves the position on the whitespace in front of that token
+/// (`[a=b c]`, reported on the space); taking it after leaves it past
+/// the token (`:nth-child(foo)`, reported on the `)`), and past a
+/// function token means on its first argument (`a::part(b)`, reported
+/// on the `b`). Both are one token from what the message names, so both
+/// are offered to the kind, and the caret moves to whichever it claims.
+///
+/// The token that follows is tried first, so a position already sitting
+/// on the offending token stays where it is. `None` when neither
+/// neighbour is the one named — a kind that echoes no token at all, or
+/// a name further off than one token, as `::before`'s is — leaving the
+/// reported position, which is still the best the parser knows.
+fn named_token_offset(css: &str, reported: usize, kind: &ParseErrorKind) -> Option<usize> {
+    let mut following = None;
+    let mut preceding = None;
+    walk_tokens(css, |start, end, token| {
+        if end == reported {
+            preceding = Some((start, token.clone()));
+        }
+        // Whitespace and comments are skipped on the way forward: they
+        // are what the position lands on when it was taken before the
+        // token, and never what a message names.
+        if start >= reported && !matches!(token, Token::WhiteSpace(_) | Token::Comment(_)) {
+            following = Some((start, token.clone()));
+            return false;
+        }
+        true
+    });
+    [following, preceding]
+        .into_iter()
+        .flatten()
+        .find(|(_, token)| kind.names_token(token))
+        .map(|(start, _)| start)
+}
+
+/// Call `visit` with the byte span of every token of `css`, whitespace
+/// and comments included, until it returns `false`.
+///
+/// `cssparser`'s `Parser` skips the body of a block whose opening token
+/// it just handed back, rather than descending into it, so the walk
+/// restarts just past every opener: most of a selector's tokens sit
+/// inside `[...]` or a functional argument, and a caret has to be able
+/// to point at those.
+fn walk_tokens<'i>(css: &'i str, mut visit: impl FnMut(usize, usize, &Token<'i>) -> bool) {
+    let mut base = 0;
+    loop {
+        let mut input = ParserInput::new(&css[base..]);
+        let mut parser = CssParser::new(&mut input);
+        let restart = loop {
+            let start = base + parser.position().byte_index();
+            // The token is cloned out because reading the position
+            // again needs the parser back.
+            let Ok(token) = parser.next_including_whitespace_and_comments().cloned() else {
+                return;
+            };
+            let end = base + parser.position().byte_index();
+            if !visit(start, end, &token) {
+                return;
+            }
+            if matches!(
+                token,
+                Token::Function(_)
+                    | Token::ParenthesisBlock
+                    | Token::SquareBracketBlock
+                    | Token::CurlyBracketBlock
+            ) {
+                break end;
+            }
+        };
+        base = restart;
+    }
 }
 
 /// The token a group blamed for being empty in fact stopped at, when
