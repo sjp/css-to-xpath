@@ -708,6 +708,11 @@ fn html_lang_wildcard_subtags() {
                 "span:lang(\"*-*\")",
                 &["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"],
             ),
+            // A wildcard range is a range like any other wherever it
+            // sits in the list: both orders of the same pair are the
+            // union of the two, in document order.
+            ("span:lang(zh-TW, *-DE)", &["l1", "l2", "l3", "l4", "l8"]),
+            ("span:lang(*-DE, zh-TW)", &["l1", "l2", "l3", "l4", "l8"]),
         ],
     );
 }

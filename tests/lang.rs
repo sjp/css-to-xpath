@@ -7,13 +7,13 @@ use css_to_xpath::Mode;
 
 #[test]
 fn lang_and_dir() {
-    /// Strip the outer `E[`…`]` predicate off a single-condition
-    /// translation, to rebuild the expected OR of a comma list.
+    /// Strip the outer `e[`…`]` predicate off a single-condition
+    /// translation, to rebuild the expected OR of a comma list. The
+    /// first `[` is the predicate's, whatever the element name before
+    /// it, and the last `]` closes it.
     fn inner(xpath: &str) -> &str {
-        xpath
-            .strip_prefix("E[")
-            .and_then(|s| s.strip_suffix(']'))
-            .unwrap()
+        let open = xpath.find('[').expect("a predicate");
+        xpath[open + 1..].strip_suffix(']').expect("a closed one")
     }
 
     let mut t = Cases::new(Mode::Generic);
@@ -52,6 +52,11 @@ fn lang_and_dir() {
         "e:lang(--x)",
         "e:lang(en,)",
         "e:lang(en,,fr)",
+        // Whitespace splits a range wherever it falls, including in a
+        // range that is not the first: these are `*` and `-CH`, not
+        // `*-CH`.
+        "e:lang(en, * -CH)",
+        "e:lang(en, de- *)",
     ] {
         assert!(t.css_to_xpath(sel, "").is_err(), "{sel} should error");
     }
@@ -208,6 +213,38 @@ fn lang_and_dir() {
     html.check(
         "e:lang(\"*-CH\")",
         html.css_to_xpath("e:lang(*-CH)", "").unwrap(),
+    );
+    // A range's position in the list says nothing about how it parses:
+    // the whitespace after a comma ends the range before it, and the
+    // range after it is assembled from adjacent tokens as usual. Both
+    // orders of the same pair therefore translate, to the same two
+    // conditions ORed the way they were written.
+    html.check(
+        "e:lang(en, *-CH)",
+        format!(
+            "e[{} or {}]",
+            inner(&html.css_to_xpath("e:lang(en)", "").unwrap()),
+            inner(&html.css_to_xpath("e:lang(*-CH)", "").unwrap()),
+        ),
+    );
+    html.check(
+        "e:lang(*-CH, en)",
+        format!(
+            "e[{} or {}]",
+            inner(&html.css_to_xpath("e:lang(*-CH)", "").unwrap()),
+            inner(&html.css_to_xpath("e:lang(en)", "").unwrap()),
+        ),
+    );
+    // The same for a trailing wildcard, which every mode takes: the
+    // generic one folds `de-*` back to `lang('de')` wherever it sits.
+    t.check("e:lang(en, de-*)", "e[lang('en') or lang('de')]");
+    xhtml.check(
+        "E:lang(en, *-CH)",
+        format!(
+            "E[{} or {}]",
+            inner(&xhtml.css_to_xpath("E:lang(en)", "").unwrap()),
+            inner(&xhtml.css_to_xpath("E:lang(*-CH)", "").unwrap()),
+        ),
     );
     // Mode::Generic hands the range to XPath's lang(), which is a prefix
     // match with nowhere to put a wildcard that is not the whole range

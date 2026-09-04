@@ -411,6 +411,13 @@ fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> 
         }
         current.push_str(&piece);
         started = true;
+        // Adjacency is a fact about the gap between two tokens, so it is
+        // restored the moment a piece is taken: only whitespace or a
+        // comment *after* this one can separate it from the next. Leaving
+        // it false here would spread a run of whitespace over the rest of
+        // the range and reject a multi-token range after a comma, so that
+        // `:lang(*-CH, en)` parsed but `:lang(en, *-CH)` did not.
+        adjacent = true;
     }
     if !started {
         return None; // no ranges at all, or a trailing comma

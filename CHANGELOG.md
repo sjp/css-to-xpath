@@ -45,6 +45,19 @@ select the same nodes, because callers compare, cache and embed the strings.
   `:lang()` errors above and in the existing "a wildcard outside the final
   subtag" one, whose range came through raw however long it was.
 
+### Fixed
+
+- A `:lang()` range built from more than one token is no longer refused when
+  it follows another range in the list: `:lang(en, *-CH)` and
+  `:lang(en, de-*)` now parse, as `:lang(*-CH, en)` and `:lang(de-*, en)`
+  already did. The argument grammar reads whitespace as a range terminator,
+  and the flag recording it was not cleared once the next range had started,
+  so the space after a comma went on separating the tokens of every range
+  after it — making the multi-token ranges (`*-CH`, which the tokenizer
+  splits into `*` and `-CH`) look like two ranges with no comma between them.
+  Whitespace *inside* a range is still an error: `:lang(en, * -CH)` and
+  `:lang(en fr)` are refused as before.
+
 ## [0.5.0] - 2026-09-04
 
 ### Changed
