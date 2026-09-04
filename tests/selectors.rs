@@ -34,7 +34,7 @@ fn simple_selectors() {
     t.check("e[foo^=\"bar\"]", "e[starts-with(@foo, 'bar')]");
     t.check(
         "e[foo$=\"bar\"]",
-        "e[substring(@foo, string-length(@foo)-2) = 'bar']",
+        "e[substring(@foo, string-length(@foo) - 2) = 'bar']",
     );
     t.check("e[foo*=\"bar\"]", "e[contains(@foo, 'bar')]");
     t.check(

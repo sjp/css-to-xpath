@@ -95,7 +95,7 @@ pub(crate) fn attrib_suffixmatch(xpath: &mut XPathExpr, name: &str, value: &str)
     if !value.is_empty() {
         let offset = value.chars().count() - 1;
         xpath.add_condition(&format!(
-            "substring({name}, string-length({name})-{offset}) = {}",
+            "substring({name}, string-length({name}) - {offset}) = {}",
             xpath_literal(value)
         ));
     } else {

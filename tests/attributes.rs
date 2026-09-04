@@ -21,7 +21,7 @@ fn case_sensitivity_flags() {
         "e[foo$=\"Bar\" i]",
         format!(
             "e[substring({LOWER_FOO}, \
-             string-length({LOWER_FOO})-2) = 'bar']"
+             string-length({LOWER_FOO}) - 2) = 'bar']"
         ),
     );
     t.check(

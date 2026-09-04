@@ -9,6 +9,18 @@ Translated XPath is part of the contract: a change to the expression a given
 selector produces is listed under **Changed**, even when the two expressions
 select the same nodes, because callers compare, cache and embed the strings.
 
+## [Unreleased]
+
+### Changed
+
+- `[attr$=value]` now spaces the subtraction in the expression it translates
+  to: `a[href$="pdf"]` gives `substring(@href, string-length(@href) - 2) =
+  'pdf'` where it previously gave `string-length(@href)-2`. The two parse
+  identically as XPath, so only the string differs — but the string is the
+  contract. This was the crate's last unspaced binary operator; every other one
+  it emits already carried a space on both sides. selectr 0.7-0 made the same
+  change, so the two remain comparable string-for-string.
+
 ## [0.3.0] - 2026-09-03
 
 ### Added
@@ -261,6 +273,7 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 Initial release, migrated from the `selectrs` package.
 
-[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sjp/css-to-xpath/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sjp/css-to-xpath/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sjp/css-to-xpath/releases/tag/v0.1.0
