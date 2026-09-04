@@ -13,6 +13,14 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ### Changed
 
+- A selector group whose first token cannot start a compound is now reported by
+  that token rather than as `ParseErrorKind::EmptySelector`: `#1abc` gives
+  ``unexpected `#1abc` `` where it previously gave "the selector is empty", which
+  sent the reader looking for a missing selector instead of at the
+  digit-leading identifier that is there. It is also the message `p#1abc` has
+  always given, so the same mistake no longer reports two ways depending on
+  whether a type selector precedes it. `EmptySelector` now means only what it
+  says: `""`, `"  "`, `"a, , b"`.
 - `[attr$=value]` now spaces the subtraction in the expression it translates
   to: `a[href$="pdf"]` gives `substring(@href, string-length(@href) - 2) =
   'pdf'` where it previously gave `string-length(@href)-2`. The two parse

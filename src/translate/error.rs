@@ -198,7 +198,10 @@ impl std::error::Error for Error {}
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ParseErrorKind {
-    /// The selector, or one group of a selector list, has nothing in it.
+    /// The selector, or one group of a selector list, has nothing in
+    /// it: `""`, `"  "`, `"a, , b"`. A group that *had* something, none
+    /// of which parsed — `#1abc` — is reported by the token that stopped
+    /// it instead.
     EmptySelector,
     /// A combinator with nothing after it, as in `div > `.
     DanglingCombinator,
@@ -295,6 +298,14 @@ impl ParseErrorKind {
             )),
             _ => ParseErrorKind::Other("the selector is not valid CSS".to_owned()),
         }
+    }
+
+    /// A [`ParseErrorKind::UnexpectedToken`] naming `token`, for the
+    /// caller that has a token in hand rather than a dependency error
+    /// holding one. Sanitized and elided exactly as the mapped kinds
+    /// are.
+    pub(crate) fn unexpected_token(token: &Token<'_>) -> Self {
+        ParseErrorKind::UnexpectedToken(token_text(token))
     }
 }
 

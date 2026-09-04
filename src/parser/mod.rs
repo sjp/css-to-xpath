@@ -762,9 +762,34 @@ fn parse_list<'i>(
 }
 
 fn parse_error(css: &str, e: &ParseFailure<'_>) -> Error {
-    Error::Parse {
-        kind: ParseErrorKind::from_kind(&e.kind),
-        offset: byte_offset(css, e.location),
+    let offset = byte_offset(css, e.location);
+    let mut kind = ParseErrorKind::from_kind(&e.kind);
+    // `EmptySelector` is what `selectors` reports whenever a compound
+    // ends up with no components, which covers both "there was nothing
+    // here" and "none of what was here parsed". Only the first is what
+    // the name says, so the second is re-reported by its cause.
+    if matches!(kind, ParseErrorKind::EmptySelector)
+        && let Some(blocked) = blocking_token(css, offset)
+    {
+        kind = blocked;
+    }
+    Error::Parse { kind, offset }
+}
+
+/// The token a group blamed for being empty in fact stopped at, when
+/// there was one: `#1abc` names an ID that CSS cannot spell unescaped,
+/// not an absent selector, and the same hash one compound later
+/// (`p#1abc`) is already reported that way.
+///
+/// `None` when the group really is empty — end of input, or the comma
+/// that closes it — leaving [`ParseErrorKind::EmptySelector`] to mean
+/// only what it says.
+fn blocking_token(css: &str, offset: usize) -> Option<ParseErrorKind> {
+    let mut input = ParserInput::new(css.get(offset..)?);
+    let mut parser = CssParser::new(&mut input);
+    match parser.next() {
+        Ok(Token::Comma) | Err(_) => None,
+        Ok(token) => Some(ParseErrorKind::unexpected_token(token)),
     }
 }
 

@@ -35,8 +35,8 @@ fn unsupported_errors() {
     // position it can appear: alone, either side of a combinator,
     // inside a compound, and inside a functional argument. Without the
     // scan Servo — which parses with nesting disabled — blames
-    // whatever it failed on next, which for a leading `&` is "the
-    // selector is empty".
+    // whatever it failed on next, which never says the `&` is the
+    // construct this translator declines to support.
     assert!(t.css_to_xpath("&", "").is_err());
     assert!(t.css_to_xpath("& a", "").is_err());
     assert!(t.css_to_xpath("a &", "").is_err());
@@ -274,6 +274,71 @@ fn parse_errors() {
     assert!(t.css_to_xpath(":lang(fr)", "").is_ok());
 }
 
+/// `EmptySelector` means the group really was empty, not merely that
+/// nothing in it parsed. `selectors` reports both the same way — a
+/// compound that ends with no components — so a group that had a
+/// token and could not use it is re-reported by that token, which is
+/// what the same token one compound later already gets.
+#[test]
+fn empty_selector_names_what_stopped_it() {
+    let t = Translator::new(Mode::Generic);
+    let kind = |sel: &str| match t.css_to_xpath(sel, "").unwrap_err() {
+        css_to_xpath::Error::Parse { kind, offset } => (kind, offset),
+        e => panic!("{sel:?} -> {e}"),
+    };
+
+    // An identifier CSS cannot spell unescaped is named, and named the
+    // same way whether or not a type selector precedes it. The caret
+    // is on the offending token either way.
+    for (sel, at) in [
+        ("#1abc", 0),
+        ("#1abc, b", 0),
+        ("a, #1abc", 3),
+        (":is(#1abc)", 4),
+    ] {
+        assert_eq!(
+            kind(sel),
+            (
+                css_to_xpath::ParseErrorKind::UnexpectedToken("#1abc".to_owned()),
+                at
+            ),
+            "{sel:?}"
+        );
+    }
+    assert_eq!(
+        kind("p#1abc"),
+        (
+            css_to_xpath::ParseErrorKind::UnexpectedToken("#1abc".to_owned()),
+            1
+        )
+    );
+    // A digit-leading class is a dimension token to the CSS
+    // tokenizer, so the two spellings agree on that echo too.
+    assert_eq!(kind(".1cls").0, kind("p.1cls").0);
+    assert_eq!(kind("#-").0, kind("p#-").0);
+
+    // What is left is what the name says: nothing between the commas,
+    // or nothing at all.
+    for (sel, at) in [("", 0), ("  ", 2), ("a,", 2), (",a", 0), ("a, , b", 3)] {
+        assert_eq!(
+            kind(sel),
+            (css_to_xpath::ParseErrorKind::EmptySelector, at),
+            "{sel:?}"
+        );
+    }
+
+    // The full message, with the caret on the hash rather than on a
+    // selector the reader is told is empty.
+    let sel = "#1abc";
+    assert_eq!(
+        t.css_to_xpath(sel, "").unwrap_err().message(sel),
+        "Unable to parse the CSS selector \"#1abc\": unexpected `#1abc`\n\
+         \x20 |\n\
+         \x20 | #1abc\n\
+         \x20 | ^"
+    );
+}
+
 /// css-syntax-3 auto-closes open blocks, functions, and strings at
 /// EOF: the parse error is flagged, not fatal, so a selector left
 /// unclosed at end-of-input translates identically to its closed
@@ -438,8 +503,8 @@ fn error_messages() {
     // The `&` nesting selector is the third, and the one whose
     // pre-parse catch matters most: Servo cannot begin a compound with
     // it, so the error that used to surface was whichever one the
-    // parse tripped over next — "the selector is empty" for a `&` that
-    // is plainly there in the caret line.
+    // parse tripped over next — a plain parse error, where the `&` is
+    // valid CSS that this translator is the one refusing.
     let sel = "a:is(&)";
     let err = t.css_to_xpath(sel, "").unwrap_err();
     assert_eq!(
