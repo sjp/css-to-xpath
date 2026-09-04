@@ -352,8 +352,14 @@ impl Translator {
             // two pseudo-classes coincide — :any-link shares :link's
             // translation verbatim. HTML matches both on an `a` or
             // `area` with an `href`; the `link` element carries an
-            // `href` but is not one of the elements HTML requires to
-            // match :link/:visited, so it is not in the set.
+            // `href` but is not in the set, and that is the spec's
+            // wording, not an omission here: "all `a` elements that
+            // have an `href` attribute, and all `area` elements that
+            // have an `href` attribute, must match one of :link and
+            // :visited" (HTML, Pseudo-classes), with Selectors 4 giving
+            // the same two elements as its example of what :any-link
+            // matches in HTML. Other translators (selectr) include
+            // `link`; they are the ones departing from the text.
             (Kind::Html, PseudoClass::Link) | (Kind::Html, PseudoClass::AnyLink) => {
                 xpath.add_condition(&match name {
                     Some("a" | "area") => "@href".to_owned(),

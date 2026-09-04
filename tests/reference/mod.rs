@@ -820,8 +820,10 @@ impl<'a> El<'a> {
     }
 
     /// `:link` and `:any-link` — an `a` or `area` with an `href`. The
-    /// `link` element carries an `href` too but is not one of the
-    /// elements HTML has these match.
+    /// `link` element carries an `href` too but is not one of the two
+    /// HTML names: "all `a` elements that have an `href` attribute, and
+    /// all `area` elements that have an `href` attribute, must match one
+    /// of :link and :visited".
     fn is_hyperlink(&self) -> bool {
         (self.is_html("a") || self.is_html("area")) && self.has_attr("href")
     }

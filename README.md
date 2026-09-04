@@ -64,7 +64,9 @@ assert_eq!(
   and gives dynamic-seeming pseudo-classes their static HTML
   meaning where one exists. Each is limited to the elements HTML
   defines it over, so nothing else matches:
-  - `:link`/`:any-link` — an `a` or `area` with an `href`.
+  - `:link`/`:any-link` — an `a` or `area` with an `href`. Those two
+    elements are the whole of HTML's set: a `link` carries an `href` too
+    but matches neither, so `link:link` is `link[0]`.
   - `:checked` — a checked `input` of type `checkbox` or `radio`, or a
     selected `option`.
   - `:disabled`/`:enabled` — the two halves of HTML's "actually

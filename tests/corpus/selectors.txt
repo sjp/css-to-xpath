@@ -742,6 +742,7 @@ xhtml|textarea:required
 xhtml|input:optional
 xhtml|a:link
 xhtml|p:link
+xhtml|link:link
 xhtml|p:checked
 xhtml|a:enabled
 :nth-child(2 of :nth-child(2 of a))

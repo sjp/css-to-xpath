@@ -15,6 +15,11 @@
   the translated XPath is supposed to do, not something the tree does.
 -->
 <html id="doc" lang="en">
+  <head id="hd">
+    <!-- A `link` carries an @href, but HTML's :link/:visited set is the
+         `a` and `area` elements only, so it matches neither. -->
+    <link id="lk" href="/x"/>
+  </head>
   <body id="body">
     <form id="f1">
       <fieldset id="fs1" disabled="">

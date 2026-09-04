@@ -31,6 +31,16 @@ select the same nodes, because callers compare, cache and embed the strings.
   always given, so the same mistake no longer reports two ways depending on
   whether a type selector precedes it. `EmptySelector` now means only what it
   says: `""`, `"  "`, `"a, , b"`.
+- The README listed `:link`/`:any-link` as matching an `a` or `area` with an
+  `href` without saying that the `link` element, which also carries an `href`,
+  is outside that set — the difference a reader hits first, since other
+  translators (selectr) do match it. It now says so, and the exclusion is
+  quoted from HTML's own wording ("all `a` elements that have an `href`
+  attribute, and all `area` elements that have an `href` attribute, must match
+  one of :link and :visited") where the translation makes it, so the decision
+  is not re-opened from memory. Both HTML fixtures grew a `<link href>` in a
+  `head`, pinning at the document level what `link:link` → `link[0]` already
+  pinned as a string. No behaviour changed.
 - `[attr$=value]` now spaces the subtraction in the expression it translates
   to: `a[href$="pdf"]` gives `substring(@href, string-length(@href) - 2) =
   'pdf'` where it previously gave `string-length(@href)-2`. The two parse

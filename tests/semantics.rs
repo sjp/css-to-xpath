@@ -334,8 +334,11 @@ fn xhtml_form_pseudos() {
             (":checked", &["i4", "o1"]),
             (":required", &["i6", "ta1"]),
             (":optional", &["i1", "i2", "i3", "i4", "i5", "se1"]),
+            // lk is a `link` with an href; HTML's :link/:visited set is
+            // `a` and `area`, so it is in neither.
             (":link", &["a1"]),
             (":any-link", &["a1"]),
+            ("xhtml|link:link", &[]),
             ("xhtml|fieldset:disabled", &["fs1"]),
             ("xhtml|option:checked", &["o1"]),
             ("xhtml|input:enabled", &["i1", "i4", "i5", "i6", "i7"]),
@@ -515,8 +518,11 @@ fn html_form_and_link_pseudos() {
                 ":enabled",
                 &["i1", "i3", "i4", "i5", "i6", "se1", "o1", "o2"],
             ),
+            // lk is a `link` with an href; HTML's :link/:visited set is
+            // `a` and `area`, so it is in neither.
             (":link", &["a1"]),
             (":any-link", &["a1"]),
+            ("link:link", &[]),
             // Naming the element lets the translation drop the arms
             // written for the other names; it must still select the same
             // elements as the wildcard form restricted to that name.

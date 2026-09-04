@@ -13,6 +13,11 @@
   (not carved out), and a disabled optgroup's options.
 -->
 <html xmlns="http://www.w3.org/1999/xhtml" id="doc" xml:lang="en">
+  <head id="hd">
+    <!-- A `link` carries an @href, but HTML's :link/:visited set is the
+         `a` and `area` elements only, so it matches neither. -->
+    <link id="lk" href="#x"/>
+  </head>
   <body id="body">
     <form id="f1">
       <fieldset id="fs1" disabled="disabled">

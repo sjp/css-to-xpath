@@ -76,8 +76,12 @@ fn html_pseudo_overrides() {
     // translation time: only the arm for that name is emitted, and a
     // name outside the pseudo-class's element set leaves `0`.
     //
-    // :link is `a`/`area` with an @href; the `link` element has an
-    // @href but is not one of the elements HTML matches here.
+    // :link is `a`/`area` with an @href. The `link` element has an
+    // @href but is not one of the two names HTML gives ("all `a`
+    // elements that have an `href` attribute, and all `area` elements
+    // that have an `href` attribute, must match one of :link and
+    // :visited"), so `link:link` is settled to a never-matching `[0]`
+    // at translation time.
     assert_eq!(h("a:link"), "a[@href]");
     assert_eq!(h("area:link"), "area[@href]");
     assert_eq!(h("link:link"), "link[0]");
