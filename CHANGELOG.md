@@ -11,6 +11,26 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Changed
+
+- A compound that can never match inside a complex functional-pseudo-class
+  argument now ends the chain, instead of leaving the reversed-axis test that
+  carried the compounds to its left in the output: `e:is(f > g:is())` is
+  `e[0]` rather than `e[0 and parent::*[self::f]]`, and
+  `li:nth-child(2 of f > g:is())` is `li[0]` rather than an expression naming
+  the dead chain twice, once inside a `count()` over every preceding sibling.
+  Both selected the same (empty) node set before, so no caller gets a
+  different answer. This is the fold `XPathExpr::condition` already applied to
+  a single compound's own conjunction (`a:hover[x]` is `a[0]`), reaching the
+  conjunction that `Translator::argument_condition` assembles across
+  compounds; it applies through `:is()`, `:where()`, `:not()` and the nth
+  `of S` lists, while `:has()` builds a path and was never affected. Only the
+  compounds to the *left* of the dead one go — `e:is(f > g:is() > h)` keeps
+  its `self::h` and is `e[self::h and parent::*[0]]` — and a `0` that is
+  already alone inside its axis bracket stays put, so `e:is(f:is() > g)`
+  remains `e[self::g and parent::*[0]]` and still shows which compound is the
+  impossible one.
+
 ## [0.4.0] - 2026-09-04
 
 ### Added

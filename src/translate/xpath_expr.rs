@@ -209,6 +209,11 @@ impl XPathExpr {
     /// The standalone predicates are deliberately untouched: they are
     /// separate brackets because their position matters (the `+`
     /// combinator's `[1]`), so a `0` here says nothing about them.
+    ///
+    /// The `0` absorption has a counterpart one level up, in
+    /// `Translator::argument_condition`: the conjunction there is
+    /// assembled from a chain of compounds rather than held in one
+    /// `conditions`, so that chain applies the same rule for itself.
     pub(crate) fn condition(&self) -> Option<Condition> {
         if self.conditions.is_empty() {
             return None;

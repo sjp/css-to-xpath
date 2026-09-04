@@ -129,4 +129,7 @@ fn nth_child_of() {
         "li:nth-child(2 of .foo, *)",
         "li[count(preceding-sibling::*) = 1]",
     );
+    // A chain argument that cannot match folds to 0 before the count()
+    // test is built, so the dead chain is not emitted twice.
+    t.check("li:nth-child(2 of a > b:hover)", "li[0]");
 }

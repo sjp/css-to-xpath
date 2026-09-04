@@ -269,6 +269,24 @@ fn complex_pseudo_arguments() {
     // A step that can never match absorbs the rest of its own
     // conjunction, here the `self::a` the folded element name added.
     t.check("e:is(a:hover b)", "e[self::b and ancestor::*[0]]");
+    // ...and, one step out, the axis test that carries the steps to its
+    // left, so the chain ends at the step that cannot match. One case
+    // per combinator:
+    t.check("e:is(a b:hover)", "e[0]");
+    t.check("e:is(a > b:hover)", "e[0]");
+    t.check("e:is(a + b:hover)", "e[0]");
+    t.check("e:is(a ~ b:hover)", "e[0]");
+    t.check("e:is(a > b > c:hover)", "e[0]");
+    // The steps to its right are untouched, brackets and all.
+    t.check("e:is(a > b:hover > c)", "e[self::c and parent::*[0]]");
+    // The 0 that is already innermost stays where it is: nothing is
+    // conjoined with it to absorb, and folding it away would hide which
+    // step is the impossible one.
+    t.check("e:is(a:hover > b)", "e[self::b and parent::*[0]]");
+    // The fold happens before the wrappers see the condition.
+    t.check("e:is(a > b:hover, c)", "e[0 or self::c]");
+    t.check("e:not(a > b:hover)", "e[not(0)]");
+    t.check("e:where(a > b:hover)", "e[0]");
     // Nested pseudo-classes inside chain steps; an or-group condition
     // is parenthesized when conjoined with the chain test.
     t.check(

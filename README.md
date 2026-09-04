@@ -124,7 +124,13 @@ Such a `[0]` absorbs the rest of its compound's condition, so
 collects twice is written once (`a[href]:any-link` is `a[@href]`). The
 same repeat rule applies to an `:is()`/`:where()`/`:not()`/`of S`
 argument list, whose branches are OR-ed: `:is(a, a)` is `*[self::a]`.
-Nothing beyond those rules is folded: the output is a faithful
+Inside a complex argument the `[0]` absorbs its chain the same way,
+taking the reversed-axis test conjoined with it and every compound to
+its left: `:is(a > b:hover)` is `*[0]`. The compounds to its right stay
+(`:is(a > b:hover > c)` is `*[self::c and parent::*[0]]`), and so does a
+`0` already alone inside its axis bracket (`:is(a:hover > b)` is
+`*[self::b and parent::*[0]]`), since that is what says which compound
+cannot match. Nothing beyond those rules is folded: the output is a faithful
 translation of the selector, not a minimised expression.
 
 `Mode` is an ordinary enum, so a caller that has one picks it at compile

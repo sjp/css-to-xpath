@@ -852,6 +852,17 @@ impl Translator {
     /// pick its reversed axis, then once right-to-left (leftmost compound
     /// first) to wrap each condition inside the one to its right.
     ///
+    /// A compound that cannot match ends the chain, the same way a `0`
+    /// absorbs the rest of a conjunction in [`XPathExpr::condition`]:
+    /// the existence test it is conjoined with, and every compound
+    /// further left, are dropped, so `:is(a > b:is())` is `0` rather
+    /// than `0 and parent::*[self::a]`. The compounds to its right are
+    /// untouched — `:is(a > b:is() > c)` keeps `self::c` and its
+    /// bracket — and a `0` that is already the innermost condition, with
+    /// nothing conjoined to absorb, stays where it is: `:is(a:is() > b)`
+    /// is `self::b and parent::*[0]`, which still says which compound is
+    /// the impossible one.
+    ///
     /// `None` means the chain imposes no condition (a bare `*` argument).
     fn argument_condition(
         &self,
@@ -882,6 +893,19 @@ impl Translator {
                     }
                 });
             }
+        }
+
+        // A compound that cannot match absorbs the existence test it is
+        // conjoined with, and with it every compound further left. The
+        // chain ends there; the compounds to its right keep their own
+        // conditions and their brackets. Every compound is translated
+        // first, so a discarded one still reports its errors.
+        if let Some(dead) = subs
+            .iter()
+            .position(|sub| matches!(sub.condition(), Some(c) if c.expr == "0"))
+        {
+            subs.truncate(dead + 1);
+            axes.truncate(dead);
         }
 
         // A single compound imposes its own conditions and nothing else.
