@@ -29,6 +29,19 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ### Changed
 
+- The error for a namespace prefix that is not an XML `NCName` now names the
+  rule rather than an operation the prefix cannot have: `\31 ns|div` gives
+  `` a namespace prefix that is not an XPath name (`1ns`) `` where it
+  previously gave "a namespace prefix that needs quoting". Quoting is what a
+  *local* name that cannot be a node test gets — it folds into a `name()` or
+  `local-name()` comparison — so the old wording named the very fallback the
+  prefix is being refused for. The README now records why that fallback stops
+  at the prefix: it is an exact rewrite of a node test, whereas comparing a
+  whole `prefix:name` against `name()` (which some other translators emit
+  here) would match on how the *document* spells its prefix, where every
+  prefix this crate emits is resolved by what the caller bound it to — and
+  nothing the caller binds could help, since an XPath expression cannot name
+  such a prefix at all. Which selectors translate is unchanged.
 - The `Mode::Generic` error for a wildcard it cannot place now names the reason
   rather than only the placement: `` the :lang() language range "*-CH" (a
   wildcard outside the final subtag, which XPath's lang() cannot express) ``.

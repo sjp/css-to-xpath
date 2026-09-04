@@ -328,7 +328,14 @@ express them faithfully:
   without the namespace URI, which this crate never sees. A *local name*
   that cannot be a node test is fine — `svg|di\[v` translates to
   `svg:*[local-name() = 'di[v']`, so the prefix still resolves through the
-  caller's namespace map.
+  caller's namespace map. That fallback is deliberately not extended to
+  the prefix itself: it is an exact rewrite of a node test, whereas
+  comparing the whole qualified name (`[\31 ns|href]` as
+  `attribute::*[name() = '1ns:href']`, which some other translators emit)
+  would match on how the *document* spells its prefix, where every prefix
+  this crate emits is resolved by what the caller bound it to. Nothing
+  the caller can bind would help: an XPath expression has no way to name
+  such a prefix at all.
 - `:scope` outside the leftmost compound, or inside a functional
   pseudo-class argument. Both are lexical facts, so — like `||` and `&` —
   the scan of the source text finds them and the error points a caret at

@@ -994,13 +994,24 @@ fn collect_seqs(
 
 /// A namespace prefix that is not an XML `NCName` (see [`ncname`]) cannot
 /// appear in a node test, and XPath 1.0 offers no way to resolve it
-/// without the namespace URI, which this crate never sees. Comparing the
-/// whole `prefix:name` against `name()` instead would match only
-/// documents that happen to use that very prefix, so such a prefix errors
-/// rather than approximating.
+/// without the namespace URI, which this crate never sees.
+///
+/// The obvious symmetry with the local-name path — where a name that
+/// cannot be a node test folds into a `name()` or `local-name()`
+/// comparison — does not hold, which is why this is an error and not a
+/// third fallback. Those fallbacks are exact rewrites: `name() = '123'
+/// and namespace-uri() = ''` selects what the node test `123` would have
+/// selected, and `svg:*[local-name() = 'di[v']` still resolves `svg`
+/// through the evaluator's namespace map. Comparing a whole
+/// `prefix:name` against `name()` is not a rewrite of anything: it tests
+/// how the *document* spells its prefix, where every other prefix this
+/// crate emits is resolved by what the caller bound it to. So a prefix
+/// that is not a name is refused rather than matched by spelling — and
+/// the caller could not bind it either way, since an XPath expression
+/// has no way to name it.
 fn unsafe_prefix_error(prefix: &str) -> Error {
     Error::unsupported(format!(
-        "a namespace prefix that needs quoting (`{prefix}`)"
+        "a namespace prefix that is not an XPath name (`{prefix}`)"
     ))
 }
 

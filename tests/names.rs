@@ -78,8 +78,8 @@ fn unsafe_names_and_escapes() {
         "svg:*[local-name() = 'di[v' \
          and count(preceding-sibling::svg:*[local-name() = 'di[v']) = 0]",
     );
-    // A prefix that itself needs quoting errors; see
-    // `unsupported_errors` in `errors.rs`.
+    // A prefix that is not an XPath name has no such fallback and
+    // errors; see `unsupported_errors` in `errors.rs`.
 }
 
 /// A namespace prefix is held to the XML `NCName` production rather than
@@ -266,7 +266,7 @@ fn default_namespace_prefix_is_checked_like_a_written_one() {
     let err = unsafe_prefix.css_to_xpath("p", "").unwrap_err();
     assert_eq!(
         err.to_string(),
-        "unsupported CSS construct: a namespace prefix that needs quoting (`1x`)"
+        "unsupported CSS construct: a namespace prefix that is not an XPath name (`1x`)"
     );
 
     let empty = Translator::new(Mode::Generic).with_default_namespace_prefix("");

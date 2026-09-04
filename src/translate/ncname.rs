@@ -8,9 +8,13 @@
 //! and the predicate here is what decides which those are. Local names
 //! need no such test: one that cannot be a name test folds into a
 //! `local-name()` comparison instead, so they stay on the deliberately
-//! conservative ASCII-only [`is_safe_name`].
+//! conservative ASCII-only [`is_safe_name`]. Why that fold is not
+//! extended to the prefix — the question the asymmetry invites — is
+//! recorded on [`unsafe_prefix_error`], which is what a prefix failing
+//! this test gets.
 //!
 //! [`is_safe_name`]: super::xpath_expr::is_safe_name
+//! [`unsafe_prefix_error`]: super::unsafe_prefix_error
 //!
 //! # Which `NCName`
 //!
