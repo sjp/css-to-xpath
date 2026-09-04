@@ -18,7 +18,7 @@ cargo add css-to-xpath
 
 ```toml
 [dependencies]
-css-to-xpath = "0.3"
+css-to-xpath = "0.4"
 ```
 
 ## Quick start
