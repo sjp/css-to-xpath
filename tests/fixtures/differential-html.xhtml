@@ -20,7 +20,8 @@
     - `type` as an enumerated attribute: mixed-case keywords (RANGE,
       TEXT, RADIO, SUBMIT, RESET), a missing one, an invalid one, an
       empty one, and one spelling two keywords with a pipe between them,
-      which is neither;
+      which is neither — and, for the pseudo-classes the type does *not*
+      reach, a disabled input of two types `required` is inert on;
     - contenteditable set, cleared, re-set, inherited, and left
       inheriting by `inherit`, an invalid value and a pipe;
     - two forms whose default button is found differently, one with no
@@ -93,6 +94,11 @@
       <input id="i28" type="file" required="required" readonly="readonly"/>
       <input id="i29" class="two" type="text"/>
       <input id="i30" type="submit"/>
+      <!-- `disabled` has no "Applies to" list of type states the way
+           `required` does, so these two are :disabled where i21 and i22,
+           the same types without the attribute, are :enabled. -->
+      <input id="i51" type="hidden" disabled="disabled"/>
+      <input id="i52" type="RANGE" disabled="disabled"/>
       <select id="se2" required="required"><option id="o2">A</option></select>
       <select id="se3"><option id="o3" selected="selected">B</option></select>
       <textarea id="ta1" required="required" readonly="readonly" placeholder="n"></textarea>

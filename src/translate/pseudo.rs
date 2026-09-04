@@ -113,6 +113,18 @@ const FIELDSET_DISABLED: &str = "count(ancestor::*[local-name() = 'fieldset'][@d
 /// nothing in static markup identifies one, so they are left out.
 /// Hyperlinks are not in the list — `a[href]` matches `:link`, never
 /// `:enabled` — and neither are the obsolete `keygen` and `command`.
+///
+/// The list is by element and only by element: no `input` type is
+/// carved out of it, because HTML's "actually disabled" is defined over
+/// these elements and the `disabled` content attribute applies to every
+/// `input` type state, Hidden included. So `<input type="hidden"
+/// disabled>` is `:disabled` and a hidden input without the attribute is
+/// `:enabled`, and neither translation mentions `@type`. That is what
+/// separates these two from [`REQUIRED_INERT_TYPES`] and its neighbours,
+/// where the type does decide: those attributes have an "Applies to"
+/// table listing the type states they affect, and `disabled` has none.
+/// Other translators (selectr) drop `type="hidden"` from both halves,
+/// which is a carve-out the spec does not make.
 const DISABLEABLE: [&str; 7] = [
     "button", "input", "select", "textarea", "optgroup", "option", "fieldset",
 ];

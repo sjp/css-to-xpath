@@ -630,7 +630,9 @@ impl<'a> El<'a> {
 
     /// The elements `:enabled` and `:disabled` apply to. (The spec's
     /// list also holds form-associated custom elements, which nothing
-    /// in static markup identifies.)
+    /// in static markup identifies.) An element, not a type state:
+    /// `disabled` applies to every `input` type, so unlike
+    /// [`InputType::required_applies`] this asks nothing about `type`.
     fn is_disableable(&self) -> bool {
         [
             "button", "input", "select", "textarea", "optgroup", "option", "fieldset",

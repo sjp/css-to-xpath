@@ -76,7 +76,9 @@ assert_eq!(
     with the carve-out that the fieldset's first `legend` keeps its
     contents enabled. The two partition that element set. (HTML also
     lists form-associated custom elements, which no static translation
-    can recognise.)
+    can recognise.) The set is by element alone: `disabled` applies to
+    every `input` type, so `<input type="hidden" disabled>` is
+    `:disabled`, where `:required` below turns on the type.
   - `:required`/`:optional` — the `required` attribute over `select`,
     `textarea` and the `input` types it applies to.
   - `:read-write`/`:read-only` — HTML's mutability: an `input` of a type

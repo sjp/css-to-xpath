@@ -75,6 +75,18 @@ select the same nodes, because callers compare, cache and embed the strings.
   is not re-opened from memory. Both HTML fixtures grew a `<link href>` in a
   `head`, pinning at the document level what `link:link` → `link[0]` already
   pinned as a string. No behaviour changed.
+- The README and the code left the `:disabled`/`:enabled` element set open to
+  being read as type-sensitive, since it sits beside `:required`,
+  `:read-write` and `:placeholder-shown`, where an `input`'s type does decide.
+  It is not: HTML's `disabled` attribute has no "Applies to" list of type
+  states, so `<input type="hidden" disabled>` is `:disabled`, and neither half
+  of the pair emits a `@type` test at all. Other translators (selectr) drop
+  Hidden from both halves, a carve-out the spec does not make. The README now
+  says the set is by element alone, the constant holding it says why, and
+  `tests/html_mode.rs` asserts the absence of the `@type` test rather than
+  leaving it to be noticed. Both HTML fixtures grew a disabled hidden `input`
+  and the differential fixture a disabled Hidden/RANGE pair, so a document
+  pins it too. No behaviour changed.
 - `[attr$=value]` now spaces the subtraction in the expression it translates
   to: `a[href$="pdf"]` gives `substring(@href, string-length(@href) - 2) =
   'pdf'` where it previously gave `string-length(@href)-2`. The two parse

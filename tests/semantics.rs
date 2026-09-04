@@ -324,7 +324,13 @@ fn xhtml_form_pseudos() {
         &[
             // fs1 is disabled; i1 sits in the *first* legend and is
             // carved out, i2 sits in the second legend and is not.
-            (":disabled", &["fs1", "i2", "i3", "og1", "o1", "o2", "bt1"]),
+            // i8 is a hidden input carrying `disabled`: the type
+            // states play no part in this pair, so it is in the same
+            // half as any other disabled control.
+            (
+                ":disabled",
+                &["fs1", "i2", "i3", "i8", "og1", "o1", "o2", "bt1"],
+            ),
             (
                 ":enabled",
                 &[
@@ -348,7 +354,11 @@ fn xhtml_form_pseudos() {
             ("xhtml|option:disabled", &["o1", "o2"]),
             ("xhtml|optgroup:disabled", &["og1"]),
             ("xhtml|optgroup:enabled", &["og2"]),
-            ("xhtml|input:disabled", &["i2", "i3"]),
+            ("xhtml|input:disabled", &["i2", "i3", "i8"]),
+            // i7 and i8 are both `type="hidden"`; only the `disabled`
+            // attribute separates them, and each half takes one.
+            ("xhtml|input[type=\"hidden\"]:disabled", &["i8"]),
+            ("xhtml|input[type=\"hidden\"]:enabled", &["i7"]),
             ("xhtml|button:disabled", &["bt1"]),
             ("xhtml|input:required", &["i6"]),
             ("xhtml|textarea:required", &["ta1"]),
@@ -369,7 +379,10 @@ fn xhtml_names_are_namespaced_and_case_sensitive() {
         &xhtml_fixture(),
         Mode::Xhtml,
         &[
-            ("xhtml|input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
+            (
+                "xhtml|input",
+                &["i1", "i2", "i3", "i4", "i5", "i6", "i7", "i8"],
+            ),
             ("xhtml|legend > xhtml|input", &["i1", "i2"]),
             (":root", &["doc"]),
             // Unprefixed means the null namespace, which no XHTML
@@ -393,7 +406,7 @@ fn xhtml_default_namespace_makes_unprefixed_names_match() {
         &xhtml_fixture(),
         &Translator::new(Mode::Xhtml).with_default_namespace_prefix("xhtml"),
         &[
-            ("input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
+            ("input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7", "i8"]),
             ("legend > input", &["i1", "i2"]),
             ("body > p", &["p1", "p2"]),
             ("body > *", &["f1", "a1", "a2", "p1", "p2"]),
@@ -411,8 +424,11 @@ fn xhtml_default_namespace_makes_unprefixed_names_match() {
             // The written forms keep their own meanings: `|e` is still
             // the null namespace, and `*|e` still any namespace.
             ("|input", &[]),
-            ("*|input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
-            ("xhtml|input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
+            ("*|input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7", "i8"]),
+            (
+                "xhtml|input",
+                &["i1", "i2", "i3", "i4", "i5", "i6", "i7", "i8"],
+            ),
         ],
     );
 }
@@ -474,7 +490,7 @@ fn html_lowercases_names_but_not_class_values() {
         &html_fixture(),
         Mode::Html,
         &[
-            ("INPUT", &["i1", "i2", "i3", "i4", "i5", "i6"]),
+            ("INPUT", &["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
             ("A", &["a1", "a2"]),
             ("body > p", &["p1", "p2"]),
             ("#doc", &["doc"]),
@@ -513,7 +529,9 @@ fn html_form_and_link_pseudos() {
         Mode::Html,
         &[
             (":checked", &["i3", "i5", "o1"]),
-            (":disabled", &["fs1", "i2"]),
+            // i7 is a hidden input carrying `disabled`, which applies
+            // to every input type: it is :disabled like any other.
+            (":disabled", &["fs1", "i2", "i7"]),
             (
                 ":enabled",
                 &["i1", "i3", "i4", "i5", "i6", "se1", "o1", "o2"],
@@ -529,7 +547,8 @@ fn html_form_and_link_pseudos() {
             ("input:checked", &["i3", "i5"]),
             ("option:checked", &["o1"]),
             ("p:checked", &[]),
-            ("input:disabled", &["i2"]),
+            ("input:disabled", &["i2", "i7"]),
+            ("input[type=hidden]:disabled", &["i7"]),
             ("fieldset:disabled", &["fs1"]),
             ("option:enabled", &["o1", "o2"]),
             ("select:enabled", &["se1"]),

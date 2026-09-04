@@ -167,6 +167,15 @@ fn html_pseudo_overrides() {
     // for an option, and neither for an optgroup itself.
     assert_eq!(h("input:disabled"), format!("input[@disabled or {fd}]"));
     assert_eq!(h("input:enabled"), format!("input[not(@disabled or {fd})]"));
+    // The set is by element and nothing else: `disabled` applies to
+    // every `input` type state, Hidden included, so unlike :required
+    // above neither half asks about @type. `<input type="hidden"
+    // disabled>` is :disabled, and other translators (selectr) that
+    // drop that type from both halves are adding a carve-out HTML does
+    // not make.
+    for css in [":disabled", ":enabled", "input:disabled", "input:enabled"] {
+        assert!(!h(css).contains("@type"), "{css}");
+    }
     let optgroup_disabled = "@disabled or parent::*[local-name() = 'optgroup'][@disabled]";
     assert_eq!(h("option:disabled"), format!("option[{optgroup_disabled}]"));
     assert_eq!(

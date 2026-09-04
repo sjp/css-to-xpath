@@ -30,6 +30,10 @@
         <input id="i5" type="radio"/>
         <input id="i6" type="text" required="required"/>
         <input id="i7" type="hidden" required="required"/>
+        <!-- `disabled` applies to every input type, Hidden included, so
+             i8 is :disabled where i7, the same type without it, is
+             :enabled. `required` is the attribute the type decides. -->
+        <input id="i8" type="hidden" disabled="disabled"/>
         <select id="se1">
           <optgroup id="og1" disabled="disabled">
             <option id="o1" selected="selected">A</option>

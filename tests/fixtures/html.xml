@@ -33,6 +33,9 @@
            does apply: the value spells out two of the types `required`
            is inert on, which the translation must not read as one. -->
       <input id="i6" type="hidden|range" required=""/>
+      <!-- `disabled` has no "Applies to" list of type states the way
+           `required` does, so a Hidden input carrying it is :disabled. -->
+      <input id="i7" type="hidden" disabled=""/>
       <select id="se1">
         <option id="o1" selected="">A</option>
         <option id="o2">B</option>

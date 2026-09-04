@@ -700,6 +700,7 @@ shelf[class="nonfiction"]
 title, blank
 :any-link
 input:disabled
+input[type=hidden]:disabled
 a:link
 a:enabled
 input:required
@@ -750,6 +751,8 @@ xhtml|option:disabled
 xhtml|optgroup:disabled
 xhtml|optgroup:enabled
 xhtml|input:disabled
+xhtml|input[type="hidden"]:disabled
+xhtml|input[type="hidden"]:enabled
 xhtml|button:disabled
 xhtml|input:required
 xhtml|textarea:required
