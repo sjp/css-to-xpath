@@ -433,19 +433,18 @@ impl Translator {
     /// HTML `:lang()`: the language of the nearest ancestor-or-self that
     /// has one (see [`LangSource`]) is matched against the range by RFC
     /// 4647 extended filtering, built out of ASCII-lowercased substring
-    /// tests (see [`lang_ancestor_condition`]).
+    /// tests (see [`lang_ancestor_condition`]). A wildcard is accepted in
+    /// any subtag position, which is what extended filtering allows.
     fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
-            check_wildcard_position(value)?;
-            if value == "*" {
+            let range = LangRange::parse(value);
+            if range.subtags.is_empty() {
+                // Nothing but wildcards ("*", "*-*"): the whole test is
+                // that the tag has a first subtag to match them against.
                 conditions.push(lang_known_condition(self.lang_source()));
             } else {
-                // A trailing wildcard ("en-*") matches the same range as
-                // the one without it ("en"): RFC 4647 skips a trailing
-                // `*` over whatever is left, and so does stopping early.
-                let range = value.strip_suffix("-*").unwrap_or(value);
-                conditions.push(lang_ancestor_condition(self.lang_source(), range));
+                conditions.push(lang_ancestor_condition(self.lang_source(), &range));
             }
         }
         add_lang_conditions(xpath, &conditions);
@@ -587,23 +586,25 @@ fn or_group(expr: &str) -> Condition {
     }
 }
 
-/// A wildcard is accepted only as a whole range (`*`) or as the final
-/// subtag (`en-*`); RFC 4647 extended filtering also allows it in any
-/// interior position (`*-CH`, `de-*-DE`), which is rejected rather than
-/// silently over- or under-matching. `Mode::Generic` delegates to XPath's
-/// `lang()` and cannot express an interior wildcard at all; the HTML
-/// modes' subtag chain could (a `*` subtag is one the chain simply skips),
-/// but a range that is an error in one mode and a match in another is a
-/// worse contract than one that is an error everywhere. (The parser has
-/// already rejected a `*` that is not a whole subtag, such as `en*`, so a
-/// range that passes here is either `*` itself or ends in `-*`.)
+/// Under `Mode::Generic` a wildcard is accepted only as a whole range
+/// (`*`) or as the final subtag (`en-*`), the two shapes XPath's `lang()`
+/// can be handed. RFC 4647 extended filtering also allows one in any
+/// other position (`*-CH`, `de-*-DE`): `lang()` does a prefix match and
+/// has nowhere to put such a range, so it is rejected rather than
+/// silently over- or under-matching. The HTML modes build the comparison
+/// themselves and take a wildcard anywhere (see [`LangRange`]).
+///
+/// (The parser has already rejected a `*` that is not a whole subtag,
+/// such as `en*`, so a range that passes here is either `*` itself or
+/// ends in `-*`.)
 fn check_wildcard_position(range: &str) -> Result<(), Error> {
     if let Some(pos) = range.find('*')
         && pos != range.len() - 1
     {
         return Err(Error::unsupported(format!(
             "the :lang() language range {range:?} \
-             (a wildcard outside the final subtag)"
+             (a wildcard outside the final subtag, \
+             which XPath's lang() cannot express)"
         )));
     }
     Ok(())
@@ -639,6 +640,53 @@ fn folded_lang(source: LangSource) -> String {
     format!("concat({}, '-')", ascii_lower(source.string()))
 }
 
+/// A `:lang()` language range reduced to what the match actually tests.
+///
+/// RFC 4647 gives the range's first subtag and the rest different jobs,
+/// and a `*` subtag a different job again, so the range is split along
+/// both lines before any XPath is built.
+struct LangRange {
+    /// Whether the range's first subtag is `*`, which stands in for the
+    /// tag's first subtag rather than being compared to it: the tag must
+    /// have one, and it may be anything.
+    wildcard_head: bool,
+    /// The range's literal (non-`*`) subtags in order, ASCII-lowercased
+    /// to meet the folded language string. A later `*` contributes
+    /// nothing to match — see [`LangRange::parse`] — so none is kept.
+    subtags: Vec<String>,
+}
+
+impl LangRange {
+    /// Split a range into [`LangRange`]'s two halves.
+    ///
+    /// Only a *leading* `*` consumes a subtag of the tag. RFC 4647's
+    /// step 3 pairs the two first subtags and a `*` there matches
+    /// anything; every later range subtag is then searched for through
+    /// what is left of the tag, and step 4.A moves past a `*` without
+    /// touching the tag at all. A `*` after the first position is
+    /// therefore a no-op — `de-*-DE` tests exactly what `de-DE` does,
+    /// `en-*` exactly what `en` does — and is dropped here.
+    ///
+    /// The parser has already rejected a `*` that is not a whole subtag
+    /// (`en*`) and an empty subtag (`en-`), so every subtag reaching
+    /// this is either `*` or a non-empty literal.
+    fn parse(range: &str) -> Self {
+        let mut subtags = range.split('-').map(str::to_ascii_lowercase);
+        let head = subtags.next().expect("split is non-empty");
+        let wildcard_head = head == "*";
+        let mut literals: Vec<String> = if wildcard_head {
+            Vec::new()
+        } else {
+            vec![head]
+        };
+        literals.extend(subtags.filter(|subtag| subtag != "*"));
+        Self {
+            wildcard_head,
+            subtags: literals,
+        }
+    }
+}
+
 /// The nearest-ancestor language test, as RFC 4647 extended filtering
 /// over the folded language string: the language's first subtag must
 /// equal the range's first, and each later range subtag must appear as a
@@ -652,9 +700,13 @@ fn folded_lang(source: LangSource) -> String {
 /// `substring-after` return `''`, and every later `contains` is then
 /// false — the right answer.
 ///
-/// `range` arrives with any trailing `-*` already stripped and no
-/// interior wildcard (see [`check_wildcard_position`]), and is lowercased
-/// here to meet the folded language string.
+/// A [`LangRange::wildcard_head`] range (`*-CH`) starts the walk one
+/// subtag in instead of anchoring: the leading `*` stands for the tag's
+/// first subtag, whatever it is, so that subtag is dropped and the
+/// literals are searched for in what follows. `*-de` therefore matches
+/// `gsw-de` and not `de` — the tag's first subtag is spent on the `*`.
+/// A range of nothing but wildcards has no literals left to search for
+/// and does not reach here (see [`Translator::lang_html`]).
 ///
 /// A single-subtag range is just the `starts-with`, which is both the
 /// whole of extended filtering for that shape and the dash-terminated
@@ -664,23 +716,33 @@ fn folded_lang(source: LangSource) -> String {
 /// private-use section): measuring the length of every skipped subtag is
 /// not expressible in XPath 1.0, so `:lang(de-DE)` also matches
 /// `de-x-de`. See the README's Approximations.
-fn lang_ancestor_condition(source: LangSource, range: &str) -> String {
-    let range = range.to_ascii_lowercase();
-    let mut subtags = range.split('-');
+fn lang_ancestor_condition(source: LangSource, range: &LangRange) -> String {
     let lang = folded_lang(source);
+    let mut subtags = range.subtags.iter();
+    let mut conditions: Vec<String> = Vec::new();
 
     // The first subtag is an equality, which on the dash-terminated
-    // string is a prefix match.
-    let first = xpath_literal(&format!("{}-", subtags.next().expect("split is non-empty")));
-    let mut conditions = format!("starts-with({lang}, {first})");
+    // string is a prefix match — unless a `*` stands in its place, which
+    // asks only that there be a subtag there to skip.
+    let mut tail = if range.wildcard_head {
+        format!("substring-after({lang}, '-')")
+    } else {
+        let first = xpath_literal(&format!(
+            "{}-",
+            subtags
+                .next()
+                .expect("no literals is the known-language test")
+        ));
+        conditions.push(format!("starts-with({lang}, {first})"));
+        format!("substring-after({lang}, {first})")
+    };
     // Everything after it is a whole-subtag search through the tail.
-    let mut tail = format!("substring-after({lang}, {first})");
     for subtag in subtags {
         let needle = xpath_literal(&format!("-{subtag}-"));
         let bounded = format!("concat('-', {tail})");
-        conditions.push_str(&format!(" and contains({bounded}, {needle})"));
+        conditions.push(format!("contains({bounded}, {needle})"));
         tail = format!("substring-after({bounded}, {needle})");
     }
 
-    format!("{}[{conditions}]", source.nearest())
+    format!("{}[{}]", source.nearest(), conditions.join(" and "))
 }

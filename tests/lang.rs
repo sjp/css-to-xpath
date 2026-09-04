@@ -152,22 +152,50 @@ fn lang_and_dir() {
             .unwrap()
             .contains("xml:lang")
     );
-    // Interior wildcards are valid CSS, but XPath's lang() cannot
-    // express one under Mode::Generic; a range that errors in one mode
-    // and matches in another is the worse contract, so both spellings
-    // error everywhere rather than over-match (unquoted *-CH) or never
-    // match (quoted "*-CH").
+    // A wildcard is a subtag like any other, in any position: RFC 4647
+    // extended filtering allows one anywhere, and the HTML modes build
+    // the comparison themselves rather than handing it to XPath's
+    // lang(). A leading * stands for the tag's first subtag, so the
+    // walk starts one subtag in instead of anchoring with starts-with.
+    html.check("e:lang(*-CH)", "e[ancestor-or-self::*[@lang][1][contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), '-')), '-ch-')]]");
+    // ... and the chain then continues as it does after a starts-with.
+    html.check("e:lang(\"*-Hant-TW\")", "e[ancestor-or-self::*[@lang][1][contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), '-')), '-hant-') and contains(concat('-', substring-after(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), '-')), '-hant-')), '-tw-')]]");
+    // Only a leading wildcard spends a subtag of the tag. A later one
+    // moves past nothing — every range subtag after the first is already
+    // searched for through the whole remaining tag — so it drops out.
+    html.check(
+        "e:lang(de-*-DE)",
+        html.css_to_xpath("e:lang(de-DE)", "").unwrap(),
+    );
+    html.check(
+        "e:lang(\"de-*-*\")",
+        html.css_to_xpath("e:lang(de)", "").unwrap(),
+    );
+    // A range of nothing but wildcards is therefore `*` itself: the tag
+    // needs a first subtag for the leading one, and nothing more.
+    html.check(
+        "e:lang(\"*-*\")",
+        html.css_to_xpath("e:lang(*)", "").unwrap(),
+    );
+    // The quoted spelling is the same range as the unquoted one; it is
+    // also the only spelling of a wildcard next to a subtag that CSS
+    // tokenizes as something other than an ident (`*-*`, `*-1996`).
+    html.check(
+        "e:lang(\"*-CH\")",
+        html.css_to_xpath("e:lang(*-CH)", "").unwrap(),
+    );
+    // Mode::Generic hands the range to XPath's lang(), which is a prefix
+    // match with nowhere to put a wildcard that is not the whole range
+    // or its final subtag: an interior one errors there rather than
+    // going into lang() as a literal, which would never match.
     for sel in [
         "e:lang(*-CH)",
         "e:lang(\"*-CH\")",
         "e:lang(de-*-DE)",
         "e:lang(\"de-*-DE\")",
+        "e:lang(\"*-*\")",
     ] {
         assert!(t.css_to_xpath(sel, "").is_err(), "{sel} should error");
-        assert!(
-            html.css_to_xpath(sel, "").is_err(),
-            "{sel} should error (html)"
-        );
     }
     // :dir() takes exactly one identifier (selectors-4) — none of
     // :lang()'s strings, wildcards, or lists. It never matches in any

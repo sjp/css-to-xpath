@@ -11,8 +11,29 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Added
+
+- `:lang()` under `Mode::Html` and `Mode::Xhtml` now accepts a `*` subtag in any
+  position, which is what Selectors 4's RFC 4647 extended filtering allows:
+  `:lang(*-CH)` — "any language as written in Switzerland" — was rejected as "a
+  wildcard outside the final subtag", and now matches `de-CH` and `fr-Latn-CH`.
+  A leading `*` stands for the tag's first subtag, so the walk starts one
+  subtag in rather than anchoring with `starts-with`, and `:lang(*-CH)`
+  therefore does not match the tag `ch` itself. A `*` anywhere else moves past
+  nothing — every range subtag after the first is already searched for through
+  the whole remaining tag — so it drops out of the translation: `:lang(de-*-DE)`
+  emits exactly what `:lang(de-DE)` emits, as `:lang(en-*)` already emitted what
+  `:lang(en)` does. `Mode::Generic` still takes only `*` and a final `en-*`,
+  since it hands the range to XPath's `lang()`, a prefix match with nowhere to
+  put the rest; its error now says so.
+
 ### Changed
 
+- The `Mode::Generic` error for a wildcard it cannot place now names the reason
+  rather than only the placement: `` the :lang() language range "*-CH" (a
+  wildcard outside the final subtag, which XPath's lang() cannot express) ``.
+  The range is no longer an error everywhere, so the message has to say which
+  translator it is beyond.
 - The caret in a parse error's message now points at the token the message
   names, rather than at the position the parse stopped on. `[a=b c]` reports
   ``unexpected `c` `` at byte 5, the `c`, where it previously reported byte 4,

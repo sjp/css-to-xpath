@@ -375,11 +375,16 @@ contract stays honest.
   XPath 1.0, so `:lang(de-DE)` also matches `de-x-de`, which Level 4 says
   it should not. Under `Mode::Generic` the test is XPath's own `lang()`,
   which is the Level 3 / `[lang|=…]` prefix match — `de-DE` there matches
-  `de-DE` and `de-DE-1996` but not `de-Latn-DE`. In every mode a written
-  wildcard is allowed only as the whole range (`*`) or as the final
-  subtag (`en-*`); an interior one (`de-*-DE`) errors rather than
-  matching in one mode and erroring in another. Single-subtag ranges —
-  `en`, `en-*`, `*`, the common case — are exact everywhere.
+  `de-DE` and `de-DE-1996` but not `de-Latn-DE`. A `*` subtag is allowed
+  anywhere in the range under `Mode::Html` and `Mode::Xhtml`, as extended
+  filtering asks: a leading one stands for the tag's first subtag, so
+  `:lang(*-CH)` matches `de-CH` and `fr-Latn-CH` but not `ch`, and one in
+  any other position moves past nothing and drops out (`de-*-DE` tests
+  what `de-DE` does). Under `Mode::Generic` only the whole range (`*`) and
+  the final subtag (`en-*`) may be a wildcard — XPath's `lang()` is a
+  prefix match with nowhere to put the rest — and any other placement is
+  an error. Single-subtag ranges — `en`, `en-*`, `*`, the common case —
+  are exact everywhere.
 - **`:empty` follows Level 3, so white space counts.** `e:empty` is
   `e[not(*) and not(string-length())]`, and `<p> </p>` is therefore not
   empty. Level 4 ignores document white space; browsers still ship the

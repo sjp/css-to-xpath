@@ -605,6 +605,41 @@ fn html_lang_extended_filtering() {
     );
 }
 
+/// A `*` subtag, which extended filtering allows in any position. The
+/// leading one is the case with something to say: it stands for the
+/// tag's first subtag, so `*-DE` asks for a `DE` somewhere *after* the
+/// first, which is what "any language as written in Germany" means.
+#[test]
+fn html_lang_wildcard_subtags() {
+    check(
+        &html_fixture(),
+        Mode::Html,
+        &[
+            // The same four tags `de-DE` reaches, now without asking
+            // for `de` first: l5 (`de-DEUTSCH`) is still out, since
+            // `DEUTSCH` is not the subtag `DE`, and l4 (`de-x-de`) is
+            // still the documented singleton over-match.
+            ("span:lang(*-DE)", &["l1", "l2", "l3", "l4"]),
+            // l6 is `de` alone: the leading `*` spends the tag's first
+            // subtag, so a one-subtag tag has nothing left to match.
+            ("span:lang(*-de)", &["l1", "l2", "l3", "l4"]),
+            ("span:lang(\"*-1996\")", &["l2"]),
+            ("span:lang(*-Hant-TW)", &["l8"]),
+            ("span:lang(*-TW-Hant)", &[]),
+            ("span:lang(*-FR)", &[]),
+            // A wildcard anywhere else moves past nothing: a later
+            // range subtag already searches the whole remaining tag.
+            ("span:lang(de-*-DE)", &["l1", "l2", "l3", "l4"]),
+            // Wildcards all the way down is `:lang(*)`: the tag needs a
+            // first subtag, and nothing more.
+            (
+                "span:lang(\"*-*\")",
+                &["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"],
+            ),
+        ],
+    );
+}
+
 /// `:read-only`/`:read-write`, `:default` and `:placeholder-shown` over
 /// a document arranged around their corners.
 #[test]
