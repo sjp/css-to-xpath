@@ -29,6 +29,23 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ### Changed
 
+- An `option` or `optgroup` inside a disabled `select` is now `:disabled` rather
+  than `:enabled`, and an `option` is now disabled by the nearest `optgroup`
+  above it rather than only by a parent one. Both are rules HTML added to
+  "actually disabled" after this translation was written: an `optgroup` or
+  `option` "whose nearest ancestor `select` is disabled" is actually disabled,
+  and an `option` is disabled by the nearest ancestor that settles it — the
+  walk ends at a `select`, `hr`, `datalist` or `option`, so an `option` in a
+  `<datalist>` inside a disabled `select` stays `:enabled`, and an `option`
+  nested below its `optgroup` rather than directly under it is disabled. This
+  changes what `:disabled`, `:enabled`, `option:disabled`, `option:enabled`,
+  `optgroup:disabled` and `optgroup:enabled` select over a document with a
+  disabled `select` in it, which is the ordinary way a whole control is
+  switched off, as well as the expressions they translate to. One corner is
+  approximated, as the `legend` counting already is: HTML's walk also gives up
+  once it has passed a second `optgroup`, which XPath cannot count, so an
+  `option` two `optgroup`s deep — non-conforming markup — inside a disabled
+  `select` is `:disabled` here.
 - The error for a namespace prefix that is not an XML `NCName` now names the
   rule rather than an operation the prefix cannot have: `\31 ns|div` gives
   `` a namespace prefix that is not an XPath name (`1ns`) `` where it

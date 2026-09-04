@@ -141,12 +141,14 @@ fn html_pseudo_overrides() {
     // hyperlinks and none of the obsolete keygen/command — against
     // the same "actually disabled" condition, negated for :enabled,
     // so the two always partition that set. The condition covers
-    // @disabled, an option under a disabled optgroup (the parent,
-    // per the spec, not any ancestor), and the fieldset carve-out:
-    // a control or nested fieldset inside a disabled fieldset is
-    // disabled unless it sits in that fieldset's first legend,
-    // expressed by counting disabled-fieldset ancestors against
-    // protecting first-legends.
+    // @disabled; an option under a disabled optgroup, found by the
+    // walk that stops at the first optgroup, select, datalist, hr or
+    // option; an option or optgroup whose nearest ancestor select is
+    // disabled, the same walk without the optgroup stop; and the
+    // fieldset carve-out: a control or nested fieldset inside a
+    // disabled fieldset is disabled unless it sits in that fieldset's
+    // first legend, expressed by counting disabled-fieldset ancestors
+    // against protecting first-legends.
     let set = "(local-name() = 'button' or local-name() = 'input' or \
                 local-name() = 'select' or local-name() = 'textarea' or \
                 local-name() = 'optgroup' or local-name() = 'option' or \
@@ -155,16 +157,23 @@ fn html_pseudo_overrides() {
               count(ancestor::*[local-name() = 'legend']\
               [not(preceding-sibling::*[local-name() = 'legend'])]\
               [parent::*[local-name() = 'fieldset'][@disabled]])";
+    let by_optgroup = "ancestor::*[local-name() = 'optgroup' or local-name() = 'select' or \
+                       local-name() = 'datalist' or local-name() = 'hr' or \
+                       local-name() = 'option'][1][local-name() = 'optgroup'][@disabled]";
+    let by_select = "ancestor::*[local-name() = 'select' or local-name() = 'datalist' or \
+                     local-name() = 'hr' or local-name() = 'option'][1]\
+                     [local-name() = 'select'][@disabled]";
     let disabled = format!(
         "@disabled or \
-         (local-name() = 'option' and parent::*[local-name() = 'optgroup'][@disabled]) or \
+         (local-name() = 'option' and {by_optgroup}) or \
+         ((local-name() = 'option' or local-name() = 'optgroup') and {by_select}) or \
          (not(local-name() = 'optgroup' or local-name() = 'option') and {fd})"
     );
     assert_eq!(h(":disabled"), format!("*[{set} and ({disabled})]"));
     assert_eq!(h(":enabled"), format!("*[{set} and not({disabled})]"));
-    // A named element keeps only the arm that can apply to it: the
-    // fieldset rule for a control, the disabled-parent-optgroup rule
-    // for an option, and neither for an optgroup itself.
+    // A named element keeps only the arms that can apply to it: the
+    // fieldset rule for a control, the optgroup and select rules for
+    // an option, and the select rule alone for an optgroup itself.
     assert_eq!(h("input:disabled"), format!("input[@disabled or {fd}]"));
     assert_eq!(h("input:enabled"), format!("input[not(@disabled or {fd})]"));
     // The set is by element and nothing else: `disabled` applies to
@@ -176,14 +185,21 @@ fn html_pseudo_overrides() {
     for css in [":disabled", ":enabled", "input:disabled", "input:enabled"] {
         assert!(!h(css).contains("@type"), "{css}");
     }
-    let optgroup_disabled = "@disabled or parent::*[local-name() = 'optgroup'][@disabled]";
-    assert_eq!(h("option:disabled"), format!("option[{optgroup_disabled}]"));
+    let option_disabled = format!("@disabled or {by_optgroup} or {by_select}");
+    assert_eq!(h("option:disabled"), format!("option[{option_disabled}]"));
     assert_eq!(
         h("option:enabled"),
-        format!("option[not({optgroup_disabled})]")
+        format!("option[not({option_disabled})]")
     );
-    assert_eq!(h("optgroup:disabled"), "optgroup[@disabled]");
-    assert_eq!(h("optgroup:enabled"), "optgroup[not(@disabled)]");
+    let optgroup_disabled = format!("@disabled or {by_select}");
+    assert_eq!(
+        h("optgroup:disabled"),
+        format!("optgroup[{optgroup_disabled}]")
+    );
+    assert_eq!(
+        h("optgroup:enabled"),
+        format!("optgroup[not({optgroup_disabled})]")
+    );
     // Hyperlinks and the obsolete `keygen`/`command` are in neither
     // set, so nothing is left of the predicate for them.
     assert_eq!(h("a:enabled"), "a[0]");

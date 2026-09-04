@@ -16,7 +16,10 @@
       disabled attribute, and a disabled fieldset inside a disabled
       fieldset's first legend (where the two carve-outs cancel);
     - the option/optgroup rules, which the fieldset rule must not reach:
-      a select inside a disabled fieldset whose options stay enabled;
+      a select inside a disabled fieldset whose options stay enabled, a
+      disabled select whose options and optgroups do not, an option a
+      disabled optgroup reaches without being its parent, and one a
+      datalist keeps a disabled select from reaching;
     - `type` as an enumerated attribute: mixed-case keywords (RANGE,
       TEXT, RADIO, SUBMIT, RESET), a missing one, an invalid one, an
       empty one, and one spelling two keywords with a pipe between them,
@@ -174,6 +177,28 @@
         <option id="o7" disabled="disabled" selected="selected">D</option>
       </optgroup>
     </select>
+    <!-- The select rules. Disabling a select disables the options and
+         optgroups inside it, however deep they sit (o9, o10, og4), but
+         the walk up to it stops at a datalist, an hr or an option — so
+         o11 is enabled inside a disabled select. -->
+    <select id="se5" disabled="disabled">
+      <option id="o8">A</option>
+      <optgroup id="og4">
+        <option id="o9">B</option>
+        <div id="dv3"><option id="o10">C</option></div>
+      </optgroup>
+      <datalist id="dl1"><option id="o11">D</option></datalist>
+    </select>
+    <!-- The same shapes with no select above them, where only the
+         optgroup rule applies: og5 disables o13 without being its
+         parent, and og6 shields o14 from nothing. -->
+    <optgroup id="og5" disabled="disabled">
+      <option id="o12">E</option>
+      <div id="dv4"><option id="o13">F</option></div>
+    </optgroup>
+    <optgroup id="og6">
+      <option id="o14">G</option>
+    </optgroup>
     <input id="i47" type="radio" checked="checked"/>
     <input id="i48" type="RADIO" checked="checked"/>
     <input id="i49" type="text" checked="checked"/>

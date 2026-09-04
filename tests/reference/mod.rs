@@ -666,12 +666,72 @@ impl<'a> El<'a> {
             .find(|child| child.is_html("legend"))
     }
 
+    /// HTML's ["nearest ancestor `select`"][nas] walk, which is how a
+    /// disabled `select` disables the `option`s and `optgroup`s inside
+    /// it: the ancestors nearest first, giving up at a `datalist`, `hr`
+    /// or `option` — and at a *second* `optgroup`, options being
+    /// nestable one `optgroup` deep and no further.
+    ///
+    /// The crate cannot count `optgroup`s in XPath and so answers this
+    /// one non-conforming shape — an `option` two `optgroup`s deep
+    /// inside a disabled `select` — differently; it says so at
+    /// `nearest_select_disabled`, and the fixture keeps to conforming
+    /// nesting, so the walk here is the spec's own.
+    ///
+    /// [nas]: https://html.spec.whatwg.org/multipage/form-elements.html#nearest-ancestor-select-element
+    fn nearest_ancestor_select(self) -> Option<El<'a>> {
+        let mut seen_optgroup = false;
+        for ancestor in self.ancestors() {
+            if ["datalist", "hr", "option"]
+                .iter()
+                .any(|name| ancestor.is_html(name))
+            {
+                return None;
+            }
+            if ancestor.is_html("optgroup") {
+                if seen_optgroup {
+                    return None;
+                }
+                seen_optgroup = true;
+            } else if ancestor.is_html("select") {
+                return Some(ancestor);
+            }
+        }
+        None
+    }
+
+    /// Whether an `option` is [disabled][od] by an `optgroup` above it:
+    /// the nearest ancestor that settles the question is an `optgroup`
+    /// carrying `disabled`. The walk ends at a `select`, `hr`,
+    /// `datalist` or `option`, and at the first `optgroup` either way —
+    /// a disabled one disables, an enabled one shields.
+    ///
+    /// It is the nearest ancestor rather than the parent because an
+    /// `option` may sit further down inside its `optgroup`.
+    ///
+    /// [od]: https://html.spec.whatwg.org/multipage/form-elements.html#concept-option-disabled
+    fn disabled_by_optgroup(self) -> bool {
+        for ancestor in self.ancestors() {
+            if ["select", "hr", "datalist", "option"]
+                .iter()
+                .any(|name| ancestor.is_html(name))
+            {
+                return false;
+            }
+            if ancestor.is_html("optgroup") {
+                return ancestor.has_attr("disabled");
+            }
+        }
+        false
+    }
+
     /// HTML's ["actually disabled"][ad] concept: the `disabled`
-    /// attribute, plus the two inherited rules — an `option` is
-    /// disabled by a disabled parent `optgroup`, and a form control or
-    /// nested `fieldset` by a disabled `fieldset` ancestor. Neither
-    /// inherited rule reaches an `optgroup`, and the fieldset rule does
-    /// not reach an `option`.
+    /// attribute, plus the inherited rules — an `option` is disabled by
+    /// a disabled `optgroup` above it, an `option` or an `optgroup` by
+    /// a disabled `select` above it, and a form control or nested
+    /// `fieldset` by a disabled `fieldset` ancestor. The fieldset rule
+    /// reaches neither `optgroup` nor `option`, and the `select` rule
+    /// reaches nothing else.
     ///
     /// [ad]: https://html.spec.whatwg.org/multipage/semantics-other.html#concept-element-disabled
     fn is_actually_disabled(self) -> bool {
@@ -679,14 +739,18 @@ impl<'a> El<'a> {
             return true;
         }
         if self.is_html("option") {
-            return self
-                .parent_el()
-                .is_some_and(|parent| parent.is_html("optgroup") && parent.has_attr("disabled"));
+            return self.disabled_by_optgroup() || self.disabled_by_select();
         }
         if self.is_html("optgroup") {
-            return false;
+            return self.disabled_by_select();
         }
         self.is_disableable() && self.disabled_by_fieldset()
+    }
+
+    /// Whether the nearest ancestor `select` exists and is disabled.
+    fn disabled_by_select(self) -> bool {
+        self.nearest_ancestor_select()
+            .is_some_and(|select| select.has_attr("disabled"))
     }
 
     /// The `contenteditable` state an element *sets*, if any: `true`

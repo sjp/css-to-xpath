@@ -72,9 +72,10 @@ assert_eq!(
   - `:disabled`/`:enabled` — the two halves of HTML's "actually
     disabled" over `button`, `input`, `select`, `textarea`, `optgroup`,
     `option` and `fieldset`: the `disabled` attribute, an `option`
-    under a disabled `optgroup`, and a disabled `fieldset` ancestor —
-    with the carve-out that the fieldset's first `legend` keeps its
-    contents enabled. The two partition that element set. (HTML also
+    under a disabled `optgroup`, an `option` or `optgroup` under a
+    disabled `select`, and a disabled `fieldset` ancestor — with the
+    carve-out that the fieldset's first `legend` keeps its contents
+    enabled. The two partition that element set. (HTML also
     lists form-associated custom elements, which no static translation
     can recognise.) The set is by element alone: `disabled` applies to
     every `input` type, so `<input type="hidden" disabled>` is
@@ -100,7 +101,7 @@ assert_eq!(
   `:lang()`, preferring `xml:lang` when both are on the nearest ancestor
   (HTML's language determination).
   The element names *inside* these pseudo-classes — the `fieldset`
-  ancestor, the parent `optgroup`, the `a`/`area` of `:link` — are matched
+  ancestor, the enclosing `optgroup`, the `a`/`area` of `:link` — are matched
   by local name, so they see XHTML's namespaced elements and work with
   `*|input` and `h|input` subjects alike. Only the names you write follow
   the namespace rule below. When the compound names its element, those

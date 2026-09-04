@@ -580,6 +580,7 @@ keygen:enabled
 a:disabled
 h|input:enabled
 select:enabled
+select:disabled
 fieldset:disabled
 shelf:has(magazine, svg|rect)
 shelf:has(magazine, svg|rect):has(> book)
@@ -748,6 +749,8 @@ xhtml|fieldset:disabled
 xhtml|option:checked
 xhtml|input:enabled
 xhtml|option:disabled
+xhtml|option:enabled
+xhtml|select:disabled
 xhtml|optgroup:disabled
 xhtml|optgroup:enabled
 xhtml|input:disabled

@@ -139,20 +139,67 @@ fn disableable() -> String {
     format!("({})", names.join(" or "))
 }
 
+/// The elements HTML's "nearest ancestor `select`" walk stops at, bar
+/// the `select` it is looking for: reaching one of these means there is
+/// no nearest ancestor `select`.
+const SELECT_WALK_STOPS: &str = "local-name() = 'select' or local-name() = 'datalist' or \
+     local-name() = 'hr' or local-name() = 'option'";
+
+/// "Whose nearest ancestor `select` is disabled" — the rule HTML gave
+/// both the `option` and the `optgroup` bullet of "actually disabled",
+/// so that disabling a `select` disables what it contains.
+///
+/// The walk climbs the ancestors and gives up at a `datalist`, `hr` or
+/// `option`, so this has the shape of the `:lang()` walk (see
+/// [`lang_ancestor_condition`]): a reverse-axis `[1]` over those and
+/// `select` picks the ancestor that settles the question, and the rest
+/// asks whether it is a disabled `select`. An `option` in a
+/// `<datalist>` inside a disabled `select` is left out, because the
+/// walk stops at the `datalist`.
+///
+/// The one step the expression cannot take is counting: the algorithm
+/// also gives up once it has passed a *second* `optgroup`, so an
+/// `option` nested two `optgroup`s deep inside a disabled `select` is
+/// disabled here and not in HTML. Nested `optgroup`s are
+/// non-conforming, and this is the same kind of approximation as the
+/// `legend` counting in [`FIELDSET_DISABLED`] — spelled out rather than
+/// paid for in XPath.
+fn nearest_select_disabled() -> String {
+    format!("ancestor::*[{SELECT_WALK_STOPS}][1][local-name() = 'select'][@disabled]")
+}
+
+/// The `optgroup` half of an `option`'s own disabledness: the nearest
+/// ancestor among `optgroup` and [`SELECT_WALK_STOPS`] is an `optgroup`
+/// carrying `disabled`. HTML widened this from the parent to the
+/// nearest such ancestor, because the customizable-`select` markup nests
+/// an `option` below its `optgroup` rather than directly under it — so
+/// the parent test is no longer the whole rule even in conforming
+/// documents.
+fn option_disabled_by_optgroup() -> String {
+    format!(
+        "ancestor::*[local-name() = 'optgroup' or {SELECT_WALK_STOPS}][1]\
+         [local-name() = 'optgroup'][@disabled]"
+    )
+}
+
 /// HTML's "actually disabled", to be read together with [`DISABLEABLE`]:
 /// `:disabled` is that set and this condition, `:enabled` is that set and
 /// not this condition, so the two stay exact complements.
 ///
-/// An element is actually disabled if it carries `@disabled`; an `option`
-/// is disabled by a disabled parent `optgroup` as well (the spec walks up
-/// to the nearest `optgroup`, which in conforming markup is the parent);
-/// and a control — or a nested `fieldset`, which is itself a disabled
-/// fieldset — is disabled by a disabled `fieldset` ancestor. The fieldset
-/// rule is the one that reaches neither `optgroup` nor `option`.
+/// An element is actually disabled if it carries `@disabled`; an
+/// `option` is disabled by a disabled `optgroup` above it as well; an
+/// `option` or an `optgroup` is disabled by a disabled `select` above
+/// it; and a control — or a nested `fieldset`, which is itself a
+/// disabled fieldset — is disabled by a disabled `fieldset` ancestor.
+/// The fieldset rule is the one that reaches neither `optgroup` nor
+/// `option`, and the two `select`-side rules are the only ones that do.
 fn actually_disabled() -> String {
+    let by_optgroup = option_disabled_by_optgroup();
+    let by_select = nearest_select_disabled();
     format!(
         "@disabled or \
-         (local-name() = 'option' and parent::*[local-name() = 'optgroup'][@disabled]) or \
+         (local-name() = 'option' and {by_optgroup}) or \
+         ((local-name() = 'option' or local-name() = 'optgroup') and {by_select}) or \
          (not(local-name() = 'optgroup' or local-name() = 'option') \
           and {FIELDSET_DISABLED})"
     )
@@ -546,11 +593,12 @@ fn required_condition(name: Option<&str>, attr: &str) -> String {
 /// element set and the same "actually disabled" condition, negated.
 ///
 /// A pinned local name settles both halves: outside [`DISABLEABLE`]
-/// neither pseudo-class matches, and inside it the three arms of
-/// [`actually_disabled`] reduce to the one written for that name — the
-/// disabled-parent-`optgroup` rule for an `option`, the
+/// neither pseudo-class matches, and inside it the arms of
+/// [`actually_disabled`] reduce to the ones written for that name — the
+/// disabled-`optgroup` and disabled-`select` rules for an `option`, the
+/// disabled-`select` rule alone for an `optgroup`, and the
 /// disabled-`fieldset`-ancestor rule for everything the spec applies it
-/// to, and neither for an `optgroup` itself.
+/// to.
 fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
     let Some(name) = name else {
         let (set, actually) = (disableable(), actually_disabled());
@@ -564,9 +612,13 @@ fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
         return plain("0");
     }
     let (actually, or_group) = match name {
-        "optgroup" => ("@disabled".to_owned(), false),
+        "optgroup" => (format!("@disabled or {}", nearest_select_disabled()), true),
         "option" => (
-            "@disabled or parent::*[local-name() = 'optgroup'][@disabled]".to_owned(),
+            format!(
+                "@disabled or {} or {}",
+                option_disabled_by_optgroup(),
+                nearest_select_disabled()
+            ),
             true,
         ),
         _ => (control_actually_disabled(), true),

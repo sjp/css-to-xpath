@@ -139,7 +139,7 @@ const PSEUDOS: &[&str] = &[
 /// pinned name collapses the translation to "never matches".
 const TYPES: &[&str] = &[
     "input", "textarea", "select", "option", "optgroup", "button", "fieldset", "legend", "form",
-    "a", "area", "div", "p", "link",
+    "a", "area", "div", "p", "link", "datalist",
 ];
 
 const CLASSES: &[&str] = &["one", "two", "three", "four"];
@@ -586,12 +586,19 @@ fn differential_regressions() {
             "*|button:disabled",
             "*|select:disabled",
             // The option/optgroup rules, which the fieldset rule must
-            // not reach.
+            // not reach, and which the select rule reaches past a
+            // parent and stops at a datalist.
             "*|fieldset[disabled] *|option:enabled",
             "*|fieldset[disabled] *|optgroup:enabled",
             "*|optgroup[disabled] > *|option:disabled",
+            "*|optgroup[disabled] *|div *|option:disabled",
+            "*|select[disabled] *|option:disabled",
+            "*|select[disabled] *|optgroup:disabled",
+            "*|datalist *|option:enabled",
             "*|option:disabled",
+            "*|option:enabled",
             "*|optgroup:enabled",
+            "*|optgroup:disabled",
             // `type` as an enumerated attribute, including the values
             // that are no keyword at all.
             "*|input:required",

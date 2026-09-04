@@ -327,9 +327,14 @@ fn xhtml_form_pseudos() {
             // i8 is a hidden input carrying `disabled`: the type
             // states play no part in this pair, so it is in the same
             // half as any other disabled control.
+            // og1 disables the options below it, o4 included, though
+            // o4 is not its child; se2 disables everything inside it.
             (
                 ":disabled",
-                &["fs1", "i2", "i3", "i8", "og1", "o1", "o2", "bt1"],
+                &[
+                    "fs1", "i2", "i3", "i8", "og1", "o1", "o2", "o4", "se2", "o5", "og3", "o6",
+                    "bt1",
+                ],
             ),
             (
                 ":enabled",
@@ -339,7 +344,7 @@ fn xhtml_form_pseudos() {
             ),
             (":checked", &["i4", "o1"]),
             (":required", &["i6", "ta1"]),
-            (":optional", &["i1", "i2", "i3", "i4", "i5", "se1"]),
+            (":optional", &["i1", "i2", "i3", "i4", "i5", "se1", "se2"]),
             // lk is a `link` with an href; HTML's :link/:visited set is
             // `a` and `area`, so it is in neither.
             (":link", &["a1"]),
@@ -351,9 +356,11 @@ fn xhtml_form_pseudos() {
             // A named subject prunes the overrides down to the arm for
             // that name — including the optgroup rules, which differ for
             // `option` and for `optgroup` itself.
-            ("xhtml|option:disabled", &["o1", "o2"]),
-            ("xhtml|optgroup:disabled", &["og1"]),
+            ("xhtml|option:disabled", &["o1", "o2", "o4", "o5", "o6"]),
+            ("xhtml|option:enabled", &["o3"]),
+            ("xhtml|optgroup:disabled", &["og1", "og3"]),
             ("xhtml|optgroup:enabled", &["og2"]),
+            ("xhtml|select:disabled", &["se2"]),
             ("xhtml|input:disabled", &["i2", "i3", "i8"]),
             // i7 and i8 are both `type="hidden"`; only the `disabled`
             // attribute separates them, and each half takes one.
@@ -413,7 +420,7 @@ fn xhtml_default_namespace_makes_unprefixed_names_match() {
             ("fieldset:nth-of-type(2)", &["fs2"]),
             (
                 "select :is(option, optgroup)",
-                &["og1", "o1", "o2", "og2", "o3"],
+                &["og1", "o1", "o2", "o4", "og2", "o3", "o5", "og3", "o6"],
             ),
             ("input:required", &["i6"]),
             ("option:checked", &["o1"]),
@@ -531,7 +538,8 @@ fn html_form_and_link_pseudos() {
             (":checked", &["i3", "i5", "o1"]),
             // i7 is a hidden input carrying `disabled`, which applies
             // to every input type: it is :disabled like any other.
-            (":disabled", &["fs1", "i2", "i7"]),
+            // se2 is disabled, and so is everything inside it.
+            (":disabled", &["fs1", "i2", "i7", "se2", "o3", "og1", "o4"]),
             (
                 ":enabled",
                 &["i1", "i3", "i4", "i5", "i6", "se1", "o1", "o2"],
@@ -551,7 +559,10 @@ fn html_form_and_link_pseudos() {
             ("input[type=hidden]:disabled", &["i7"]),
             ("fieldset:disabled", &["fs1"]),
             ("option:enabled", &["o1", "o2"]),
+            ("option:disabled", &["o3", "o4"]),
+            ("optgroup:disabled", &["og1"]),
             ("select:enabled", &["se1"]),
+            ("select:disabled", &["se2"]),
             ("a:link", &["a1"]),
             ("p:link", &[]),
             // `a` is in neither the :enabled nor the :disabled set.
