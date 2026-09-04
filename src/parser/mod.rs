@@ -130,6 +130,12 @@ impl ToCss for PseudoClass {
                     // was parsed from: `*` cannot be part of an
                     // identifier, so the pieces around it are serialized
                     // separately (`en-*` as the ident `en-` then `*`).
+                    // The empty range has no such token — an identifier
+                    // cannot be empty — and is written as the string it
+                    // has to be written as.
+                    if range.is_empty() {
+                        dest.write_str("\"\"")?;
+                    }
                     for (j, piece) in range.split('*').enumerate() {
                         if j > 0 {
                             dest.write_char('*')?;
@@ -278,9 +284,15 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
     /// an error rather than two ranges, and `en *` is not the range
     /// `en-*`. A range is assembled here, while the tokens' adjacency is
     /// still known — the tokenizer splits `en-*` into an ident and a
-    /// delimiter — and is then checked by [`is_valid_lang_range`].
-    /// NUMBER/`+`/`-` tokens are rejected. `:dir()` is stricter,
-    /// matching its selectors-4 grammar: exactly one identifier.
+    /// delimiter. NUMBER/`+`/`-` tokens are rejected. `:dir()` is
+    /// stricter, matching its selectors-4 grammar: exactly one
+    /// identifier.
+    ///
+    /// What the assembled text *says* is not judged here: a range whose
+    /// subtags are malformed (`en-`, `*en`) is a well-formed argument
+    /// that no language tag can match, and it is the translators that
+    /// reject it — by then the range is in hand and the message can name
+    /// it (see `check_lang_range`).
     ///
     /// The non-standard text-content pseudo `:contains()` is deliberately
     /// unsupported and falls through to the rejection arm, as does any
@@ -353,10 +365,14 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
 
 /// The body of the `:lang()` argument grammar: the comma-separated
 /// ranges, or `None` if the arguments do not spell out at least one
-/// valid range. Assembling happens here rather than at translation time
+/// range. Assembling happens here rather than at translation time
 /// because only the token stream records whether two pieces were
 /// adjacent, and adjacency is the whole difference between the range
 /// `en-*` and the pair `en-`, `*`.
+///
+/// A range is any assembled text, the empty string included: `:lang("")`
+/// is the Level 4 "language not known" range, and the shapes that cannot
+/// match anything are the translators' to reject.
 fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> {
     let mut ranges: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -379,8 +395,8 @@ fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> 
                 continue;
             }
             Token::Comma => {
-                if !started || !is_valid_lang_range(&current) {
-                    return None;
+                if !started {
+                    return None; // an empty range slot: `,en`, `en,,fr`
                 }
                 ranges.push(std::mem::take(&mut current));
                 (started, adjacent) = (false, true);
@@ -396,33 +412,11 @@ fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> 
         current.push_str(&piece);
         started = true;
     }
-    if !started || !is_valid_lang_range(&current) {
+    if !started {
         return None; // no ranges at all, or a trailing comma
     }
     ranges.push(current);
     Some(ranges)
-}
-
-/// Whether an assembled `:lang()` argument is a language range: one or
-/// more non-empty `-`-separated subtags, each either a whole `*` or free
-/// of `*` entirely (RFC 4647 extended-language-range, minus its
-/// restrictions on subtag length and character set — which cost nothing
-/// but never-matching output, unlike the shapes rejected here).
-///
-/// The wildcard rule is what makes a typo like `:lang(en*)` an error
-/// instead of the two ranges `en` and `*`, the second of which matches
-/// every element with a known language. The non-empty-subtag rule
-/// rejects `""`, `en-`, and `--x`; a trailing `-` in particular reads as
-/// a half-written `en-*`.
-///
-/// Positional restrictions the translators impose on a *valid* wildcard
-/// (only `*` or a final `en-*` survive XPath 1.0) belong to translation,
-/// not to this grammar.
-fn is_valid_lang_range(range: &str) -> bool {
-    !range.is_empty()
-        && range
-            .split('-')
-            .all(|subtag| !subtag.is_empty() && (subtag == "*" || !subtag.contains('*')))
 }
 
 /// The maximum functional-pseudo-class nesting depth accepted, measured
@@ -1038,6 +1032,14 @@ mod tests {
         // Values are run through `serialize_identifier`, not written raw:
         // a leading digit needs escaping to remain a valid CSS identifier.
         assert_eq!(css(&PseudoClass::Lang(vec!["1x".into()])), ":lang(\\31 x)");
+        // The empty range has no identifier to write — an identifier
+        // cannot be empty — so it is written as the string it was
+        // parsed from, and stays a range on the way back in.
+        assert_eq!(css(&PseudoClass::Lang(vec![String::new()])), ":lang(\"\")");
+        assert_eq!(
+            css(&PseudoClass::Lang(vec![String::new(), "en".into()])),
+            ":lang(\"\", en)"
+        );
     }
 
     /// The `:lang()` argument grammar, at the level the parser decides
@@ -1068,6 +1070,15 @@ mod tests {
         one("lang(*)", "*");
         one("lang(*-CH)", "*-CH");
         one("lang(\"en nz\")", "en nz");
+        // The empty string is a range like any other here: what a range
+        // *means* — the empty one included — is settled by the
+        // translators, which is also where a malformed one is rejected.
+        one("lang(\"\")", "");
+        one("lang(en-)", "en-");
+        one("lang(--x)", "--x");
+        one("lang(en--)", "en--");
+        one("lang(en*)", "en*");
+        one("lang(*en)", "*en");
         assert_eq!(
             ranges("lang( en , fr )"),
             Some(vec!["en".to_owned(), "fr".to_owned()])
@@ -1076,12 +1087,6 @@ mod tests {
             "lang()",
             "lang(en fr)", // whitespace is not a separator
             "lang(en *)",  // ... and does not build `en-*` either
-            "lang(en*)",   // `*` is only ever a whole subtag
-            "lang(*en)",
-            "lang(\"\")",
-            "lang(en-)",
-            "lang(--x)",
-            "lang(en--)",
             "lang(,)",
             "lang(,en)",
             "lang(en,)",

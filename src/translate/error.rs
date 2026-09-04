@@ -289,7 +289,7 @@ impl ParseErrorKind {
                 ParseErrorKind::ExpectedName(token_text(t))
             }
             CssErrorKind::Custom(S::UnsupportedPseudoClassOrElement(name)) => {
-                ParseErrorKind::UnsupportedPseudo(elide(sanitize(name)))
+                ParseErrorKind::UnsupportedPseudo(echoed(name))
             }
             CssErrorKind::Custom(
                 S::NoQualifiedNameInAttributeSelector(t)
@@ -300,7 +300,7 @@ impl ParseErrorKind {
             ) => ParseErrorKind::InvalidAttributeSelector(token_text(t)),
             CssErrorKind::Custom(S::ExpectedNamespace(prefix)) => ParseErrorKind::Other(format!(
                 "the namespace prefix `{}` is not declared",
-                elide(sanitize(prefix))
+                echoed(prefix)
             )),
             _ => ParseErrorKind::Other("the selector is not valid CSS".to_owned()),
         }
@@ -333,9 +333,7 @@ impl ParseErrorKind {
             | ParseErrorKind::ExpectedName(text)
             | ParseErrorKind::InvalidAttributeSelector(text) => *text == token_text(token),
             ParseErrorKind::UnsupportedPseudo(name) => match token {
-                Token::Ident(written) | Token::Function(written) => {
-                    *name == elide(sanitize(written))
-                }
+                Token::Ident(written) | Token::Function(written) => *name == echoed(written),
                 _ => false,
             },
             _ => false,
@@ -348,7 +346,17 @@ impl ParseErrorKind {
 fn token_text(token: &Token<'_>) -> String {
     let mut css = String::new();
     let _ = token.to_css(&mut css);
-    elide(sanitize(&css))
+    echoed(&css)
+}
+
+/// A piece of the selector as a message may echo it: sanitized and
+/// elided, which is the whole of "bounded and safe to print" for an
+/// echoed payload. Every message that quotes something the caller wrote
+/// — a token, a pseudo-class name, a `:lang()` range — goes through
+/// here, so the bound is one rule rather than a promise each call site
+/// has to keep.
+pub(crate) fn echoed(text: &str) -> String {
+    elide(sanitize(text))
 }
 
 /// `text` with every control character — which a message must never

@@ -234,6 +234,11 @@ svg|*:only-of-type
 :lang()
 :lang(5)
 :lang(-)
+e:lang(en-)
+e:lang(en--)
+e:lang(--x)
+e:lang(en*)
+e:lang(*en)
 \31 ns|div
 \31 ns|*
 \31 ns|di\[v
@@ -466,6 +471,8 @@ e:lang(en)
 e:lang("en")
 e:lang(en-*)
 e:lang(*)
+e:lang("")
+e:lang(en, "")
 e:lang(en, fr)
 e:lang(en, de, fr)
 e:lang( en , fr )
@@ -483,6 +490,7 @@ e:lang("de-*-*")
 e:lang("*-*")
 e:lang("*-CH")
 E:lang(*)
+E:lang("")
 E:lang(EN)
 E:lang(en-*)
 E:lang(en)
@@ -645,6 +653,9 @@ book:lang(fr)
 title:lang(en)
 title:lang(fr)
 title:lang(de)
+book:lang("")
+title:lang("")
+book:lang(en, "")
 svg|rect
 *|creator
 [dc|role]
@@ -665,6 +676,7 @@ p:lang(fr)
 p:lang(en)
 a:lang(en)
 p:lang(de)
+p:lang("")
 book:first-child
 book:last-child
 book:first-of-type
@@ -736,6 +748,7 @@ xhtml|p:lang(en)
 xhtml|p:lang(fr-CA)
 xhtml|p:lang(fr-Latn)
 xhtml|p:lang(fr-DE)
+xhtml|p:lang("")
 span:lang(de)
 span:lang(de-DE)
 span:lang(de-1996)
@@ -756,6 +769,8 @@ span:lang(*-TW-Hant)
 span:lang(*-FR)
 span:lang(de-*-DE)
 span:lang("*-*")
+span:lang("")
+span:lang(en, "")
 xhtml|fieldset:disabled
 xhtml|option:checked
 xhtml|input:enabled

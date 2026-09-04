@@ -11,6 +11,40 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Added
+
+- The empty language range `:lang("")` now has its Selectors 4 meaning — "the
+  element's language is not known" — where it was rejected as a malformed
+  range. It is the complement of `:lang(*)`, so it translates to that range's
+  test negated: `e:lang("")` is
+  `e[not(ancestor-or-self::*[@lang][1][string-length(@lang) > 0])]` under
+  `Mode::Html`, and the same shape over `@xml:lang` under `Mode::Generic` and
+  over both attributes under `Mode::Xhtml`. An empty attribute counts as no
+  language, as it does for `:lang(*)`: an element under `lang=""` matches
+  `:lang("")` rather than inheriting the tag above it. XPath's own `lang()`
+  cannot express this, so `Mode::Generic` walks the language attribute
+  directly, as it already did for `:lang(*)`.
+
+### Changed
+
+- A `:lang()` language range that no language tag could match — an empty
+  subtag (`en-`, `--x`) or a `*` glued to one rather than standing as a whole
+  subtag (`en*`, `*en`) — is now refused by the translator, which names it:
+  `` the :lang() language range "en-" (an empty subtag, which a language range
+  cannot have) ``. These were rejected by the argument grammar before, as
+  `` `lang` is not a supported pseudo-class or pseudo-element `` — a message
+  that named neither the range nor what was wrong with it. So they are now
+  `Error::Unsupported` (with no offset) where they were `Error::Parse` (with a
+  caret on `lang`); the set of selectors that error is unchanged apart from
+  `:lang("")`, which now translates. The grammar still decides what it alone
+  can: whether the tokens assemble into ranges at all, which is where
+  `:lang()`, `:lang(5)`, `:lang(en fr)` and a stray comma are still refused.
+- Every message payload echoed from the selector is bounded by one rule: a
+  `:lang()` range is now sanitized and elided past 40 bytes, as a token or
+  pseudo-class name in a parse error already was. This is visible only in the
+  `:lang()` errors above and in the existing "a wildcard outside the final
+  subtag" one, whose range came through raw however long it was.
+
 ## [0.5.0] - 2026-09-04
 
 ### Changed

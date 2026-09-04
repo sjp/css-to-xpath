@@ -44,9 +44,9 @@ fn lang_and_dir() {
         "e:lang(en fr)",
         "e:lang(en *)",
         "e:lang(en*)",
-        // Empty and empty-subtag ranges cannot match anything and
-        // are not valid language ranges.
-        "e:lang(\"\")",
+        // An empty *subtag* is still not a language range: `en-` reads
+        // as a half-written `en-*`, not as the range `en`. (The empty
+        // range itself is a different thing entirely — see below.)
         "e:lang(en-)",
         "e:lang(en--)",
         "e:lang(--x)",
@@ -55,6 +55,18 @@ fn lang_and_dir() {
     ] {
         assert!(t.css_to_xpath(sel, "").is_err(), "{sel} should error");
     }
+    // The empty range is Level 4's complement of `*`: it matches an
+    // element whose language is *not* known, which is the wildcard's
+    // test negated. XPath's lang() cannot express it either.
+    t.check(
+        "e:lang(\"\")",
+        "e[not(ancestor-or-self::*[@xml:lang][1][string-length(@xml:lang) > 0])]",
+    );
+    t.check(
+        "e:lang(en, \"\")",
+        "e[lang('en') or \
+         not(ancestor-or-self::*[@xml:lang][1][string-length(@xml:lang) > 0])]",
+    );
     // A bare * stays match-anything even alongside other ranges: it
     // must not be confused with the head of an interior wildcard.
     t.check(
@@ -68,6 +80,10 @@ fn lang_and_dir() {
     html.check(
         "e:lang(*)",
         "e[ancestor-or-self::*[@lang][1][string-length(@lang) > 0]]",
+    );
+    html.check(
+        "e:lang(\"\")",
+        "e[not(ancestor-or-self::*[@lang][1][string-length(@lang) > 0])]",
     );
     // A trailing wildcard matches the same prefix as the range
     // without it: both stop at a subtag boundary.
@@ -106,6 +122,15 @@ fn lang_and_dir() {
         "E[ancestor-or-self::*[@xml:lang or @lang][1]\
          [string-length(concat(@xml:lang, \
          substring(@lang, 1, string-length(@lang) * not(@xml:lang)))) > 0]]",
+    );
+    // The empty range negates that same wildcard test, xhtml language
+    // source and all.
+    xhtml.check(
+        "E:lang(\"\")",
+        format!(
+            "E[not({})]",
+            inner(&xhtml.css_to_xpath("E:lang(*)", "").unwrap())
+        ),
     );
     xhtml.check(
         "E:lang(EN)",

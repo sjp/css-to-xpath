@@ -9,7 +9,7 @@
 
 use crate::parser::PseudoClass;
 
-use super::error::Error;
+use super::error::{Error, echoed};
 use super::xpath_expr::{Condition, XPathExpr, ascii_lower, xpath_literal};
 use super::{Kind, Translator};
 
@@ -468,13 +468,18 @@ impl Translator {
 
     /// Generic `:lang()`: XPath's `lang()` does language-range prefix
     /// matching natively, so `en` and `en-*` both become `lang('en')`-style
-    /// tests. A bare `*` matches elements whose language is *known*, which
-    /// `lang()` cannot express, so it walks the language source instead.
+    /// tests. The two ranges that say something *about* the language
+    /// rather than matching one — `*` ("known") and `""` ("not known") —
+    /// are what `lang()` cannot express, so they walk the language source
+    /// instead.
     fn lang_generic(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
+            check_lang_range(value)?;
             check_wildcard_position(value)?;
-            if value == "*" {
+            if value.is_empty() {
+                conditions.push(lang_unknown_condition(self.lang_source()));
+            } else if value == "*" {
                 conditions.push(lang_known_condition(self.lang_source()));
             } else if let Some(prefix) = value.strip_suffix("-*") {
                 // The trailing '-' goes with the wildcard: lang('en-')
@@ -497,6 +502,13 @@ impl Translator {
     fn lang_html(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
+            check_lang_range(value)?;
+            if value.is_empty() {
+                // Not a filtering range at all: the empty range asks
+                // that there be no language to filter.
+                conditions.push(lang_unknown_condition(self.lang_source()));
+                continue;
+            }
             let range = LangRange::parse(value);
             if range.subtags.is_empty() {
                 // Nothing but wildcards ("*", "*-*"): the whole test is
@@ -650,6 +662,51 @@ fn or_group(expr: &str) -> Condition {
     }
 }
 
+/// Reject a `:lang()` argument that no translator can take. What is left
+/// is a language range: one or more non-empty `-`-separated subtags, each
+/// either a whole `*` or free of `*` entirely (RFC 4647
+/// extended-language-range, minus its restrictions on subtag length and
+/// character set — which cost nothing but never-matching output, unlike
+/// the shapes rejected here).
+///
+/// The empty argument passes without being one: it is not a range to
+/// filter with but a statement about the language, Level 4's "the
+/// element's language is not known" (see [`lang_unknown_condition`]) —
+/// the complement of what `:lang(*)` asks.
+///
+/// The wildcard rule is what keeps a typo like `:lang(en*)` an error
+/// rather than the range `en` widened by a `*` that would match every
+/// element with a known language. The non-empty-subtag rule rejects
+/// `en-` and `--x`; a trailing `-` in particular reads as a
+/// half-written `en-*`.
+///
+/// The check lives here rather than in the parser's argument grammar —
+/// which only asks whether the tokens assemble into ranges at all — so
+/// that the message can name the offending range, as the wildcard-
+/// position one below does. What is left to the grammar is what only the
+/// token stream knows: the adjacency that separates `en-*` from `en-`,
+/// `*`.
+fn check_lang_range(range: &str) -> Result<(), Error> {
+    if range.is_empty() {
+        return Ok(()); // no subtags to be wrong about
+    }
+    for subtag in range.split('-') {
+        let fault = if subtag.is_empty() {
+            "an empty subtag, which a language range cannot have"
+        } else if subtag != "*" && subtag.contains('*') {
+            "a wildcard glued to a subtag, \
+             where a language range takes one only as a whole subtag"
+        } else {
+            continue;
+        };
+        return Err(Error::unsupported(format!(
+            "the :lang() language range {:?} ({fault})",
+            echoed(range)
+        )));
+    }
+    Ok(())
+}
+
 /// Under `Mode::Generic` a wildcard is accepted only as a whole range
 /// (`*`) or as the final subtag (`en-*`), the two shapes XPath's `lang()`
 /// can be handed. RFC 4647 extended filtering also allows one in any
@@ -658,17 +715,18 @@ fn or_group(expr: &str) -> Condition {
 /// silently over- or under-matching. The HTML modes build the comparison
 /// themselves and take a wildcard anywhere (see [`LangRange`]).
 ///
-/// (The parser has already rejected a `*` that is not a whole subtag,
-/// such as `en*`, so a range that passes here is either `*` itself or
-/// ends in `-*`.)
+/// ([`check_lang_range`] has already rejected a `*` that is not a whole
+/// subtag, such as `en*`, so a range that passes here is either `*`
+/// itself or ends in `-*`.)
 fn check_wildcard_position(range: &str) -> Result<(), Error> {
     if let Some(pos) = range.find('*')
         && pos != range.len() - 1
     {
         return Err(Error::unsupported(format!(
-            "the :lang() language range {range:?} \
+            "the :lang() language range {:?} \
              (a wildcard outside the final subtag, \
-             which XPath's lang() cannot express)"
+             which XPath's lang() cannot express)",
+            echoed(range)
         )));
     }
     Ok(())
@@ -695,6 +753,15 @@ fn lang_known_condition(source: LangSource) -> String {
         source.nearest(),
         source.string()
     )
+}
+
+/// The empty range `""`, which Level 4 defines as the complement of `*`:
+/// it matches an element whose language is *not* known. That is exactly
+/// the absence of the node [`lang_known_condition`] looks for — no
+/// ancestor-or-self carries a language attribute, or the nearest one that
+/// does carries an empty value — so the test is that condition negated.
+fn lang_unknown_condition(source: LangSource) -> String {
+    format!("not({})", lang_known_condition(source))
 }
 
 /// The element's language as the comparisons below want it: ASCII-folded
@@ -731,9 +798,11 @@ impl LangRange {
     /// therefore a no-op — `de-*-DE` tests exactly what `de-DE` does,
     /// `en-*` exactly what `en` does — and is dropped here.
     ///
-    /// The parser has already rejected a `*` that is not a whole subtag
-    /// (`en*`) and an empty subtag (`en-`), so every subtag reaching
-    /// this is either `*` or a non-empty literal.
+    /// [`check_lang_range`] has already rejected a `*` that is not a
+    /// whole subtag (`en*`) and an empty subtag (`en-`), and the empty
+    /// range is answered before the split (see
+    /// [`Translator::lang_html`]), so every subtag reaching this is
+    /// either `*` or a non-empty literal.
     fn parse(range: &str) -> Self {
         let mut subtags = range.split('-').map(str::to_ascii_lowercase);
         let head = subtags.next().expect("split is non-empty");

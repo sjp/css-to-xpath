@@ -299,6 +299,48 @@ fn generic_lang_wildcard_and_multiple_ranges() {
     );
 }
 
+/// The empty range `:lang("")` is Level 4's complement of `:lang(*)`: it
+/// matches an element whose language is *not* known — no ancestor-or-self
+/// carries a language attribute, or the nearest one that does carries an
+/// empty value, which resets the language rather than deferring to the
+/// tag above.
+#[test]
+fn lang_empty_range_matches_an_unknown_language() {
+    check(
+        &generic_fixture(),
+        Mode::Generic,
+        &[
+            // b1 is `en-GB` and b3 is `fr`; the rest of the library
+            // carries no xml:lang at all, root included.
+            ("book:lang(\"\")", &["b2", "b4"]),
+            ("title:lang(\"\")", &["ti2", "ti3", "ti5"]),
+            // A comma list ORs, so `en` and "no language" together are
+            // every book but the French one.
+            ("book:lang(en, \"\")", &["b1", "b2", "b4"]),
+        ],
+    );
+    check(
+        &html_fixture(),
+        Mode::Html,
+        &[
+            // l10 has `lang=""` and l11 sits inside it: an empty tag
+            // resets the language, so neither inherits the document's
+            // `en` the way l9 does.
+            ("span:lang(\"\")", &["l10", "l11"]),
+            ("span:lang(en, \"\")", &["l9", "l10", "l11"]),
+            // Everything else in the document is under <html lang="en">.
+            ("p:lang(\"\")", &[]),
+        ],
+    );
+    check(
+        &xhtml_fixture(),
+        Mode::Xhtml,
+        // p3 carries both attributes, and xml:lang wins even though it
+        // is the empty one: its language is unknown, not `fr`.
+        &[("xhtml|p:lang(\"\")", &["p3"])],
+    );
+}
+
 #[test]
 fn generic_scope_is_the_context_node() {
     let fixture = generic_fixture();
@@ -415,8 +457,8 @@ fn xhtml_default_namespace_makes_unprefixed_names_match() {
         &[
             ("input", &["i1", "i2", "i3", "i4", "i5", "i6", "i7", "i8"]),
             ("legend > input", &["i1", "i2"]),
-            ("body > p", &["p1", "p2"]),
-            ("body > *", &["f1", "a1", "a2", "p1", "p2"]),
+            ("body > p", &["p1", "p2", "p3"]),
+            ("body > *", &["f1", "a1", "a2", "p1", "p2", "p3"]),
             ("fieldset:nth-of-type(2)", &["fs2"]),
             (
                 "select :is(option, optgroup)",

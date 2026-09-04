@@ -63,5 +63,8 @@
     <a id="a2">not a link</a>
     <p id="p1" xml:lang="fr-Latn-CA">bonjour</p>
     <p id="p2" lang="de">hallo</p>
+    <!-- xml:lang wins over lang on the same element even when it is
+         empty, so p3's language is unknown rather than `fr`. -->
+    <p id="p3" xml:lang="" lang="fr">rien</p>
   </body>
 </html>

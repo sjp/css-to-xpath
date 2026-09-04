@@ -66,6 +66,10 @@
       <span id="l7" lang="dede">7</span>
       <span id="l8" lang="zh-Hant-TW">8</span>
       <span id="l9">9</span>
+      <!-- An empty tag is not a tag: l10's language is *unknown*, not
+           the document's `en`, and l11 inherits that rather than
+           looking past l10 for the next tag up. -->
+      <span id="l10" lang=""><span id="l11">11</span></span>
     </div>
   </body>
 </html>

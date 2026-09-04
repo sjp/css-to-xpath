@@ -151,8 +151,12 @@ fn unsupported_errors() {
     assert!(t.css_to_xpath("svg|*:only-of-type", "").is_err());
     assert!(t.css_to_xpath("*|*:first-of-type", "").is_err());
     assert!(t.css_to_xpath("|*:first-of-type", "").is_err());
-    // :lang()/:dir() argument validation; a lone '-' is not a valid
-    // ident.
+    // :lang()/:dir() argument validation, at the level the argument
+    // grammar decides it: whether the tokens assemble into ranges at
+    // all. (A lone '-' is not a valid ident, so it never becomes one.)
+    // A range that assembles but says something no language tag can
+    // match is the translators' to reject, by name — see
+    // `lang_range_errors_name_the_range`.
     assert!(t.css_to_xpath(":lang()", "").is_err());
     assert!(t.css_to_xpath(":lang(5)", "").is_err());
     assert!(t.css_to_xpath(":lang(-)", "").is_err());
@@ -803,6 +807,71 @@ fn error_messages_are_not_debug_renderings() {
     }
 }
 
+/// A `:lang()` range the translation cannot make sense of is reported by
+/// naming the range, not merely the pseudo-class it sits in: the
+/// argument grammar accepts whatever assembles into ranges, so the fault
+/// is in what a range *says*, and there can be several of them.
+#[test]
+fn lang_range_errors_name_the_range() {
+    const EMPTY_SUBTAG: &str = "an empty subtag, which a language range cannot have";
+    const GLUED_WILDCARD: &str =
+        "a wildcard glued to a subtag, where a language range takes one only as a whole subtag";
+
+    // The shapes no translator can take, rejected the same way in all
+    // three modes and whichever range of a list is the bad one.
+    for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+        let t = Translator::new(mode);
+        for (sel, range, fault) in [
+            ("e:lang(en-)", "en-", EMPTY_SUBTAG),
+            ("e:lang(en--)", "en--", EMPTY_SUBTAG),
+            ("e:lang(--x)", "--x", EMPTY_SUBTAG),
+            ("e:lang(en, de-)", "de-", EMPTY_SUBTAG),
+            ("e:lang(en*)", "en*", GLUED_WILDCARD),
+            ("e:lang(*en)", "*en", GLUED_WILDCARD),
+            ("e:lang(\"en-*-\")", "en-*-", EMPTY_SUBTAG),
+        ] {
+            assert_eq!(
+                t.css_to_xpath(sel, "").unwrap_err(),
+                css_to_xpath::Error::Unsupported {
+                    construct: format!("the :lang() language range {range:?} ({fault})"),
+                    offset: None,
+                },
+                "{sel} in {mode:?} mode"
+            );
+        }
+    }
+
+    // An interior wildcard is a well-formed range that only
+    // Mode::Generic has to refuse, and its message names the range the
+    // same way. The HTML modes translate it.
+    let t = Translator::new(Mode::Generic);
+    assert_eq!(
+        t.css_to_xpath("e:lang(*-CH)", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "the :lang() language range \"*-CH\" (a wildcard outside the final \
+                        subtag, which XPath's lang() cannot express)"
+                .to_owned(),
+            offset: None,
+        }
+    );
+    assert!(
+        Translator::new(Mode::Html)
+            .css_to_xpath("e:lang(*-CH)", "")
+            .is_ok()
+    );
+
+    // Positionless, so the message is the plain sentence with no caret
+    // gutter: the range reaches translation as a parsed component, which
+    // no longer knows where in the selector it was written.
+    let sel = "e:lang(en-)";
+    assert_eq!(
+        t.css_to_xpath(sel, "").unwrap_err().message(sel),
+        "The CSS selector \"e:lang(en-)\" uses the :lang() language range \"en-\" \
+         (an empty subtag, which a language range cannot have), \
+         which this translator does not support"
+    );
+}
+
 /// The payloads echoed from the selector are bounded and safe to
 /// print, exactly as the quoted selector and the caret gutter are: a
 /// token or pseudo-class name is elided past 40 bytes, and control
@@ -826,6 +895,30 @@ fn error_payloads_are_bounded() {
         css_to_xpath::Error::Parse {
             kind: css_to_xpath::ParseErrorKind::InvalidAttributeSelector("\u{fffd}".to_owned()),
             offset: 5
+        }
+    );
+    // A `:lang()` range is echoed by the same rule, though it is not a
+    // token: a range is whatever a quoted string held, which is neither
+    // bounded nor printable on its own.
+    assert_eq!(
+        t.css_to_xpath(&format!("a:lang(\"{long}-\")"), "")
+            .unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: format!(
+                "the :lang() language range \"{}\u{2026}\" \
+                 (an empty subtag, which a language range cannot have)",
+                "z".repeat(40)
+            ),
+            offset: None,
+        }
+    );
+    assert_eq!(
+        t.css_to_xpath("a:lang(\"\u{1}-\")", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "the :lang() language range \"\u{fffd}-\" \
+                        (an empty subtag, which a language range cannot have)"
+                .to_owned(),
+            offset: None,
         }
     );
 }

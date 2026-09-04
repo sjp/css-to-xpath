@@ -95,6 +95,10 @@ assert_eq!(
     `placeholder` its type allows, with no value in the markup.
   - `:lang()` — nearest `@lang` ancestor, case-folded, matched by RFC
     4647 extended filtering (so `:lang(de-DE)` matches `de-Latn-DE`).
+    Level 4's two ranges about the language itself are honoured:
+    `:lang(*)` matches an element whose language is known, `:lang("")`
+    one whose language is not — including one under an empty `lang=""`,
+    which resets the language rather than deferring to the tag above.
 - **`Mode::Xhtml`** — the same HTML pseudo-class semantics as `Mode::Html`,
   but preserves case (XHTML is XML, so both names and those attribute
   values are case-sensitive) and reads `xml:lang` as well as `lang` for
@@ -208,9 +212,11 @@ XPath reads as a division, not a path.
   requires; the rest of forgiveness is not adopted, so an argument that
   fails to parse is an error rather than a silently dropped one.
 - `:scope`, `:root`, `:empty`, `:lang()`. Under `Mode::Generic` a range
-  translates to XPath's `lang()`, except the wildcard `:lang(*)` —
-  "any known language", which `lang()` cannot express — which walks
-  `@xml:lang` instead. `Mode::Xhtml` reads `@xml:lang` for every range.
+  translates to XPath's `lang()`, except the two that say something
+  *about* an element's language rather than naming one — `:lang(*)`
+  ("known") and `:lang("")` ("not known") — which `lang()` cannot
+  express, so they walk `@xml:lang` instead. `Mode::Xhtml` reads
+  `@xml:lang` for every range.
   Both rely on the `xml` prefix, which XML binds implicitly and so needs
   no entry in the caller's namespace map; processors that do not pre-bind
   it need it registered. `:empty` follows Level 3 rather than Level 4,
@@ -349,10 +355,16 @@ express them faithfully:
   pseudo-class argument. Both are lexical facts, so — like `||` and `&` —
   the scan of the source text finds them and the error points a caret at
   the offending `:scope` rather than leaving the caller to find it.
-- The empty language range `:lang("")`, which Level 4 defines as matching
-  only elements whose language is *not* tagged. It is rejected with the
-  other malformed ranges (`en-`, `--x`, `en*`) rather than given that
-  meaning; the ones that are supported are described below.
+- `:lang()` language ranges no language tag could match: an empty subtag
+  (`en-`, `--x`) or a `*` glued to one rather than standing as a whole
+  subtag (`en*`, `*en`). The argument grammar accepts them — its job is
+  only to decide where one range ends and the next begins, which is the
+  part that needs the token stream — so the refusal comes from the
+  translator, which has the range in hand and names it: `` the :lang()
+  language range "en-" (an empty subtag, which a language range cannot
+  have) ``. The *empty* range `:lang("")` is not one of these: Level 4
+  gives it a meaning, and this crate gives it that meaning (see
+  [Approximations](#approximations)).
 - Functional pseudo-classes (`:is()`, `:not()`, `:where()`, `:has()`,
   `:nth-child(… of S)`) nested more than **32** levels deep. Parsing and
   translating both recurse once per level, so the depth is capped to turn
@@ -400,7 +412,8 @@ contract stays honest.
   the final subtag (`en-*`) may be a wildcard — XPath's `lang()` is a
   prefix match with nowhere to put the rest — and any other placement is
   an error. Single-subtag ranges — `en`, `en-*`, `*`, the common case —
-  are exact everywhere.
+  are exact everywhere, as is the empty range `""`: "the language is not
+  known" is the wildcard's test negated, which needs no filtering at all.
 - **`:empty` follows Level 3, so white space counts.** `e:empty` is
   `e[not(*) and not(string-length())]`, and `<p> </p>` is therefore not
   empty. Level 4 ignores document white space; browsers still ship the
