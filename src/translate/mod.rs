@@ -421,6 +421,13 @@ impl Translator {
     /// Build the element part of the expression from the namespace
     /// constraint and element name.
     fn xpath_element(&self, ns: NsConstraint, element: Option<&str>) -> Result<XPathExpr, Error> {
+        // Whether the compound wrote a type selector at all. Only the
+        // delimiter `*` is the universal selector; an escape only ever
+        // produces an <ident>, so `\2a` is a type selector naming the
+        // character `*` (css-syntax-3 §4.3.7, Selectors 4 §5.1–5.2).
+        // The two are told apart here by `element`, never by comparing
+        // the name to "*", which would read `*|\2a` as `*|*`.
+        let universal = element.is_none();
         let (mut name, safe) = match element {
             None => ("*".to_owned(), true),
             Some(e) => {
@@ -434,7 +441,7 @@ impl Translator {
             }
         };
         match ns {
-            NsConstraint::Any if name != "*" => {
+            NsConstraint::Any if !universal => {
                 // '*|e': 'e' in any namespace, including none. An unprefixed
                 // XPath name test only matches the null namespace, so test
                 // against local-name() instead. The of-type nodetest counts
@@ -449,7 +456,7 @@ impl Translator {
                 xpath.add_condition(&cond);
                 return Ok(xpath);
             }
-            NsConstraint::ExplicitNone if name == "*" => {
+            NsConstraint::ExplicitNone if universal => {
                 // '|*': every element with no namespace. A bare '*' is
                 // every element whatever its namespace, so the constraint
                 // has to be written out.

@@ -93,6 +93,19 @@ e:has(> svg|di\[v)
 e:has(+ svg|di\[v)
 e + svg|di\[v
 svg|di\[v:first-of-type
+\2a
+|\2a
+*|\2a
+svg|\2a
+[*|\2a]
+*|\2a.x
+*|\2a:first-of-type
+\2a:only-of-type
+e:is(*|\2a)
+e:not(*|\2a)
+e:has(> *|\2a)
+e + *|\2a
+\2a|a
 nsé|div
 nsé|*
 [nsé|href]

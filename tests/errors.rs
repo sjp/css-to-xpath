@@ -216,6 +216,17 @@ fn unsupported_errors() {
             offset: None,
         }
     );
+    // An escaped `*` is an ident, so it is a *name* — which in the
+    // local-name position is a name needing quoting (see
+    // `an_escaped_asterisk_names_an_element` in `names.rs`) and in the
+    // prefix position is one more prefix that is not an XPath name.
+    assert_eq!(
+        t.css_to_xpath("\\2a|a", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "a namespace prefix that is not an XPath name (`*`)".to_owned(),
+            offset: None,
+        }
+    );
     // An+B must be whitespace-exact and integer-valued.
     assert!(t.css_to_xpath("e:nth-child(3 7)", "").is_err());
     assert!(t.css_to_xpath("e:nth-child(2 n)", "").is_err());

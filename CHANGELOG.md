@@ -11,6 +11,25 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Fixed
+
+- An element *named* `*` — written with an escape, as `\2a` — is no longer
+  translated as the universal selector when a namespace constraint is written
+  in front of it. An escape only ever produces an `<ident>` (css-syntax-3
+  §4.3.7), so `\2a` is a type selector whose name happens to be the character
+  `*`; only the delimiter `*` is the universal selector (Selectors 4
+  §5.1–5.2). The translator told the two apart by comparing the
+  name to `"*"`, which read `*|\2a` as `*|*` (every element in the document,
+  where the selector asks for elements named `*` in any namespace) and `|\2a`
+  as `|*` (every element in no namespace). They are now `*[local-name() = '*']`
+  and `*[name() = '*' and namespace-uri() = '']`, matching what the unprefixed
+  `\2a` and the prefixed `ns|\2a` already produced. For the same reason
+  `*|\2a:first-of-type` — refused as "an of-type pseudo-class on the universal
+  selector `*`" — now translates, counting siblings by the name as any other
+  type selector does. The universal selector itself is unchanged in every
+  namespace form (`*`, `|*`, `*|*`, `ns|*`), and `\2a` in the *prefix*
+  position is still "a namespace prefix that is not an XPath name (`*`)".
+
 ## [0.5.1] - 2026-09-05
 
 ### Added

@@ -82,6 +82,62 @@ fn unsafe_names_and_escapes() {
     // errors; see `unsupported_errors` in `errors.rs`.
 }
 
+/// `\2a` is an escaped `*`, and an escape only ever produces an
+/// `<ident>` (css-syntax-3 §4.3.7) — so it is a type selector naming
+/// the character `*`, never the universal selector, which is the
+/// delimiter `*` alone (Selectors 4 §5.1–5.2). The translator tells the
+/// two apart by whether a type selector was written, so an element
+/// *named* `*` gets a name test like any other name needing quoting,
+/// in every namespace form.
+#[test]
+fn an_escaped_asterisk_names_an_element() {
+    let mut t = Cases::new(Mode::Generic);
+    // Unprefixed, and with each namespace constraint written out. `*`
+    // is not a safe name, so it folds into a comparison exactly as
+    // `di\[v` does.
+    t.check("\\2a", "*[name() = '*' and namespace-uri() = '']");
+    t.check("|\\2a", "*[name() = '*' and namespace-uri() = '']");
+    t.check("*|\\2a", "*[local-name() = '*']");
+    t.check("svg|\\2a", "svg:*[local-name() = '*']");
+    t.check("[*|\\2a]", "*[@*[local-name() = '*']]");
+    // The universal selector proper is unaffected: it is the only form
+    // that drops the name test.
+    t.check("*", "*");
+    t.check("|*", "*[namespace-uri() = '']");
+    t.check("*|*", "*");
+    t.check("svg|*", "svg:*");
+    // The rest of the compound is applied on top of the name test
+    // rather than in place of it.
+    t.check(
+        "*|\\2a.x",
+        "*[local-name() = '*' \
+         and contains(concat(' ', normalize-space(@class), ' '), ' x ')]",
+    );
+    // And the name test is a type, so the of-type pseudo-classes count
+    // by it instead of refusing the compound as universal.
+    t.check(
+        "*|\\2a:first-of-type",
+        "*[local-name() = '*' and count(preceding-sibling::*[local-name() = '*']) = 0]",
+    );
+    t.check(
+        "\\2a:only-of-type",
+        "*[name() = '*' and namespace-uri() = '' \
+         and count(preceding-sibling::*[name() = '*' and namespace-uri() = '']) = 0 \
+         and count(following-sibling::*[name() = '*' and namespace-uri() = '']) = 0]",
+    );
+    // Everywhere else a type selector can be written.
+    t.check("e:is(*|\\2a)", "e[local-name() = '*']");
+    t.check("e:not(*|\\2a)", "e[not(local-name() = '*')]");
+    t.check("e:has(> *|\\2a)", "e[child::*[local-name() = '*']]");
+    t.check(
+        "e + *|\\2a",
+        "e/following-sibling::*[1][local-name() = '*']",
+    );
+    // In the *prefix* position the same escape is a prefix that is not
+    // an XPath name, which errors; see `unsupported_errors` in
+    // `errors.rs`.
+}
+
 /// A namespace prefix is held to the XML `NCName` production rather than
 /// to the local name's stricter ASCII test. The looser rule is what the
 /// prefix position needs: a prefix has no `local-name()` fallback to
