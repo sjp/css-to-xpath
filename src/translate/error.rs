@@ -314,6 +314,18 @@ impl ParseErrorKind {
         ParseErrorKind::UnexpectedToken(token_text(token))
     }
 
+    /// Whether [`names_token`](Self::names_token) can hold for any token
+    /// at all.
+    pub(crate) fn echoes_token(&self) -> bool {
+        matches!(
+            self,
+            ParseErrorKind::UnexpectedToken(_)
+                | ParseErrorKind::ExpectedName(_)
+                | ParseErrorKind::InvalidAttributeSelector(_)
+                | ParseErrorKind::UnsupportedPseudo(_)
+        )
+    }
+
     /// Whether `token` is the one this kind's message echoes.
     ///
     /// The parser asks this of the tokens on either side of the

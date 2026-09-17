@@ -731,6 +731,14 @@ fn parse_lists(
         Ok(list) => return Ok(list),
         Err(e) => e,
     };
+    // The strict parse stops at the first error in source order, and an
+    // empty argument list is reported as `EmptySelector`. Any other
+    // strict error therefore sits before, or is, something the forgiving
+    // parse cannot accept cleanly either, and every outcome of the retry
+    // below would report it unchanged — so the retry is skipped.
+    if !is_empty_selector(&strict) {
+        return Err(parse_error(css, &strict));
+    }
     match parse_list(css, true, &default_namespace) {
         Ok(list) if dropped_nothing(&list) => Ok(list),
         // The forgiving parse recovered from a genuinely invalid
@@ -800,6 +808,11 @@ fn parse_error(css: &str, e: &ParseFailure<'_>) -> Error {
 /// a name further off than one token, as `::before`'s is — leaving the
 /// reported position, which is still the best the parser knows.
 fn named_token_offset(css: &str, reported: usize, kind: &ParseErrorKind) -> Option<usize> {
+    // The walk re-tokenises from the start, which is wasted on a kind
+    // that could not claim either neighbour anyway.
+    if !kind.echoes_token() {
+        return None;
+    }
     let mut following = None;
     let mut preceding = None;
     walk_tokens(css, |start, end, token| {
@@ -1133,5 +1146,168 @@ mod tests {
         assert!(!PseudoClass::Target.is_user_action_state());
         assert!(!PseudoClass::Enabled.is_user_action_state());
         assert!(!PseudoClass::Checked.is_user_action_state());
+    }
+}
+
+/// Pins the early exits in [`parse_lists`] and [`named_token_offset`]:
+/// both skip work on the grounds that it cannot change the result, so
+/// the result is checked against the implementation that did the work.
+#[cfg(test)]
+mod early_exit_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    const CORPUS: &str = include_str!("../../tests/corpus/selectors.txt");
+
+    /// `parse_lists` and `parse_error` as they were before the early
+    /// exits: the forgiving retry after every strict failure, and the
+    /// token walk for every kind.
+    fn reference(
+        css: &str,
+        default_namespace: Option<&str>,
+    ) -> Result<SelectorList<CssToXpathImpl>, Error> {
+        let default_namespace = CssString::from(default_namespace.unwrap_or(""));
+        let strict = match parse_list(css, false, &default_namespace) {
+            Ok(list) => return Ok(list),
+            Err(e) => e,
+        };
+        match parse_list(css, true, &default_namespace) {
+            Ok(list) if dropped_nothing(&list) => Ok(list),
+            Ok(_) => Err(reference_error(css, &strict)),
+            Err(e) if is_empty_selector(&strict) => Err(reference_error(css, &e)),
+            Err(_) => Err(reference_error(css, &strict)),
+        }
+    }
+
+    fn reference_error(css: &str, e: &ParseFailure<'_>) -> Error {
+        let reported = byte_offset(css, e.location);
+        let mut kind = ParseErrorKind::from_kind(&e.kind);
+        if matches!(kind, ParseErrorKind::EmptySelector)
+            && let Some(blocked) = blocking_token(css, reported)
+        {
+            kind = blocked;
+        }
+        let mut following = None;
+        let mut preceding = None;
+        walk_tokens(css, |start, end, token| {
+            if end == reported {
+                preceding = Some((start, token.clone()));
+            }
+            if start >= reported && !matches!(token, Token::WhiteSpace(_) | Token::Comment(_)) {
+                following = Some((start, token.clone()));
+                return false;
+            }
+            true
+        });
+        let offset = [following, preceding]
+            .into_iter()
+            .flatten()
+            .find(|(_, token)| kind.names_token(token))
+            .map_or(reported, |(start, _)| start);
+        Error::Parse { kind, offset }
+    }
+
+    fn assert_agrees(css: &str) -> Result<(), TestCaseError> {
+        let shown =
+            |r: Result<SelectorList<CssToXpathImpl>, Error>| r.map(|list| list.to_css_string());
+        prop_assert_eq!(
+            shown(parse_lists(css, None)),
+            shown(reference(css, None)),
+            "{:?}",
+            css
+        );
+        Ok(())
+    }
+
+    /// Characters that make up selector syntax, weighted towards the
+    /// ones that open, close and separate the constructs at issue.
+    const PIECES: &[&str] = &[
+        ":is(",
+        ":where(",
+        ":not(",
+        ":has(",
+        ":nth-child(",
+        "::before",
+        ":foo",
+        "(",
+        ")",
+        "[",
+        "]",
+        ",",
+        " ",
+        ">",
+        "+",
+        "~",
+        "|",
+        "*",
+        "=",
+        "\"",
+        "'",
+        "\\",
+        "/**/",
+        "/*",
+        "#",
+        ".",
+        "a",
+        "b",
+        "1",
+        "-",
+        "&",
+        "{",
+        "}",
+        "\u{e9}",
+    ];
+
+    fn piece() -> impl Strategy<Value = String> {
+        proptest::sample::select(PIECES).prop_map(str::to_owned)
+    }
+
+    fn corpus_line() -> impl Strategy<Value = String> {
+        let lines: Vec<&'static str> = CORPUS.lines().collect();
+        proptest::sample::select(lines).prop_map(str::to_owned)
+    }
+
+    /// A corpus selector with a few pieces spliced in at arbitrary
+    /// character positions, and a few characters removed.
+    fn mutated() -> impl Strategy<Value = String> {
+        (
+            corpus_line(),
+            proptest::collection::vec((any::<proptest::sample::Index>(), piece()), 0..4),
+            proptest::collection::vec(any::<proptest::sample::Index>(), 0..3),
+        )
+            .prop_map(|(line, inserts, removals)| {
+                let mut chars: Vec<char> = line.chars().collect();
+                for index in removals {
+                    if !chars.is_empty() {
+                        chars.remove(index.index(chars.len()));
+                    }
+                }
+                for (index, piece) in inserts {
+                    let at = index.index(chars.len() + 1);
+                    chars.splice(at..at, piece.chars());
+                }
+                chars.into_iter().collect()
+            })
+    }
+
+    #[test]
+    fn corpus_agrees() {
+        for line in CORPUS.lines() {
+            assert_agrees(line).unwrap();
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 4096, ..ProptestConfig::default() })]
+
+        #[test]
+        fn mutated_corpus_agrees(css in mutated()) {
+            assert_agrees(&css)?;
+        }
+
+        #[test]
+        fn assembled_pieces_agree(pieces in proptest::collection::vec(piece(), 0..12)) {
+            assert_agrees(&pieces.concat())?;
+        }
     }
 }
