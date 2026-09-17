@@ -198,10 +198,10 @@ impl Translator {
         // the a==0 branch below ask for a negative sibling count says so
         // plainly.
         if a <= 0 && b_min_1 < 0 {
-            xpath.add_condition("0");
             if let Some(check) = current_element_check {
                 xpath.push_condition(check);
             }
+            xpath.add_condition("0");
             return Ok(());
         }
 
@@ -212,6 +212,13 @@ impl Translator {
             None => String::new(),
         };
 
+        // The current-element check goes before the sibling test: `and`
+        // evaluates left to right and stops at the first false operand,
+        // so a candidate that does not match `S` skips the sibling walk.
+        if let Some(check) = current_element_check {
+            xpath.push_condition(check);
+        }
+
         // the siblings before or after the element
         let axis = if last { "following" } else { "preceding" };
         let siblings = format!("{axis}-sibling::{nodetest}{selector_predicate}");
@@ -219,9 +226,6 @@ impl Translator {
         // special case of fixed position: nth-*(0n+b)
         if a == 0 {
             xpath.add_condition(&sibling_count_is(&siblings, Bound::Exactly, b_min_1));
-            if let Some(check) = current_element_check {
-                xpath.push_condition(check);
-            }
             return Ok(());
         }
 
@@ -230,8 +234,10 @@ impl Translator {
         if a > 0 {
             // siblings count, an+b-1, is always >= 0, so if a>0 and
             // (b-1)<=0 an "n" exists to satisfy this; the predicate is
-            // only interesting if (b-1)>0
-            if b_min_1 > 0 {
+            // only interesting if (b-1)>0. Nor is it if (b-1)<a: the
+            // smallest count congruent to b-1 modulo a is then b-1
+            // itself, so the `mod` test below already implies the bound.
+            if b_min_1 >= a {
                 expr.push(sibling_count_is(&siblings, Bound::AtLeast, b_min_1));
             }
         } else {
@@ -260,10 +266,6 @@ impl Translator {
 
         if !expr.is_empty() {
             xpath.add_condition(&expr.join(" and "));
-        }
-
-        if let Some(check) = current_element_check {
-            xpath.push_condition(check);
         }
 
         Ok(())

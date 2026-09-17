@@ -27,6 +27,19 @@ select the same nodes, because callers compare, cache and embed the strings.
   `count()`. Because `:nth-child(k of S)` now tests the sibling list twice,
   nested `of S` lists can grow the output threefold per level instead of
   twofold; the existing depth and size limits still bound it.
+- A repeating `An+B` series no longer tests a lower bound that its `mod` test
+  already implies. `:nth-child(3n+2)` was
+  `preceding-sibling::*[1] and (count(preceding-sibling::*) + 2) mod 3 = 0`
+  and is now `(count(preceding-sibling::*) + 2) mod 3 = 0`; the bound is kept
+  only where `b - 1 >= a`, as in `2n+3`. With `of S` this also writes `S` one
+  time fewer, so `:nth-child(3n+2 of …)` nested eight deep drops from ~308 KB
+  to ~15 KB.
+- `:nth-child(… of S)` and its variants test that the element itself matches
+  `S` before testing its siblings: `li:nth-child(3 of .c1)` is now
+  `li[S and preceding-sibling::*[S][2] and not(preceding-sibling::*[S][3])]`
+  instead of putting `S` last. XPath `and` stops at the first false operand,
+  so elements that do not match `S` skip the sibling walk; in libxml2 that
+  makes the test faster in proportion to how selective `S` is.
 
 ### Fixed
 

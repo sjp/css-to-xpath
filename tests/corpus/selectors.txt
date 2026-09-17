@@ -814,6 +814,7 @@ xhtml|p:checked
 xhtml|a:enabled
 :nth-child(2 of a)
 :nth-child(2 of :nth-child(2 of a))
+:nth-child(3n+2 of a)
 a:any-link
 a:visited
 a:hover

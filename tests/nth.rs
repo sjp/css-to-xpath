@@ -12,7 +12,7 @@ fn nth_family() {
     t.check("e:nth-child(1)", "e[not(preceding-sibling::*[1])]");
     t.check(
         "e:nth-child(3n+2)",
-        "e[preceding-sibling::*[1] and (count(preceding-sibling::*) + 2) mod 3 = 0]",
+        "e[(count(preceding-sibling::*) + 2) mod 3 = 0]",
     );
     t.check(
         "e:nth-child(3n-2)",
@@ -39,7 +39,7 @@ fn nth_family() {
     );
     t.check(
         "e:nth-last-child(2n+2)",
-        "e[following-sibling::*[1] and (count(following-sibling::*) + 1) mod 2 = 0]",
+        "e[(count(following-sibling::*) + 1) mod 2 = 0]",
     );
     t.check(
         "e:nth-last-child(3n+1)",
@@ -106,7 +106,7 @@ fn nth_family() {
 #[test]
 fn nth_child_of() {
     let mut t = Cases::new(Mode::Generic);
-    t.check("div:nth-child(2 of .foo)", "div[preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][1] and not(preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][2]) and contains(concat(' ', normalize-space(@class), ' '), ' foo ')]");
+    t.check("div:nth-child(2 of .foo)", "div[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][1] and not(preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][2])]");
     // a=1, b<=1: only the current-element check remains.
     t.check(
         "li:nth-child(n of .item)",
@@ -116,7 +116,7 @@ fn nth_child_of() {
     // so the 0 absorbs the current-element check.
     t.check("li:nth-child(-n of .item)", "li[0]");
     // An element argument folds into a self:: test.
-    t.check("div:nth-child(2 of div.foo)", "div[preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div][1] and not(preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div][2]) and contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div]");
+    t.check("div:nth-child(2 of div.foo)", "div[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div and preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div][1] and not(preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div][2])]");
     // A universal argument makes the list match everything, like a
     // plain :nth-child.
     t.check(
