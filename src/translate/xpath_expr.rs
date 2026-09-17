@@ -397,6 +397,16 @@ impl XPathExpr {
             out.push('0');
             return Some(false);
         }
+        // Room for every condition as if none were a repeat, with its
+        // ` and ` and parentheses: a nested `of S` makes these megabytes,
+        // and growing into them by doubling would copy them several
+        // times over.
+        out.reserve(
+            self.conditions
+                .iter()
+                .map(|c| c.expr.len() + " and ()".len())
+                .sum(),
+        );
         let start = out.len();
         let mut kept = 0usize;
         let mut last_or_group = false;

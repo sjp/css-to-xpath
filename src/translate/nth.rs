@@ -11,12 +11,12 @@
 //! # Positional tests, not `count()`
 //!
 //! Every bound on the number of siblings is written as a positional
-//! predicate — see [`sibling_count_is`]. `count()` materialises the whole
+//! predicate — see [`push_sibling_count`]. `count()` materialises the whole
 //! axis, so selecting over *n* siblings costs O(n²); `axis::T[k]` lets the
 //! engine stop at the *k*-th node. Only the `mod a` congruence of a
 //! repeating series still has to count.
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use selectors::parser::{NthSelectorData, NthType, Selector};
 
@@ -81,11 +81,11 @@ impl Translator {
             // parent is the document node, not an element) matches, the
             // same way the equivalent :first-child:last-child does.
             NthType::OnlyChild => {
-                xpath.add_condition(format!(
-                    "{} and {}",
-                    sibling_count_is("preceding-sibling::*", Bound::Exactly, 0),
-                    sibling_count_is("following-sibling::*", Bound::Exactly, 0),
-                ));
+                let mut cond = String::new();
+                push_sibling_count(&mut cond, "preceding-sibling::*", Bound::Exactly, 0);
+                cond.push_str(" and ");
+                push_sibling_count(&mut cond, "following-sibling::*", Bound::Exactly, 0);
+                xpath.add_condition(cond);
                 Ok(())
             }
             // :only-of-type
@@ -93,19 +93,15 @@ impl Translator {
                 let nodetest = xpath.same_type_nodetest().ok_or_else(|| {
                     Error::unsupported("`:only-of-type` on the universal selector `*`")
                 })?;
-                xpath.add_condition(format!(
-                    "{} and {}",
-                    sibling_count_is(
-                        format_args!("preceding-sibling::{nodetest}"),
-                        Bound::Exactly,
-                        0
-                    ),
-                    sibling_count_is(
-                        format_args!("following-sibling::{nodetest}"),
-                        Bound::Exactly,
-                        0
-                    ),
-                ));
+                let mut cond = String::new();
+                for (i, last) in [false, true].into_iter().enumerate() {
+                    if i > 0 {
+                        cond.push_str(" and ");
+                    }
+                    let siblings = Siblings::new(last, &nodetest, None);
+                    push_sibling_count(&mut cond, siblings, Bound::Exactly, 0);
+                }
+                xpath.add_condition(cond);
                 Ok(())
             }
             // :first-child / :last-child / :nth-child() / :nth-last-child()
@@ -215,12 +211,62 @@ impl Translator {
             return Ok(());
         }
 
-        // The predicate filtering counted siblings (CSS Level 4 `of S`) —
-        // the same OR-joined conditions as the current-element check.
-        let selector_predicate = match current_element_check {
-            Some(ref check) => format!("[{}]", check.expr),
-            None => String::new(),
-        };
+        // The siblings before or after the element, filtered by `S` (CSS
+        // Level 4 `of S`) — the same OR-joined conditions as the
+        // current-element check. Every term below is written straight
+        // into one buffer: `S` can be up to `MAX_NTH_OF_BYTES`, and any
+        // intermediate string holding it multiplies what a nested `of S`
+        // allocates.
+        let siblings = Siblings::new(
+            last,
+            nodetest,
+            current_element_check.as_ref().map(|c| c.expr.as_str()),
+        );
+        // At most two copies of `siblings` (an exact position, or a bound
+        // and the congruence), plus the fixed text and up to three
+        // integers around them.
+        let mut cond = String::with_capacity(2 * siblings.len() + 96);
+
+        // special case of fixed position: nth-*(0n+b)
+        if a == 0 {
+            push_sibling_count(&mut cond, siblings, Bound::Exactly, b_min_1);
+        } else {
+            if a > 0 {
+                // siblings count, an+b-1, is always >= 0, so if a>0 and
+                // (b-1)<=0 an "n" exists to satisfy this; the predicate is
+                // only interesting if (b-1)>0. Nor is it if (b-1)<a: the
+                // smallest count congruent to b-1 modulo a is then b-1
+                // itself, so the `mod` test below already implies the
+                // bound.
+                if b_min_1 >= a {
+                    push_sibling_count(&mut cond, siblings, Bound::AtLeast, b_min_1);
+                }
+            } else {
+                // a<0 with (b-1)<0 was the early exit above; otherwise:
+                push_sibling_count(&mut cond, siblings, Bound::AtMost, b_min_1);
+            }
+
+            // operations modulo 1 or -1 are simpler: the >=/<= test above
+            // already covers them
+            if a.abs() != 1 {
+                if !cond.is_empty() {
+                    cond.push_str(" and ");
+                }
+                // count(***-sibling::***) - (b-1) = 0 (mod a) — the one
+                // test with no positional equivalent.
+                //
+                // Apply "modulo a" on the 2nd term, -(b-1), to simplify
+                // things like "(... +6) % -3", and also make it positive
+                // with |a| (`rem_euclid`).
+                let b_neg = (-b_min_1).rem_euclid(a.abs());
+                let written = if b_neg == 0 {
+                    write!(cond, "count({siblings}) mod {a} = 0")
+                } else {
+                    write!(cond, "(count({siblings}) + {b_neg}) mod {a} = 0")
+                };
+                written.expect("writing to a String cannot fail");
+            }
+        }
 
         // The current-element check goes before the sibling test: `and`
         // evaluates left to right and stops at the first false operand,
@@ -228,63 +274,15 @@ impl Translator {
         if let Some(check) = current_element_check {
             xpath.push_condition(check);
         }
-
-        // the siblings before or after the element
-        let axis = if last { "following" } else { "preceding" };
-        let siblings = format!("{axis}-sibling::{nodetest}{selector_predicate}");
-
-        // special case of fixed position: nth-*(0n+b)
-        if a == 0 {
-            xpath.add_condition(sibling_count_is(&siblings, Bound::Exactly, b_min_1));
-            return Ok(());
-        }
-
-        let mut expr: Vec<String> = Vec::new();
-
-        if a > 0 {
-            // siblings count, an+b-1, is always >= 0, so if a>0 and
-            // (b-1)<=0 an "n" exists to satisfy this; the predicate is
-            // only interesting if (b-1)>0. Nor is it if (b-1)<a: the
-            // smallest count congruent to b-1 modulo a is then b-1
-            // itself, so the `mod` test below already implies the bound.
-            if b_min_1 >= a {
-                expr.push(sibling_count_is(&siblings, Bound::AtLeast, b_min_1));
-            }
-        } else {
-            // a<0 with (b-1)<0 was the early exit above; otherwise:
-            expr.push(sibling_count_is(&siblings, Bound::AtMost, b_min_1));
-        }
-
-        // operations modulo 1 or -1 are simpler: the >=/<= test above
-        // already covers them
-        if a.abs() != 1 {
-            // count(***-sibling::***) - (b-1) = 0 (mod a) — the one test
-            // with no positional equivalent
-            let mut left = format!("count({siblings})");
-
-            // apply "modulo a" on the 2nd term, -(b-1), to simplify things
-            // like "(... +6) % -3", and also make it positive with |a|
-            // (`rem_euclid`)
-            let b_neg = (-b_min_1).rem_euclid(a.abs());
-
-            if b_neg != 0 {
-                left = format!("({left} + {b_neg})");
-            }
-
-            expr.push(format!("{left} mod {a} = 0"));
-        }
-
-        match expr.len() {
-            0 => {}
-            1 => xpath.add_condition(expr.pop().expect("checked")),
-            _ => xpath.add_condition(expr.join(" and ")),
+        if !cond.is_empty() {
+            xpath.add_condition(cond);
         }
 
         Ok(())
     }
 }
 
-/// How [`sibling_count_is`] bounds the number of siblings.
+/// How [`push_sibling_count`] bounds the number of siblings.
 #[derive(Clone, Copy)]
 enum Bound {
     Exactly,
@@ -292,9 +290,54 @@ enum Bound {
     AtMost,
 }
 
-/// A test that the node-set `siblings` — a reverse or forward sibling
-/// axis step, predicates and all — has `Exactly`, `AtLeast` or `AtMost`
-/// `k` members, written with positional predicates rather than `count()`.
+/// A sibling axis step, `{axis}-sibling::{nodetest}` with an optional
+/// `[{filter}]`, written in place wherever it is formatted rather than
+/// built once and copied.
+#[derive(Clone, Copy)]
+struct Siblings<'a> {
+    axis: &'static str,
+    nodetest: &'a str,
+    filter: Option<&'a str>,
+}
+
+impl<'a> Siblings<'a> {
+    /// The siblings after the element when `last`, else those before it.
+    const fn new(last: bool, nodetest: &'a str, filter: Option<&'a str>) -> Self {
+        let axis = if last {
+            "following-sibling::"
+        } else {
+            "preceding-sibling::"
+        };
+        Self {
+            axis,
+            nodetest,
+            filter,
+        }
+    }
+
+    /// The formatted length in bytes.
+    fn len(&self) -> usize {
+        self.axis.len() + self.nodetest.len() + self.filter.map_or(0, |f| f.len() + 2)
+    }
+}
+
+impl fmt::Display for Siblings<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.axis)?;
+        f.write_str(self.nodetest)?;
+        if let Some(filter) = self.filter {
+            f.write_str("[")?;
+            f.write_str(filter)?;
+            f.write_str("]")?;
+        }
+        Ok(())
+    }
+}
+
+/// Append to `out` a test that the node-set `siblings` — a reverse or
+/// forward sibling axis step, predicates and all — has `Exactly`,
+/// `AtLeast` or `AtMost` `k` members, written with positional predicates
+/// rather than `count()`.
 ///
 /// `siblings[k]` is non-empty exactly when there are at least `k`
 /// siblings: on either sibling axis, position counts outwards from the
@@ -304,15 +347,16 @@ enum Bound {
 /// The `[1]` in the zero case is load-bearing: libxml2 takes a
 /// pathological path on a bare `not(preceding-sibling::*)` — minutes for a
 /// list `count()` answers in seconds — which the positional form avoids.
-fn sibling_count_is(siblings: impl fmt::Display, bound: Bound, k: i64) -> String {
+fn push_sibling_count(out: &mut String, siblings: impl fmt::Display, bound: Bound, k: i64) {
     debug_assert!(k >= 0, "a sibling count is never negative");
-    match bound {
-        Bound::Exactly if k == 0 => format!("not({siblings}[1])"),
-        Bound::Exactly => format!("{siblings}[{k}] and not({siblings}[{}])", k + 1),
+    let written = match bound {
+        Bound::Exactly if k == 0 => write!(out, "not({siblings}[1])"),
+        Bound::Exactly => write!(out, "{siblings}[{k}] and not({siblings}[{}])", k + 1),
         Bound::AtLeast => {
             debug_assert!(k > 0, "at least zero siblings is no test at all");
-            format!("{siblings}[{k}]")
+            write!(out, "{siblings}[{k}]")
         }
-        Bound::AtMost => format!("not({siblings}[{}])", k + 1),
-    }
+        Bound::AtMost => write!(out, "not({siblings}[{}])", k + 1),
+    };
+    written.expect("writing to a String cannot fail");
 }
