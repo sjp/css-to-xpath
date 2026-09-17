@@ -100,12 +100,7 @@ impl Condition {
     /// unmatchable, `:is()` of it is a no-op), and the `Option` is where
     /// that decision is made.
     pub(crate) fn join_or(conditions: &[Condition]) -> Option<Condition> {
-        let mut kept: Vec<&Condition> = Vec::new();
-        for condition in conditions {
-            if !kept.iter().any(|k| k.expr == condition.expr) {
-                kept.push(condition);
-            }
-        }
+        let kept = distinct(conditions, |c| c.expr.as_str());
         let first = kept.first()?;
         let exprs: Vec<&str> = kept.iter().map(|c| c.expr.as_str()).collect();
         Some(Condition {
@@ -113,6 +108,41 @@ impl Condition {
             or_group: kept.len() > 1 || first.or_group,
         })
     }
+}
+
+/// The longest list [`distinct`] de-duplicates by pairwise comparison.
+/// Past it the pairwise scan's quadratic cost outgrows a hash set's
+/// fixed one; below it the hash set is the slower of the two, and the
+/// lists nearly every selector produces are one or two long.
+const LINEAR_DISTINCT_MAX: usize = 16;
+
+/// The conditions whose `key` has not been seen earlier in the list, in
+/// the order they were written.
+///
+/// This is the one super-linear step the translator would otherwise
+/// have: a class list or `:is()` argument list of *n* conditions is *n*
+/// same-length strings, so a pairwise scan compares ~n²/2 of them past a
+/// shared prefix. Both strategies keep the first occurrence, so which
+/// one runs never shows in the output.
+fn distinct<'a, K>(
+    conditions: &'a [Condition],
+    key: impl Fn(&'a Condition) -> K,
+) -> Vec<&'a Condition>
+where
+    K: Eq + std::hash::Hash,
+{
+    let mut kept: Vec<&Condition> = Vec::with_capacity(conditions.len());
+    if conditions.len() <= LINEAR_DISTINCT_MAX {
+        for condition in conditions {
+            if !kept.iter().any(|k| key(k) == key(condition)) {
+                kept.push(condition);
+            }
+        }
+    } else {
+        let mut seen = std::collections::HashSet::with_capacity(conditions.len());
+        kept.extend(conditions.iter().filter(|c| seen.insert(key(c))));
+    }
+    kept
 }
 
 /// A partially built XPath expression: path, element, predicates, and
@@ -226,15 +256,7 @@ impl XPathExpr {
                 or_group: false,
             });
         }
-        let mut kept: Vec<&Condition> = Vec::new();
-        for condition in &self.conditions {
-            if !kept
-                .iter()
-                .any(|k| k.expr == condition.expr && k.or_group == condition.or_group)
-            {
-                kept.push(condition);
-            }
-        }
+        let kept = distinct(&self.conditions, |c| (c.expr.as_str(), c.or_group));
         match kept.len() {
             1 => Some(kept[0].clone()),
             _ => {

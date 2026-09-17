@@ -397,3 +397,37 @@ fn repeated_argument_branches_are_folded() {
         "e[(count(preceding-sibling::*[self::a]) + 1) mod 2 = 0 and self::a]",
     );
 }
+
+/// Folding repeats works the same however long the list is: past a
+/// handful of conditions the translator switches from comparing each
+/// pair to hashing, and the result must not show which one ran. Both the
+/// or-join of an argument list and the and-join of a compound are
+/// checked with lists well past that point, repeats interleaved and the
+/// first occurrence of each kept in place.
+#[test]
+fn repeats_fold_the_same_in_long_lists() {
+    let t = Cases::new(Mode::Generic);
+    let class = |i: usize| format!("contains(concat(' ', normalize-space(@class), ' '), ' c{i} ')");
+    // 0, 0, 1, 0, 2, 1, 3, 1, … — each name first appears in ascending order.
+    let order: Vec<usize> = (0..40).flat_map(|i| [i, i / 2]).collect();
+    let expected: Vec<String> = (0..40).map(class).collect();
+
+    let names: Vec<String> = order.iter().map(|i| format!(".c{i}")).collect();
+    assert_eq!(
+        t.xpath(&format!("e:is({})", names.join(", "))),
+        format!("e[{}]", expected.join(" or ")),
+    );
+    assert_eq!(
+        t.xpath(&format!("e{}", names.concat())),
+        format!("e[{}]", expected.join(" and ")),
+    );
+    // A repeated or-group folds too, and keeps its parentheses.
+    let group = format!("{} or {}", class(0), class(1));
+    let mut compound = String::from("e");
+    for i in 0..20 {
+        compound.push_str(&format!(":is(.c0, .c1).c{i}"));
+    }
+    let mut parts = vec![format!("({group})")];
+    parts.extend((0..20).map(class));
+    assert_eq!(t.xpath(&compound), format!("e[{}]", parts.join(" and ")),);
+}

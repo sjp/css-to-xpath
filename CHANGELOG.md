@@ -11,6 +11,14 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Fixed
+
+- Translation time no longer grows with the square of a long class list or
+  `:is()`/`:where()`/`:not()` argument list. Dropping repeated conditions
+  compared every pair, so a selector of 10 000 classes took ~110 ms; long
+  lists are now de-duplicated with a hash set, and the same selector takes
+  ~3 ms. The translated XPath is unchanged.
+
 ## [0.5.2] - 2026-09-05
 
 ### Fixed
