@@ -7,11 +7,39 @@
 //! everything except `:lang()`, which it maps to XPath's `lang()`
 //! function.
 
+use std::sync::LazyLock;
+
 use crate::parser::PseudoClass;
 
 use super::error::{Error, echoed};
 use super::xpath_expr::{Condition, Literal, XPathExpr, ascii_lower, xpath_literal};
 use super::{Kind, Translator};
+
+/// A fragment of an HTML override, built on first use and kept for the
+/// life of the process. The overrides translate to fixed text — each
+/// pseudo-class has a handful of possible outputs, picked by the subject's
+/// pinned local name and by nothing else in the selector — so each arm
+/// builds its output once from the builder functions below, rather than
+/// reassembling it on every translation.
+///
+/// `$build` runs as a static's initialiser, so it can use constants and
+/// functions but not the caller's locals. The `negated if` form keeps both
+/// `$build` and `not($build)`, and picks one by `$negate`.
+macro_rules! cached {
+    ($build:expr) => {{
+        static FRAGMENT: LazyLock<String> = LazyLock::new(|| $build);
+        FRAGMENT.as_str()
+    }};
+    ($build:expr, negated if $negate:expr) => {{
+        static FRAGMENTS: LazyLock<[String; 2]> = LazyLock::new(|| {
+            let expr = $build;
+            // `not(...)` supplies its own grouping, whatever is inside it.
+            let negated = format!("not({expr})");
+            [expr, negated]
+        });
+        FRAGMENTS[usize::from($negate)].as_str()
+    }};
+}
 
 /// Where a translator reads an element's language from, for `:lang()`.
 /// The two halves — which elements carry a language, and what that
@@ -316,22 +344,45 @@ fn textarea_mutable() -> String {
 
 /// `:read-write` — a mutable `input` or `textarea`, or an editable
 /// element. `:read-only` is Selectors 4's complement of it, so both are
-/// built from this one expression and the two partition every element.
-fn read_write(name: Option<&str>) -> Condition {
-    let editable = editable();
-    match name {
-        Some("input") => Condition::or_group(format!("({}) or {editable}", input_mutable())),
-        Some("textarea") => Condition::or_group(format!("({}) or {editable}", textarea_mutable())),
+/// built from this one expression and the two partition every element:
+/// `read_only` asks for the complement.
+fn read_write(name: Option<&str>, read_only: bool) -> Condition {
+    let (expr, or_group) = match name {
+        Some("input") => (
+            cached!(
+                format!("({}) or {}", input_mutable(), editable()),
+                negated if read_only
+            ),
+            true,
+        ),
+        Some("textarea") => (
+            cached!(
+                format!("({}) or {}", textarea_mutable(), editable()),
+                negated if read_only
+            ),
+            true,
+        ),
         // A control is not the only editable thing: any element inside a
         // contenteditable subtree is user-alterable, whatever its name.
-        Some(_) => Condition::plain(editable),
-        None => Condition::or_group(format!(
-            "(local-name() = 'input' and {}) or \
-             (local-name() = 'textarea' and {}) or \
-             {editable}",
-            input_mutable(),
-            textarea_mutable()
-        )),
+        Some(_) => (cached!(editable(), negated if read_only), false),
+        None => (
+            cached!(
+                format!(
+                    "(local-name() = 'input' and {}) or \
+                     (local-name() = 'textarea' and {}) or \
+                     {}",
+                    input_mutable(),
+                    textarea_mutable(),
+                    editable()
+                ),
+                negated if read_only
+            ),
+            true,
+        ),
+    };
+    Condition {
+        expr: expr.to_owned(),
+        or_group: or_group && !read_only,
     }
 }
 
@@ -424,10 +475,10 @@ impl Translator {
                 })
             }
             (Kind::Html, PseudoClass::Required) => {
-                Condition::plain(required_condition(name, "@required"))
+                Condition::plain(required_condition(name, /* optional = */ false))
             }
             (Kind::Html, PseudoClass::Optional) => {
-                Condition::plain(required_condition(name, "not(@required)"))
+                Condition::plain(required_condition(name, /* optional = */ true))
             }
             // `:disabled` and `:enabled` are one expression read two
             // ways, so they always partition the element set.
@@ -441,12 +492,8 @@ impl Translator {
             // wider set: Selectors 4 defines the latter as the
             // complement of the former, so the two partition *every*
             // element, controls and prose alike.
-            (Kind::Html, PseudoClass::ReadWrite) => read_write(name),
-            (Kind::Html, PseudoClass::ReadOnly) => {
-                // `not(...)` supplies its own grouping, whatever is
-                // inside it.
-                Condition::plain(format!("not({})", read_write(name).expr))
-            }
+            (Kind::Html, PseudoClass::ReadWrite) => read_write(name, /* read_only = */ false),
+            (Kind::Html, PseudoClass::ReadOnly) => read_write(name, /* read_only = */ true),
             (Kind::Html, PseudoClass::Default) => default_condition(name),
             (Kind::Html, PseudoClass::PlaceholderShown) => placeholder_shown_condition(name),
             // Everything else never matches.
@@ -515,18 +562,21 @@ impl Translator {
 
 /// `:checked` — a selected `option`, or a checked checkbox/radio `input`.
 fn checked_condition(name: Option<&str>) -> Condition {
-    let type_lc = type_lc();
     match name {
         Some("option") => Condition::plain("@selected"),
-        Some("input") => Condition::plain(format!(
-            "@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')"
-        )),
+        Some("input") => Condition::plain(cached!({
+            let type_lc = type_lc();
+            format!("@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')")
+        })),
         Some(_) => Condition::plain("0"),
-        None => Condition::or_group(format!(
-            "(@selected and local-name() = 'option') or \
-             (@checked and local-name() = 'input' \
-             and ({type_lc} = 'checkbox' or {type_lc} = 'radio'))"
-        )),
+        None => Condition::or_group(cached!({
+            let type_lc = type_lc();
+            format!(
+                "(@selected and local-name() = 'option') or \
+                 (@checked and local-name() = 'input' \
+                 and ({type_lc} = 'checkbox' or {type_lc} = 'radio'))"
+            )
+        })),
     }
 }
 
@@ -534,25 +584,35 @@ fn checked_condition(name: Option<&str>) -> Condition {
 /// or a form's default submit button. The first two arms are `:checked`
 /// read off the same attributes; only the third is new.
 fn default_condition(name: Option<&str>) -> Condition {
-    let type_lc = type_lc();
-    let default_button = is_default_button();
     match name {
         Some("option") => Condition::plain("@selected"),
-        Some("button") => Condition::plain(format!(
-            "not({type_lc} = 'reset' or {type_lc} = 'button') and {default_button}"
-        )),
-        Some("input") => Condition::or_group(format!(
-            "(@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
-             (({type_lc} = 'submit' or {type_lc} = 'image') and {default_button})"
-        )),
+        Some("button") => Condition::plain(cached!({
+            let type_lc = type_lc();
+            format!(
+                "not({type_lc} = 'reset' or {type_lc} = 'button') and {}",
+                is_default_button()
+            )
+        })),
+        Some("input") => Condition::or_group(cached!({
+            let type_lc = type_lc();
+            format!(
+                "(@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
+                 (({type_lc} = 'submit' or {type_lc} = 'image') and {})",
+                is_default_button()
+            )
+        })),
         Some(_) => Condition::plain("0"),
-        None => Condition::or_group(format!(
-            "(@selected and local-name() = 'option') or \
-             (@checked and local-name() = 'input' \
-             and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
-             (({}) and {default_button})",
-            submit_button()
-        )),
+        None => Condition::or_group(cached!({
+            let type_lc = type_lc();
+            format!(
+                "(@selected and local-name() = 'option') or \
+                 (@checked and local-name() = 'input' \
+                 and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
+                 (({}) and {})",
+                submit_button(),
+                is_default_button()
+            )
+        })),
     }
 }
 
@@ -564,30 +624,42 @@ fn placeholder_shown_condition(name: Option<&str>) -> Condition {
     // `input`'s value is the `value` attribute; a `textarea`'s is its
     // text content, and a missing attribute has string-length 0 too, so
     // one `not(string-length(...))` covers "absent or empty" in both.
-    let input = format!(
-        "string-length(@placeholder) > 0 and not({}) and not(string-length(@value))",
-        type_is_one_of(PLACEHOLDER_INERT_TYPES)
-    );
-    let textarea = "string-length(@placeholder) > 0 and not(string-length())";
     match name {
-        Some("input") => Condition::plain(input),
-        Some("textarea") => Condition::plain(textarea),
+        Some("input") => Condition::plain(cached!(placeholder_shown_input())),
+        Some("textarea") => Condition::plain(PLACEHOLDER_SHOWN_TEXTAREA),
         Some(_) => Condition::plain("0"),
-        None => Condition::or_group(format!(
-            "(local-name() = 'input' and {input}) or \
-             (local-name() = 'textarea' and {textarea})"
-        )),
+        None => Condition::or_group(cached!(format!(
+            "(local-name() = 'input' and {}) or \
+             (local-name() = 'textarea' and {PLACEHOLDER_SHOWN_TEXTAREA})",
+            placeholder_shown_input()
+        ))),
     }
 }
 
-/// `:required` and `:optional`, which differ only in `attr` — the test on
-/// the `required` attribute itself — and share the element set.
-fn required_condition(name: Option<&str>, attr: &str) -> String {
-    match name {
-        Some("select" | "textarea") => attr.to_owned(),
-        Some("input") => format!("{attr} and not({})", required_is_inert()),
-        Some(_) => "0".to_owned(),
-        None => format!("{attr} and {}", required_applies()),
+/// `:placeholder-shown` for an `input`.
+fn placeholder_shown_input() -> String {
+    format!(
+        "string-length(@placeholder) > 0 and not({}) and not(string-length(@value))",
+        type_is_one_of(PLACEHOLDER_INERT_TYPES)
+    )
+}
+
+/// `:placeholder-shown` for a `textarea`.
+const PLACEHOLDER_SHOWN_TEXTAREA: &str = "string-length(@placeholder) > 0 and not(string-length())";
+
+/// `:required` and `:optional` (`optional`), which differ only in the test
+/// on the `required` attribute itself and share the element set.
+fn required_condition(name: Option<&str>, optional: bool) -> &'static str {
+    match (name, optional) {
+        (Some("select" | "textarea"), false) => "@required",
+        (Some("select" | "textarea"), true) => "not(@required)",
+        (Some("input"), false) => cached!(format!("@required and not({})", required_is_inert())),
+        (Some("input"), true) => {
+            cached!(format!("not(@required) and not({})", required_is_inert()))
+        }
+        (Some(_), _) => "0",
+        (None, false) => cached!(format!("@required and {}", required_applies())),
+        (None, true) => cached!(format!("not(@required) and {}", required_applies())),
     }
 }
 
@@ -602,37 +674,38 @@ fn required_condition(name: Option<&str>, attr: &str) -> String {
 /// disabled-`fieldset`-ancestor rule for everything the spec applies it
 /// to.
 fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
-    let Some(name) = name else {
-        let (set, actually) = (disableable(), actually_disabled());
-        return Condition::plain(if want_disabled {
-            format!("{set} and ({actually})")
-        } else {
-            format!("{set} and not({actually})")
-        });
-    };
-    if !DISABLEABLE.contains(&name) {
-        return Condition::plain("0");
-    }
-    let (actually, or_group) = match name {
-        "optgroup" => (format!("@disabled or {}", nearest_select_disabled()), true),
-        "option" => (
+    let negate = !want_disabled;
+    let expr = match name {
+        None if want_disabled => {
+            cached!(format!("{} and ({})", disableable(), actually_disabled()))
+        }
+        None => cached!(format!(
+            "{} and not({})",
+            disableable(),
+            actually_disabled()
+        )),
+        Some("optgroup") => cached!(
+            format!("@disabled or {}", nearest_select_disabled()),
+            negated if negate
+        ),
+        Some("option") => cached!(
             format!(
                 "@disabled or {} or {}",
                 option_disabled_by_optgroup(),
                 nearest_select_disabled()
             ),
-            true,
+            negated if negate
         ),
-        _ => (control_actually_disabled(), true),
-    };
-    if want_disabled {
-        Condition {
-            expr: actually,
-            or_group,
+        Some(name) if DISABLEABLE.contains(&name) => {
+            cached!(control_actually_disabled(), negated if negate)
         }
-    } else {
-        // `not(...)` supplies its own grouping, whatever is inside it.
-        Condition::plain(format!("not({actually})"))
+        Some(_) => "0",
+    };
+    // Every pinned arm of "actually disabled" is a disjunction, which its
+    // negation wraps in `not(...)`; the wildcard form groups its own.
+    Condition {
+        expr: expr.to_owned(),
+        or_group: want_disabled && name.is_some_and(|name| DISABLEABLE.contains(&name)),
     }
 }
 

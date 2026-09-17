@@ -47,6 +47,12 @@ select the same nodes, because callers compare, cache and embed the strings.
   `div:is(.a, .b, section > p) span:not(.x)` 52 instead of 134, and
   `body > p.x` under a default namespace 15 instead of 39. Typical selectors
   translate 20–40% faster. The translated XPath is unchanged.
+- The HTML-mode pseudo-classes (`:disabled`, `:enabled`, `:checked`,
+  `:required`, `:optional`, `:read-only`, `:read-write`, `:default`,
+  `:placeholder-shown`) build their fixed XPath once and reuse it, instead
+  of reassembling it on every translation. `:disabled` now takes 7 heap
+  allocations instead of 29 and translates about 4× faster. The translated
+  XPath is unchanged.
 
 ### Fixed
 
