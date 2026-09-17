@@ -27,7 +27,7 @@ fn scope_pseudo() {
     );
     t.check(
         ":scope:first-child",
-        "self::*[count(preceding-sibling::*) = 0]",
+        "self::*[not(preceding-sibling::*[1])]",
     );
     // The prefix is replaced by the self:: anchor, per selector group.
     assert_eq!(

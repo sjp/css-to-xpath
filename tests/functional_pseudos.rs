@@ -119,11 +119,11 @@ fn negation_matching_where_has() {
     // `:last-child` counts *that* element's following siblings.
     t.check(
         "e:has(+ p:last-child)",
-        "e[following-sibling::*[1][count(following-sibling::*) = 0 and self::p]]",
+        "e[following-sibling::*[1][not(following-sibling::*[1]) and self::p]]",
     );
     t.check(
         "e:has(~ p:first-of-type)",
-        "e[following-sibling::p[count(preceding-sibling::p) = 0]]",
+        "e[following-sibling::p[not(preceding-sibling::p[1])]]",
     );
     // Nested :not() (Selectors Level 4).
     t.check(":not(:not(a))", "*[not(not(self::a))]");
@@ -264,7 +264,7 @@ fn complex_pseudo_arguments() {
     );
     t.check(
         "e:is(a:first-child b)",
-        "e[self::b and ancestor::*[count(preceding-sibling::*) = 0 and self::a]]",
+        "e[self::b and ancestor::*[not(preceding-sibling::*[1]) and self::a]]",
     );
     // A step that can never match absorbs the rest of its own
     // conjunction, here the `self::a` the folded element name added.
@@ -361,7 +361,8 @@ fn complex_pseudo_arguments() {
     );
     t.check(
         "e:nth-last-child(3 of a b)",
-        "e[count(following-sibling::*[self::b and ancestor::*[self::a]]) = 2 \
+        "e[following-sibling::*[self::b and ancestor::*[self::a]][2] \
+         and not(following-sibling::*[self::b and ancestor::*[self::a]][3]) \
          and self::b and ancestor::*[self::a]]",
     );
 }

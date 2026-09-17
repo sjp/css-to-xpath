@@ -11,6 +11,23 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Changed
+
+- Structural pseudo-classes test sibling positions instead of counting
+  siblings. `li:first-child` was `li[count(preceding-sibling::*) = 0]` and is
+  now `li[not(preceding-sibling::*[1])]`; `:nth-child(3)` is
+  `preceding-sibling::*[2] and not(preceding-sibling::*[3])`, `:nth-child(n+4)`
+  is `preceding-sibling::*[3]` and `:nth-child(-n+5)` is
+  `not(preceding-sibling::*[5])`. The same applies to the `last`, `only` and
+  `of-type` variants and to `of S` lists. The new forms select the same
+  elements, but an engine can stop at the *k*-th sibling instead of counting
+  all of them, so selecting over *n* siblings is linear rather than quadratic.
+  In libxml2, `:first-child` over 20 000 siblings drops from ~2.3 s to ~25 ms.
+  Only the `mod` test in a repeating series such as `2n+1` still uses
+  `count()`. Because `:nth-child(k of S)` now tests the sibling list twice,
+  nested `of S` lists can grow the output threefold per level instead of
+  twofold; the existing depth and size limits still bound it.
+
 ### Fixed
 
 - Translation time no longer grows with the square of a long class list or

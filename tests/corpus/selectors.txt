@@ -812,6 +812,7 @@ xhtml|p:link
 xhtml|link:link
 xhtml|p:checked
 xhtml|a:enabled
+:nth-child(2 of a)
 :nth-child(2 of :nth-child(2 of a))
 a:any-link
 a:visited

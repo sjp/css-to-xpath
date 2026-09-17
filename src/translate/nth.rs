@@ -5,8 +5,16 @@
 //! `:last-child` as `nth-last-child(0n+1)`, and so on. That collapse is
 //! lossless for translation: a dedicated `:first-child` translation would
 //! produce byte-identical output to the general an+b form on the same
-//! `(a, b)` (e.g. both give `count(preceding-sibling::*) = 0`). Only
+//! `(a, b)` (e.g. both give `not(preceding-sibling::*[1])`). Only
 //! `:only-child`/`:only-of-type` need their own translation.
+//!
+//! # Positional tests, not `count()`
+//!
+//! Every bound on the number of siblings is written as a positional
+//! predicate — see [`sibling_count_is`]. `count()` materialises the whole
+//! axis, so selecting over *n* siblings costs O(n²); `axis::T[k]` lets the
+//! engine stop at the *k*-th node. Only the `mod a` congruence of a
+//! repeating series still has to count.
 
 use selectors::parser::{NthSelectorData, NthType, Selector};
 
@@ -17,24 +25,26 @@ use crate::parser::CssToXpathImpl;
 
 /// The maximum `An+B of S` nesting depth accepted.
 ///
-/// XPath 1.0 has no variables, so `S` must be written out twice: once to
-/// filter the siblings being counted, once to constrain the element being
-/// matched. An `of S` list nested inside another therefore appears in both
-/// copies, and the output doubles per level — a ~500-byte selector nesting
-/// 30 deep asks for tens of gigabytes. The duplication is inherent, so
-/// only a depth limit can bound it. At 8 levels the doubling costs at most
-/// a few hundred times the argument's own translation, and nothing
-/// hand-written nests `of S` at all.
+/// XPath 1.0 has no variables, so `S` must be written out more than once:
+/// to filter the siblings being tested — twice when a test bounds the
+/// sibling count from both sides, as `:nth-child(2 of S)` or
+/// `:nth-child(2n+3 of S)` does — and once more to constrain the element
+/// being matched. An `of S` list nested inside another therefore appears
+/// in every copy, and the output doubles or triples per level — a
+/// ~500-byte selector nesting 30 deep asks for far more memory than
+/// exists. The duplication is inherent, so only a depth limit can bound
+/// it, with [`MAX_NTH_OF_BYTES`] behind it for the arguments the depth
+/// alone does not keep small. Nothing hand-written nests `of S` at all.
 ///
 /// This is far below [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH), which bounds
 /// *recursion* rather than output size and so can afford to be generous.
 pub const MAX_NTH_OF_DEPTH: usize = 8;
 
 /// The maximum size of one `of S` translation, a last line of defence
-/// behind [`MAX_NTH_OF_DEPTH`](crate::MAX_NTH_OF_DEPTH): the doubling is bounded by the depth
-/// limit, but the argument it doubles is bounded only by the length of
+/// behind [`MAX_NTH_OF_DEPTH`](crate::MAX_NTH_OF_DEPTH): the duplication is bounded by the depth
+/// limit, but the argument it copies is bounded only by the length of
 /// the selector, so cap the product too. Checked per nesting level, which
-/// caps the largest string ever built at roughly twice this.
+/// caps the largest string ever built at roughly three times this.
 pub const MAX_NTH_OF_BYTES: usize = 1 << 20;
 
 /// A Level 4 `of S` argument list, carried together with how many other
@@ -64,14 +74,16 @@ impl Translator {
             depth: of_depth,
         });
         match data.ty {
-            // :only-child — sibling counts rather than
+            // :only-child — sibling tests rather than
             // count(parent::*/child::*) = 1, so the root element (whose
             // parent is the document node, not an element) matches, the
             // same way the equivalent :first-child:last-child does.
             NthType::OnlyChild => {
-                xpath.add_condition(
-                    "count(preceding-sibling::*) = 0 and count(following-sibling::*) = 0",
-                );
+                xpath.add_condition(&format!(
+                    "{} and {}",
+                    sibling_count_is("preceding-sibling::*", Bound::Exactly, 0),
+                    sibling_count_is("following-sibling::*", Bound::Exactly, 0),
+                ));
                 Ok(())
             }
             // :only-of-type
@@ -80,8 +92,9 @@ impl Translator {
                     Error::unsupported("`:only-of-type` on the universal selector `*`")
                 })?;
                 xpath.add_condition(&format!(
-                    "count(preceding-sibling::{nodetest}) = 0 \
-                     and count(following-sibling::{nodetest}) = 0"
+                    "{} and {}",
+                    sibling_count_is(&format!("preceding-sibling::{nodetest}"), Bound::Exactly, 0),
+                    sibling_count_is(&format!("following-sibling::{nodetest}"), Bound::Exactly, 0),
                 ));
                 Ok(())
             }
@@ -138,8 +151,8 @@ impl Translator {
         // CSS Level 4: when a selector list is provided, the current
         // element must match it too. The same OR-joined condition is
         // appended in every branch *and* rendered into the sibling
-        // predicate below, so each level of `of S` nesting doubles the
-        // output: both limits guard that doubling.
+        // predicate below, so each level of `of S` nesting doubles or
+        // triples the output: both limits guard that growth.
         // A trivially-true list (it contains a universal argument)
         // constrains nothing, like a plain :nth-child.
         let current_element_check = match of {
@@ -182,7 +195,8 @@ impl Translator {
         // ~~~~~~~~~~~~~~~~~~~~~~~
         // an+b-1 siblings with (b-1)<0 needs a>0 to reach zero, so for
         // a<=0 nothing can match. Writing it as `0` rather than letting
-        // the a==0 branch below emit `count(...) = -1` says so plainly.
+        // the a==0 branch below ask for a negative sibling count says so
+        // plainly.
         if a <= 0 && b_min_1 < 0 {
             xpath.add_condition("0");
             if let Some(check) = current_element_check {
@@ -198,13 +212,13 @@ impl Translator {
             None => String::new(),
         };
 
-        // count siblings before or after the element
+        // the siblings before or after the element
         let axis = if last { "following" } else { "preceding" };
-        let siblings_count = format!("count({axis}-sibling::{nodetest}{selector_predicate})");
+        let siblings = format!("{axis}-sibling::{nodetest}{selector_predicate}");
 
         // special case of fixed position: nth-*(0n+b)
         if a == 0 {
-            xpath.add_condition(&format!("{siblings_count} = {b_min_1}"));
+            xpath.add_condition(&sibling_count_is(&siblings, Bound::Exactly, b_min_1));
             if let Some(check) = current_element_check {
                 xpath.push_condition(check);
             }
@@ -218,18 +232,19 @@ impl Translator {
             // (b-1)<=0 an "n" exists to satisfy this; the predicate is
             // only interesting if (b-1)>0
             if b_min_1 > 0 {
-                expr.push(format!("{siblings_count} >= {b_min_1}"));
+                expr.push(sibling_count_is(&siblings, Bound::AtLeast, b_min_1));
             }
         } else {
             // a<0 with (b-1)<0 was the early exit above; otherwise:
-            expr.push(format!("{siblings_count} <= {b_min_1}"));
+            expr.push(sibling_count_is(&siblings, Bound::AtMost, b_min_1));
         }
 
         // operations modulo 1 or -1 are simpler: the >=/<= test above
         // already covers them
         if a.abs() != 1 {
-            // count(***-sibling::***) - (b-1) = 0 (mod a)
-            let mut left = siblings_count;
+            // count(***-sibling::***) - (b-1) = 0 (mod a) — the one test
+            // with no positional equivalent
+            let mut left = format!("count({siblings})");
 
             // apply "modulo a" on the 2nd term, -(b-1), to simplify things
             // like "(... +6) % -3", and also make it positive with |a|
@@ -252,5 +267,38 @@ impl Translator {
         }
 
         Ok(())
+    }
+}
+
+/// How [`sibling_count_is`] bounds the number of siblings.
+#[derive(Clone, Copy)]
+enum Bound {
+    Exactly,
+    AtLeast,
+    AtMost,
+}
+
+/// A test that the node-set `siblings` — a reverse or forward sibling
+/// axis step, predicates and all — has `Exactly`, `AtLeast` or `AtMost`
+/// `k` members, written with positional predicates rather than `count()`.
+///
+/// `siblings[k]` is non-empty exactly when there are at least `k`
+/// siblings: on either sibling axis, position counts outwards from the
+/// context node. A trailing `[S]` in `siblings` filters before the
+/// position applies, so `[S][k]` is the `k`-th sibling matching `S`.
+///
+/// The `[1]` in the zero case is load-bearing: libxml2 takes a
+/// pathological path on a bare `not(preceding-sibling::*)` — minutes for a
+/// list `count()` answers in seconds — which the positional form avoids.
+fn sibling_count_is(siblings: &str, bound: Bound, k: i64) -> String {
+    debug_assert!(k >= 0, "a sibling count is never negative");
+    match bound {
+        Bound::Exactly if k == 0 => format!("not({siblings}[1])"),
+        Bound::Exactly => format!("{siblings}[{k}] and not({siblings}[{}])", k + 1),
+        Bound::AtLeast => {
+            debug_assert!(k > 0, "at least zero siblings is no test at all");
+            format!("{siblings}[{k}]")
+        }
+        Bound::AtMost => format!("not({siblings}[{}])", k + 1),
     }
 }

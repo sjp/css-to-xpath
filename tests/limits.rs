@@ -89,11 +89,12 @@ fn long_chains_translate() {
 }
 
 /// The size of an `of S` translation is bounded. XPath 1.0 has no
-/// variables, so `S` is written out twice — into the sibling
-/// predicate and into the current-element check — and a nested `of S`
-/// lands in both copies, doubling the output per level. Only a limit
-/// can fix that, so both the nesting depth and the size of one level
-/// are capped.
+/// variables, so `S` is written out more than once — into the sibling
+/// tests (twice, when they bound the count from both sides as
+/// `:nth-child(2 of S)` does) and into the current-element check — and a
+/// nested `of S` lands in every copy, tripling the output per level.
+/// Only a limit can fix that, so both the nesting depth and the size of
+/// one level are capped.
 #[test]
 fn nth_child_of_nesting_is_bounded() {
     let mut t = Cases::new(Mode::Generic);
@@ -106,16 +107,19 @@ fn nth_child_of_nesting_is_bounded() {
         offset: None,
     };
 
-    // Two levels, in full: `a` appears four times, not twice.
+    // One level: `a` appears three times.
+    const S: &str = "preceding-sibling::*[self::a][1] \
+                     and not(preceding-sibling::*[self::a][2]) and self::a";
+    t.check(&nest(1), format!("*[{S}]"));
+    // Two levels, in full: `a` appears nine times, not three.
     t.check(
         &nest(2),
-        "*[count(preceding-sibling::*[count(preceding-sibling::*[self::a]) = 1 \
-          and self::a]) = 1 \
-          and count(preceding-sibling::*[self::a]) = 1 and self::a]",
+        format!("*[preceding-sibling::*[{S}][1] and not(preceding-sibling::*[{S}][2]) and {S}]"),
     );
-    // The doubling itself: each level is a little over twice the last.
-    assert_eq!(t.xpath(&nest(4)).len(), 685);
-    assert_eq!(t.xpath(&nest(8)).len(), 11_485);
+    // The tripling itself: each level is a little over three times the
+    // last.
+    assert_eq!(t.xpath(&nest(4)).len(), 3_170);
+    assert_eq!(t.xpath(&nest(8)).len(), 259_130);
 
     // Past the limit it is an error, and a cheap one: the depth is
     // checked before descending, so nothing exponential is built.
@@ -169,9 +173,9 @@ fn nth_child_of_nesting_is_bounded() {
             ")".repeat(8)
         )
     };
-    assert!(t.css_to_xpath(&big(200), "").is_ok());
+    assert!(t.css_to_xpath(&big(20), "").is_ok());
     assert_eq!(
-        t.css_to_xpath(&big(800), "").unwrap_err(),
+        t.css_to_xpath(&big(200), "").unwrap_err(),
         css_to_xpath::Error::Unsupported {
             construct: "an `An+B of S` selector list translating to more than 1048576 bytes"
                 .to_owned(),

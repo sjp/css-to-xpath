@@ -76,7 +76,7 @@ fn unsafe_names_and_escapes() {
     t.check(
         "svg|di\\[v:first-of-type",
         "svg:*[local-name() = 'di[v' \
-         and count(preceding-sibling::svg:*[local-name() = 'di[v']) = 0]",
+         and not(preceding-sibling::svg:*[local-name() = 'di[v'][1])]",
     );
     // A prefix that is not an XPath name has no such fallback and
     // errors; see `unsupported_errors` in `errors.rs`.
@@ -117,13 +117,13 @@ fn an_escaped_asterisk_names_an_element() {
     // by it instead of refusing the compound as universal.
     t.check(
         "*|\\2a:first-of-type",
-        "*[local-name() = '*' and count(preceding-sibling::*[local-name() = '*']) = 0]",
+        "*[local-name() = '*' and not(preceding-sibling::*[local-name() = '*'][1])]",
     );
     t.check(
         "\\2a:only-of-type",
         "*[name() = '*' and namespace-uri() = '' \
-         and count(preceding-sibling::*[name() = '*' and namespace-uri() = '']) = 0 \
-         and count(following-sibling::*[name() = '*' and namespace-uri() = '']) = 0]",
+         and not(preceding-sibling::*[name() = '*' and namespace-uri() = ''][1]) \
+         and not(following-sibling::*[name() = '*' and namespace-uri() = ''][1])]",
     );
     // Everywhere else a type selector can be written.
     t.check("e:is(*|\\2a)", "e[local-name() = '*']");
@@ -166,7 +166,7 @@ fn non_ascii_namespace_prefixes() {
     t.check("e + nsé|div", "e/following-sibling::*[1][self::nsé:div]");
     t.check(
         "nsé|div:first-of-type",
-        "nsé:div[count(preceding-sibling::nsé:div) = 0]",
+        "nsé:div[not(preceding-sibling::nsé:div[1])]",
     );
     // What the rule still rejects is a prefix that is not a name at
     // all; see `unsupported_errors` in `errors.rs`.
@@ -199,7 +199,7 @@ fn unprefixed_names_mean_the_null_namespace_everywhere() {
     );
     t.check(
         "e:nth-child(1 of p)",
-        "e[count(preceding-sibling::*[self::p]) = 0 and self::p]",
+        "e[not(preceding-sibling::*[self::p][1]) and self::p]",
     );
     // :has() looks forward, so the name stays in the node test of the
     // existence path — except under `+`, where the [1] position
@@ -222,7 +222,7 @@ fn unprefixed_names_mean_the_null_namespace_everywhere() {
     t.check("e:has(+ é)", format!("e[following-sibling::*[1][{E}]]"));
     t.check(
         "e:nth-child(1 of é)",
-        format!("e[count(preceding-sibling::*[{E}]) = 0 and {E}]"),
+        format!("e[not(preceding-sibling::*[{E}][1]) and {E}]"),
     );
 
     // `*|e` asks for the name in any namespace, and it too means the
@@ -258,11 +258,14 @@ fn default_namespace_qualifies_unprefixed_type_selectors() {
     t.check("p:has(> a)", "h:p[child::h:a]");
     t.check(
         "e:nth-child(1 of p)",
-        "h:e[count(preceding-sibling::*[self::h:p]) = 0 and self::h:p]",
+        "h:e[not(preceding-sibling::*[self::h:p][1]) and self::h:p]",
     );
     // The of-type family counts by the qualified node test, so the
-    // prefix reaches the sibling count too.
-    t.check("p:nth-of-type(2)", "h:p[count(preceding-sibling::h:p) = 1]");
+    // prefix reaches the sibling test too.
+    t.check(
+        "p:nth-of-type(2)",
+        "h:p[preceding-sibling::h:p[1] and not(preceding-sibling::h:p[2])]",
+    );
 
     // The implicit universal of a type-less compound, including the
     // written `*` and `:scope`.
