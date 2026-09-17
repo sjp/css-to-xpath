@@ -3,7 +3,7 @@
 use selectors::attr::AttrSelectorOperator;
 
 use super::error::Error;
-use super::xpath_expr::{XPathExpr, xpath_literal};
+use super::xpath_expr::{Literal, XPathExpr, xpath_literal};
 
 /// Dispatch over `[attr <op> value]`. Attribute *values* keep their
 /// case under every translator. Empty values are fine —
@@ -38,7 +38,7 @@ pub(crate) fn attrib_operator(
 
 /// `[attr=value]`.
 pub(crate) fn attrib_equals(xpath: &mut XPathExpr, name: &str, value: &str) {
-    xpath.add_condition(&format!("{name} = {}", xpath_literal(value)));
+    xpath.add_condition(format!("{name} = {}", xpath_literal(value)));
 }
 
 /// `[attr~=value]`, and so `.class`. The value must be non-empty and
@@ -60,9 +60,9 @@ pub(crate) fn attrib_includes(xpath: &mut XPathExpr, name: &str, value: &str) {
             .chars()
             .any(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{c}'));
     if matchable {
-        xpath.add_condition(&format!(
+        xpath.add_condition(format!(
             "contains(concat(' ', normalize-space({name}), ' '), {})",
-            xpath_literal(&format!(" {value} "))
+            Literal::affixed(" ", value, " ")
         ));
     } else {
         xpath.add_condition("0");
@@ -72,17 +72,17 @@ pub(crate) fn attrib_includes(xpath: &mut XPathExpr, name: &str, value: &str) {
 /// `[attr|=value]`. An or-group, so it is parenthesized when it is
 /// conjoined with the rest of a compound.
 pub(crate) fn attrib_dashmatch(xpath: &mut XPathExpr, name: &str, value: &str) {
-    xpath.add_or_condition(&format!(
+    xpath.add_or_condition(format!(
         "{name} = {} or starts-with({name}, {})",
         xpath_literal(value),
-        xpath_literal(&format!("{value}-"))
+        Literal::affixed("", value, "-")
     ));
 }
 
 /// `[attr^=value]`.
 pub(crate) fn attrib_prefixmatch(xpath: &mut XPathExpr, name: &str, value: &str) {
     if !value.is_empty() {
-        xpath.add_condition(&format!("starts-with({name}, {})", xpath_literal(value)));
+        xpath.add_condition(format!("starts-with({name}, {})", xpath_literal(value)));
     } else {
         xpath.add_condition("0");
     }
@@ -94,7 +94,7 @@ pub(crate) fn attrib_prefixmatch(xpath: &mut XPathExpr, name: &str, value: &str)
 pub(crate) fn attrib_suffixmatch(xpath: &mut XPathExpr, name: &str, value: &str) {
     if !value.is_empty() {
         let offset = value.chars().count() - 1;
-        xpath.add_condition(&format!(
+        xpath.add_condition(format!(
             "substring({name}, string-length({name}) - {offset}) = {}",
             xpath_literal(value)
         ));
@@ -106,7 +106,7 @@ pub(crate) fn attrib_suffixmatch(xpath: &mut XPathExpr, name: &str, value: &str)
 /// `[attr*=value]`.
 pub(crate) fn attrib_substringmatch(xpath: &mut XPathExpr, name: &str, value: &str) {
     if !value.is_empty() {
-        xpath.add_condition(&format!("contains({name}, {})", xpath_literal(value)));
+        xpath.add_condition(format!("contains({name}, {})", xpath_literal(value)));
     } else {
         xpath.add_condition("0");
     }

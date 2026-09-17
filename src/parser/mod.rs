@@ -201,9 +201,10 @@ pub(crate) struct CssToXpathParser<'a> {
     /// [`parse`] sets this, and it then rejects every recovery bar the
     /// empty argument list.
     forgiving: bool,
-    /// The caller's default namespace prefix, or `None` for the sentinel
-    /// (see [`CssToXpathParser::default_namespace`]).
-    default_namespace: Option<&'a str>,
+    /// The caller's default namespace prefix, or the empty sentinel
+    /// (see [`CssToXpathParser::default_namespace`]). Built once per
+    /// parse, since Servo asks for it once per compound.
+    default_namespace: &'a CssString,
 }
 
 impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
@@ -359,7 +360,7 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
     /// argument, and a written `h|e` naming the same prefix collapses
     /// onto the same component.
     fn default_namespace(&self) -> Option<CssString> {
-        Some(CssString::from(self.default_namespace.unwrap_or("")))
+        Some(self.default_namespace.clone())
     }
 }
 
@@ -725,11 +726,12 @@ fn parse_lists(
     css: &str,
     default_namespace: Option<&str>,
 ) -> Result<SelectorList<CssToXpathImpl>, Error> {
-    let strict = match parse_list(css, false, default_namespace) {
+    let default_namespace = CssString::from(default_namespace.unwrap_or(""));
+    let strict = match parse_list(css, false, &default_namespace) {
         Ok(list) => return Ok(list),
         Err(e) => e,
     };
-    match parse_list(css, true, default_namespace) {
+    match parse_list(css, true, &default_namespace) {
         Ok(list) if dropped_nothing(&list) => Ok(list),
         // The forgiving parse recovered from a genuinely invalid
         // argument: the strict error is the one that names it, and
@@ -748,7 +750,7 @@ fn parse_lists(
 fn parse_list<'i>(
     css: &'i str,
     forgiving: bool,
-    default_namespace: Option<&str>,
+    default_namespace: &CssString,
 ) -> Result<SelectorList<CssToXpathImpl>, ParseFailure<'i>> {
     let mut input = ParserInput::new(css);
     let mut parser = CssParser::new(&mut input);

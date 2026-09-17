@@ -290,23 +290,31 @@ impl Translator {
     /// or uses an unsupported construct.
     pub fn css_to_xpath(&self, css: &str, prefix: &str) -> Result<String, Error> {
         let list = parser::parse(css, self.default_namespace_prefix())?;
-        let mut parts: Vec<String> = Vec::new();
-        for sel in list.slice() {
-            parts.push(self.selector_to_xpath(sel, prefix)?);
+        let mut out = String::new();
+        for (i, sel) in list.slice().iter().enumerate() {
+            if i > 0 {
+                out.push_str(" | ");
+            }
+            self.selector_to_xpath(sel, prefix, &mut out)?;
         }
-        Ok(parts.join(" | "))
+        Ok(out)
     }
 
-    /// Iteration bridge: Servo iterates compound selectors right-to-left
-    /// (match order), but the XPath is built left-to-right. Collect
-    /// Servo's sequences + combinators, then fold from the leftmost
-    /// compound.
+    /// Translate one selector group onto the end of `out`, folding from
+    /// the leftmost compound rightwards.
+    ///
+    /// The expression is built on `out`'s own buffer, so nothing already
+    /// written is copied. On error, what `out` holds is unspecified.
     fn selector_to_xpath(
         &self,
         selector: &Selector<CssToXpathImpl>,
         prefix: &str,
-    ) -> Result<String, Error> {
-        let seqs = collect_seqs(selector);
+        out: &mut String,
+    ) -> Result<(), Error> {
+        let mut compounds = compounds_left_to_right(selector);
+        let (leftmost, _) = compounds
+            .next()
+            .expect("a selector has at least one compound");
 
         // :scope is the node the XPath is evaluated from. In the leftmost
         // compound it anchors the expression on the self:: axis, which
@@ -318,43 +326,35 @@ impl Translator {
         // which knows where it is and so reports the same construct with
         // a caret; this check stays as the backstop for one Servo can
         // introduce with no source text of its own (`ImplicitScope`).
-        let leftmost = seqs.len() - 1;
-        for (compound, _) in &seqs[..leftmost] {
-            if compound.iter().any(|c| matches!(c, Component::Scope)) {
-                return Err(Error::unsupported(
-                    "the `:scope` pseudo-class outside the leftmost compound",
-                ));
-            }
-        }
-        let scope_anchored = seqs[leftmost]
-            .0
+        // Match order stores the leftmost compound last.
+        let raw = selector.iter_raw_match_order().as_slice();
+        let right_of_leftmost = &raw[..raw.len() - leftmost.len()];
+        if right_of_leftmost
             .iter()
-            .any(|c| matches!(c, Component::Scope));
+            .any(|c| matches!(c, Component::Scope))
+        {
+            return Err(Error::unsupported(
+                "the `:scope` pseudo-class outside the leftmost compound",
+            ));
+        }
+        let scope_anchored = leftmost.iter().any(|c| matches!(c, Component::Scope));
 
         // Leftmost compound first, then fold rightwards.
-        let mut xpath = if scope_anchored {
-            let compound: Vec<&Component<CssToXpathImpl>> = seqs[leftmost]
-                .0
-                .iter()
-                .filter(|c| !matches!(c, Component::Scope))
-                .copied()
-                .collect();
-            let mut xp = self.compound_to_xpath(&compound, 0)?;
-            xp.path = "self::".to_owned();
-            xp
-        } else {
-            self.compound_to_xpath(&seqs[leftmost].0, 0)?
-        };
-        for i in (0..leftmost).rev() {
-            let combinator = seqs[i]
-                .1
-                .ok_or_else(|| Error::unsupported("an unexpected selector structure"))?;
-            let right = self.compound_to_xpath(&seqs[i].0, 0)?;
-            xpath = apply_combinator(combinator, xpath, &right)?;
+        let mut xpath = self.compound_to_xpath(
+            leftmost.iter().filter(|c| !matches!(c, Component::Scope)),
+            0,
+        )?;
+        let mut path = std::mem::take(out);
+        path.push_str(if scope_anchored { "self::" } else { prefix });
+        xpath.path = path;
+        for (compound, combinator) in compounds {
+            let combinator =
+                combinator.ok_or_else(|| Error::unsupported("an unexpected selector structure"))?;
+            let right = self.compound_to_xpath(compound, 0)?;
+            xpath = apply_combinator(combinator, xpath, right)?;
         }
-
-        let prefix = if scope_anchored { "" } else { prefix };
-        Ok(format!("{prefix}{}", xpath.render()))
+        xpath.render_into(out);
+        Ok(())
     }
 
     /// Translate one compound selector (a sequence of simple selectors).
@@ -364,9 +364,9 @@ impl Translator {
     ///
     /// `of_depth` is how many `An+B of S` argument lists this compound is
     /// nested inside; see [`nth::MAX_NTH_OF_DEPTH`].
-    fn compound_to_xpath(
+    fn compound_to_xpath<'c>(
         &self,
-        components: &[&Component<CssToXpathImpl>],
+        components: impl IntoIterator<Item = &'c Component<CssToXpathImpl>>,
         of_depth: usize,
     ) -> Result<XPathExpr, Error> {
         let mut ns = NsConstraint::None;
@@ -427,21 +427,33 @@ impl Translator {
         // character `*` (css-syntax-3 §4.3.7, Selectors 4 §5.1–5.2).
         // The two are told apart here by `element`, never by comparing
         // the name to "*", which would read `*|\2a` as `*|*`.
-        let universal = element.is_none();
-        let (mut name, safe) = match element {
-            None => ("*".to_owned(), true),
-            Some(e) => {
-                let safe = is_safe_name(e);
-                let e = if self.lower_case_element_names() {
-                    e.to_ascii_lowercase()
-                } else {
-                    e.to_owned()
-                };
-                (e, safe)
-            }
+        let Some(element) = element else {
+            return Ok(match ns {
+                // '|*': every element with no namespace. A bare '*' is
+                // every element whatever its namespace, so the constraint
+                // has to be written out.
+                NsConstraint::ExplicitNone => {
+                    let mut xpath = XPathExpr::new("*");
+                    xpath.add_condition("namespace-uri() = ''");
+                    xpath
+                }
+                NsConstraint::Prefix(prefix) if !is_ncname(prefix) => {
+                    return Err(unsafe_prefix_error(prefix));
+                }
+                NsConstraint::Prefix(prefix) => XPathExpr::new(format!("{prefix}:*")),
+                // '*' and '*|*' translate to an unqualified name test.
+                NsConstraint::None | NsConstraint::Any => XPathExpr::new("*"),
+            });
         };
+        let safe = is_safe_name(element);
+        let name =
+            if self.lower_case_element_names() && element.bytes().any(|b| b.is_ascii_uppercase()) {
+                Cow::Owned(element.to_ascii_lowercase())
+            } else {
+                Cow::Borrowed(element)
+            };
         match ns {
-            NsConstraint::Any if !universal => {
+            NsConstraint::Any => {
                 // '*|e': 'e' in any namespace, including none. An unprefixed
                 // XPath name test only matches the null namespace, so test
                 // against local-name() instead. The of-type nodetest counts
@@ -452,17 +464,9 @@ impl Translator {
                 let cond = format!("local-name() = {}", xpath_expr::xpath_literal(&name));
                 let mut xpath = XPathExpr::new("*");
                 xpath.name_test = Some(format!("*[{cond}]"));
-                xpath.local_name = Some(name);
-                xpath.add_condition(&cond);
-                return Ok(xpath);
-            }
-            NsConstraint::ExplicitNone if universal => {
-                // '|*': every element with no namespace. A bare '*' is
-                // every element whatever its namespace, so the constraint
-                // has to be written out.
-                let mut xpath = XPathExpr::new("*");
-                xpath.add_condition("namespace-uri() = ''");
-                return Ok(xpath);
+                xpath.folded_name = Some(name.into_owned());
+                xpath.add_condition(cond);
+                Ok(xpath)
             }
             NsConstraint::None | NsConstraint::ExplicitNone if !safe => {
                 // A safe 'e' or '|e' is just an unprefixed XPath name
@@ -480,19 +484,17 @@ impl Translator {
                 xpath.name_test = Some(format!("*[{cond} and namespace-uri() = '']"));
                 // name() on an element with no namespace is its local
                 // name, which the namespace-uri() pin below makes exact.
-                xpath.local_name = Some(name);
-                xpath.add_condition(&cond);
+                xpath.folded_name = Some(name.into_owned());
+                xpath.add_condition(cond);
                 xpath.add_condition("namespace-uri() = ''");
-                return Ok(xpath);
+                Ok(xpath)
             }
             // A prefix is written into the node test as it stands
             // (prefixes are case-sensitive:
             // https://www.w3.org/TR/css-namespaces-3/#prefixes), so it
             // has to be a name XPath can parse — a looser test than the
             // local name's, which has the local-name() fallback.
-            NsConstraint::Prefix(prefix) if !is_ncname(prefix) => {
-                return Err(unsafe_prefix_error(prefix));
-            }
+            NsConstraint::Prefix(prefix) if !is_ncname(prefix) => Err(unsafe_prefix_error(prefix)),
             NsConstraint::Prefix(prefix) if !safe => {
                 // Only the local name needs quoting: keep the prefix in
                 // the node test so the engine still resolves it through
@@ -501,23 +503,22 @@ impl Translator {
                 // test would instead match only documents that happen to
                 // use that very prefix.
                 let cond = format!("local-name() = {}", xpath_expr::xpath_literal(&name));
-                let mut xpath = XPathExpr::new(&format!("{prefix}:*"));
+                let mut xpath = XPathExpr::new(format!("{prefix}:*"));
                 // The of-type nodetest must carry the local-name test set
                 // by the condition below.
                 xpath.name_test = Some(format!("{prefix}:*[{cond}]"));
-                xpath.local_name = Some(name);
-                xpath.add_condition(&cond);
-                return Ok(xpath);
+                xpath.folded_name = Some(name.into_owned());
+                xpath.add_condition(cond);
+                Ok(xpath)
             }
-            NsConstraint::Prefix(prefix) => {
-                name = format!("{prefix}:{name}");
+            // Every name needing quoting was handled above, so what is
+            // left is a plain node test: 'e' or 'ns:e'.
+            NsConstraint::Prefix(prefix) => Ok(XPathExpr::new(format!("{prefix}:{name}"))),
+            // 'e' and '|e' translate to an unqualified name test.
+            NsConstraint::None | NsConstraint::ExplicitNone => {
+                Ok(XPathExpr::new(name.into_owned()))
             }
-            // 'e', '|e' and '*|*' translate to an unqualified name test.
-            _ => {}
         }
-        // Every name needing quoting was handled above, so what is left
-        // is a plain node test: '*', 'e', 'ns:e' or 'ns:*'.
-        Ok(XPathExpr::new(&name))
     }
 
     /// Dispatch over the non-element components of a compound — the
@@ -552,11 +553,11 @@ impl Translator {
             Component::Negation(list) => {
                 let joined = self
                     .arg_conditions(list.slice(), ":not()", of_depth)?
-                    .and_then(|conditions| Condition::join_or(&conditions));
+                    .and_then(Condition::join_or);
                 match joined {
                     // not(...) supplies its own grouping, so the
                     // or-join needs no parentheses.
-                    Some(joined) => xpath.add_condition(&format!("not({})", joined.expr)),
+                    Some(joined) => xpath.add_condition(format!("not({})", joined.expr)),
                     // A universal argument makes the negation unmatchable.
                     None => xpath.add_condition("0"),
                 }
@@ -581,7 +582,7 @@ impl Translator {
                 // None means an argument matched everything, so the whole
                 // pseudo-class is a no-op constraint.
                 if let Some(conditions) = self.arg_conditions(list.slice(), context, of_depth)?
-                    && let Some(joined) = Condition::join_or(&conditions)
+                    && let Some(joined) = Condition::join_or(conditions)
                 {
                     xpath.push_condition(joined);
                 }
@@ -603,7 +604,7 @@ impl Translator {
             }
             Component::AttributeInNoNamespaceExists { local_name, .. } => {
                 let attrib = self.attrib_expr(NsConstraint::None, local_name.as_str())?;
-                xpath.add_condition(&attrib);
+                xpath.add_condition(attrib);
                 Ok(())
             }
             Component::AttributeInNoNamespace {
@@ -630,7 +631,7 @@ impl Translator {
                 let attrib = self.attrib_expr(ns, attr.local_name.as_str())?;
                 match attr.operation {
                     ParsedAttrSelectorOperation::Exists => {
-                        xpath.add_condition(&attrib);
+                        xpath.add_condition(attrib);
                         Ok(())
                     }
                     ParsedAttrSelectorOperation::WithValue {
@@ -660,25 +661,27 @@ impl Translator {
         relatives: &[RelativeSelector<CssToXpathImpl>],
         of_depth: usize,
     ) -> Result<(), Error> {
-        let mut conditions: Vec<String> = Vec::new();
-        for relative in relatives.iter() {
-            let seqs = collect_seqs(&relative.selector);
-            // The leftmost sequence is the anchor (the candidate element
-            // itself); its combinator slot carries the argument's leading
-            // combinator.
-            let anchor = &seqs[seqs.len() - 1].0;
-            let anchor_only = seqs.len() >= 2
-                && anchor.len() == 1
-                && matches!(anchor[0], Component::RelativeSelectorAnchor);
-            if !anchor_only {
+        // Every argument's test, written straight into one union.
+        let mut union = String::new();
+        for (arg, relative) in relatives.iter().enumerate() {
+            let mut compounds = compounds_left_to_right(&relative.selector).peekable();
+            // The leftmost compound is the anchor (the candidate element
+            // itself); the combinator to the right of it is the
+            // argument's leading combinator.
+            let anchor_only = matches!(
+                compounds.next(),
+                Some(([Component::RelativeSelectorAnchor], _))
+            );
+            if !anchor_only || compounds.peek().is_none() {
                 return Err(Error::unsupported(
                     "an unexpected selector structure inside `:has()`",
                 ));
             }
-            let mut test = String::new();
-            for i in (0..seqs.len() - 1).rev() {
-                let first = i == seqs.len() - 2;
-                let combinator = seqs[i].1;
+            if arg > 0 {
+                union.push_str(" | ");
+            }
+            for (step, (compound, combinator)) in compounds.enumerate() {
+                let first = step == 0;
                 // The first step is an axis from the candidate element;
                 // later steps join onto the path.
                 let axis = match (first, combinator) {
@@ -698,7 +701,7 @@ impl Translator {
                         )));
                     }
                 };
-                let mut sub = self.compound_to_xpath(&seqs[i].0, of_depth)?;
+                let mut sub = self.compound_to_xpath(compound, of_depth)?;
                 // The name stays in the node test (`.//p`, `.//svg:g`) so
                 // it means exactly what it means at the top level and a
                 // prefix resolves through the namespace map — except under
@@ -710,19 +713,18 @@ impl Translator {
                     // position before applying the match conditions.
                     sub.add_predicate("1");
                 }
-                test.push_str(axis);
-                test.push_str(&sub.render());
+                union.push_str(axis);
+                sub.render_into(&mut union);
             }
-            conditions.push(test);
         }
         // A `:has()` list of several arguments renders as a union, which
         // binds tighter than `and` in XPath 1.0 and so needs no
         // parentheses — but reads as though it might, so it is marked an
         // or-group and parenthesized wherever an or-group would be.
-        match conditions.len() {
+        match relatives.len() {
             0 => {}
-            1 => xpath.add_condition(&conditions[0]),
-            _ => xpath.add_or_condition(&conditions.join(" | ")),
+            1 => xpath.add_condition(union),
+            _ => xpath.add_or_condition(union),
         }
         Ok(())
     }
@@ -744,12 +746,12 @@ impl Translator {
     /// Folding means comparing the ASCII-lowercased attribute (via XPath
     /// `translate()`) against the ASCII-lowercased value. An empty value needs
     /// no lowercasing, and skipping it keeps the existence tests exact.
-    fn apply_case_flag(
+    fn apply_case_flag<'v>(
         &self,
         attrib: String,
-        value: &str,
+        value: &'v str,
         case_sensitivity: ParsedCaseSensitivity,
-    ) -> (String, String) {
+    ) -> (String, Cow<'v, str>) {
         let fold = match case_sensitivity {
             // `[attr="value" i]`.
             ParsedCaseSensitivity::AsciiCaseInsensitive => true,
@@ -765,9 +767,12 @@ impl Translator {
             }
         };
         if fold && !value.is_empty() {
-            (xpath_expr::ascii_lower(&attrib), value.to_ascii_lowercase())
+            (
+                xpath_expr::ascii_lower(&attrib),
+                Cow::Owned(value.to_ascii_lowercase()),
+            )
         } else {
-            (attrib, value.to_owned())
+            (attrib, Cow::Borrowed(value))
         }
     }
 
@@ -830,8 +835,7 @@ impl Translator {
         let mut conditions = Vec::new();
         let mut trivially_true = false;
         for selector in selectors {
-            let seqs = collect_seqs(selector);
-            match self.argument_condition(&seqs, context, of_depth)? {
+            match self.argument_condition(selector, context, of_depth)? {
                 None => trivially_true = true,
                 Some(condition) => conditions.push(condition),
             }
@@ -860,7 +864,7 @@ impl Translator {
     /// first) to wrap each condition inside the one to its right.
     ///
     /// A compound that cannot match ends the chain, the same way a `0`
-    /// absorbs the rest of a conjunction in [`XPathExpr::condition`]:
+    /// absorbs the rest of a conjunction in [`XPathExpr::write_condition`]:
     /// the existence test it is conjoined with, and every compound
     /// further left, are dropped, so `:is(a > b:is())` is `0` rather
     /// than `0 and parent::*[self::a]`. The compounds to its right are
@@ -873,21 +877,27 @@ impl Translator {
     /// `None` means the chain imposes no condition (a bare `*` argument).
     fn argument_condition(
         &self,
-        seqs: &[(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)],
+        selector: &Selector<CssToXpathImpl>,
         context: &str,
         of_depth: usize,
     ) -> Result<Option<Condition>, Error> {
-        let mut subs: Vec<XPathExpr> = Vec::with_capacity(seqs.len());
-        // `axes[i]` points back at where the left-hand side of `seqs[i]`'s
+        // The compounds, rightmost first.
+        let mut subs: Vec<XPathExpr> = Vec::new();
+        // `axes[i]` points back at where the left-hand side of `subs[i]`'s
         // combinator must be, relative to the element matched by
-        // `seqs[i]`. The leftmost compound has nothing to its left, so
+        // `subs[i]`. The leftmost compound has nothing to its left, so
         // there is one fewer axis than compound.
-        let mut axes: Vec<&str> = Vec::with_capacity(seqs.len().saturating_sub(1));
-        for (idx, (compound, combinator)) in seqs.iter().enumerate() {
+        let mut axes: Vec<&str> = Vec::new();
+        for (compound, combinator) in compounds_match_order(selector) {
             let mut sub = self.compound_to_xpath(compound, of_depth)?;
             sub.take_element_into_self_test();
+            // A single compound imposes its own conditions and nothing
+            // else.
+            if combinator.is_none() && subs.is_empty() {
+                return Ok(sub.into_condition());
+            }
             subs.push(sub);
-            if idx + 1 < seqs.len() {
+            if combinator.is_some() {
                 axes.push(match combinator {
                     Some(Combinator::Descendant) => "ancestor::*",
                     Some(Combinator::Child) => "parent::*",
@@ -907,17 +917,13 @@ impl Translator {
         // chain ends there; the compounds to its right keep their own
         // conditions and their brackets. Every compound is translated
         // first, so a discarded one still reports its errors.
-        if let Some(dead) = subs
-            .iter()
-            .position(|sub| matches!(sub.condition(), Some(c) if c.expr == "0"))
-        {
+        if let Some(dead) = subs.iter().position(XPathExpr::is_never) {
             subs.truncate(dead + 1);
             axes.truncate(dead);
         }
-
-        // A single compound imposes its own conditions and nothing else.
-        if subs.len() == 1 {
-            return Ok(subs.pop().expect("checked").condition());
+        let innermost = subs.pop().expect("more than one compound");
+        if subs.is_empty() {
+            return Ok(innermost.into_condition());
         }
 
         // The nesting reads outward-in — `c0 and axis0[c1 and axis1[c2]]`
@@ -927,37 +933,30 @@ impl Translator {
         // so far inside the next compound's brackets) would copy the whole
         // accumulated condition once per compound, making a chain of n
         // compounds cost O(n^2) bytes.
-        let innermost = subs.last().expect("more than one compound").condition();
         let mut expr = String::new();
         let mut open = 0usize;
-        for (idx, (sub, axis)) in subs[..subs.len() - 1].iter().zip(&axes).enumerate() {
+        for (idx, (sub, axis)) in subs.iter().zip(&axes).enumerate() {
             // This compound's own conditions come first, conjoined with
             // the existence test that follows; a lone or-group is
             // parenthesized here because `and` binds tighter than `or`.
-            if let Some(condition) = sub.condition() {
-                if condition.or_group {
-                    expr.push('(');
-                    expr.push_str(&condition.expr);
-                    expr.push(')');
-                } else {
-                    expr.push_str(&condition.expr);
-                }
+            if sub
+                .write_condition(&mut expr, /* as_operand = */ true)
+                .is_some()
+            {
                 expr.push_str(" and ");
             }
             expr.push_str(axis);
             // The bracket is only opened when something goes inside it:
             // the innermost compound may impose no condition at all (a
             // bare `*`), leaving the axis as a plain existence test.
-            if idx + 2 < subs.len() || innermost.is_some() {
+            if idx + 1 < subs.len() || innermost.has_condition() {
                 expr.push('[');
                 open += 1;
             }
         }
         // The innermost condition sits inside brackets, so a top-level
         // `or` needs no parentheses of its own.
-        if let Some(condition) = &innermost {
-            expr.push_str(&condition.expr);
-        }
+        innermost.write_condition(&mut expr, /* as_operand = */ false);
         for _ in 0..open {
             expr.push(']');
         }
@@ -974,7 +973,7 @@ impl Translator {
 fn apply_combinator(
     combinator: Combinator,
     mut left: XPathExpr,
-    right: &XPathExpr,
+    right: XPathExpr,
 ) -> Result<XPathExpr, Error> {
     match combinator {
         Combinator::Descendant => left.join("//", right),
@@ -987,10 +986,10 @@ fn apply_combinator(
             // ones: *[1][self::element][existing conditions]. A `*`
             // node test already counts every sibling, so it needs no
             // predicate — `self::*` would test nothing.
-            let target_element = std::mem::replace(&mut left.element, "*".to_owned());
+            let target_element = left.take_element();
             left.add_predicate("1");
             if target_element != "*" {
-                left.add_predicate(&format!("self::{target_element}"));
+                left.add_predicate(format!("self::{target_element}"));
             }
         }
         // PseudoElement / SlotAssignment / Part combinators can never be
@@ -1002,25 +1001,38 @@ fn apply_combinator(
     Ok(left)
 }
 
-/// Collect a selector's compound sequences in match order: `seqs[i]` is
-/// (compound, combinator between this compound and the one to its left),
-/// so `seqs[0]` is the rightmost compound and only the last entry's
-/// combinator is `None`.
-fn collect_seqs(
+/// A selector's compounds in match order (rightmost first), each with
+/// the combinator to its left — `None` for the leftmost only.
+///
+/// Servo stores a selector in exactly this order, as one slice with a
+/// `Component::Combinator` between neighbouring compounds and each
+/// compound's own components in source order, so the compounds are
+/// borrowed from it rather than collected.
+fn compounds_match_order(
     selector: &Selector<CssToXpathImpl>,
-) -> Vec<(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)> {
-    let mut iter = selector.iter();
-    let mut seqs: Vec<(Vec<&Component<CssToXpathImpl>>, Option<Combinator>)> = Vec::new();
-    loop {
-        let compound: Vec<&Component<CssToXpathImpl>> = (&mut iter).collect();
-        let combinator = iter.next_sequence();
-        let done = combinator.is_none();
-        seqs.push((compound, combinator));
-        if done {
-            break;
-        }
+) -> impl Iterator<Item = (&[Component<CssToXpathImpl>], Option<Combinator>)> {
+    let raw = selector.iter_raw_match_order().as_slice();
+    let combinators = raw.iter().filter_map(as_combinator).map(Some);
+    raw.split(Component::is_combinator)
+        .zip(combinators.chain(std::iter::once(None)))
+}
+
+/// [`compounds_match_order`] reversed: the leftmost compound first,
+/// each with the combinator to its left.
+fn compounds_left_to_right(
+    selector: &Selector<CssToXpathImpl>,
+) -> impl Iterator<Item = (&[Component<CssToXpathImpl>], Option<Combinator>)> {
+    let raw = selector.iter_raw_match_order().as_slice();
+    let combinators = raw.iter().rev().filter_map(as_combinator).map(Some);
+    raw.rsplit(Component::is_combinator)
+        .zip(std::iter::once(None).chain(combinators))
+}
+
+fn as_combinator(component: &Component<CssToXpathImpl>) -> Option<Combinator> {
+    match component {
+        Component::Combinator(combinator) => Some(*combinator),
+        _ => None,
     }
-    seqs
 }
 
 /// A namespace prefix that is not an XML `NCName` (see [`ncname`]) cannot

@@ -40,6 +40,13 @@ select the same nodes, because callers compare, cache and embed the strings.
   instead of putting `S` last. XPath `and` stops at the first false operand,
   so elements that do not match `S` skip the sibling walk; in libxml2 that
   makes the test faster in proportion to how selective `S` is.
+- Translation allocates far less. Conditions are no longer copied as they are
+  added, compounds are borrowed from the parsed selector rather than
+  collected, and the result is written into one buffer rather than being
+  copied on the way out. `.foo` now takes 8 heap allocations instead of 22,
+  `div:is(.a, .b, section > p) span:not(.x)` 52 instead of 134, and
+  `body > p.x` under a default namespace 15 instead of 39. Typical selectors
+  translate 20–40% faster. The translated XPath is unchanged.
 
 ### Fixed
 

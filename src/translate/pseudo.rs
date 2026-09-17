@@ -10,7 +10,7 @@
 use crate::parser::PseudoClass;
 
 use super::error::{Error, echoed};
-use super::xpath_expr::{Condition, XPathExpr, ascii_lower, xpath_literal};
+use super::xpath_expr::{Condition, Literal, XPathExpr, ascii_lower, xpath_literal};
 use super::{Kind, Translator};
 
 /// Where a translator reads an element's language from, for `:lang()`.
@@ -320,12 +320,12 @@ fn textarea_mutable() -> String {
 fn read_write(name: Option<&str>) -> Condition {
     let editable = editable();
     match name {
-        Some("input") => or_group(&format!("({}) or {editable}", input_mutable())),
-        Some("textarea") => or_group(&format!("({}) or {editable}", textarea_mutable())),
+        Some("input") => Condition::or_group(format!("({}) or {editable}", input_mutable())),
+        Some("textarea") => Condition::or_group(format!("({}) or {editable}", textarea_mutable())),
         // A control is not the only editable thing: any element inside a
         // contenteditable subtree is user-alterable, whatever its name.
-        Some(_) => plain(&editable),
-        None => or_group(&format!(
+        Some(_) => Condition::plain(editable),
+        None => Condition::or_group(format!(
             "(local-name() = 'input' and {}) or \
              (local-name() = 'textarea' and {}) or \
              {editable}",
@@ -382,9 +382,8 @@ impl Translator {
         // The element part of a compound is always translated before its
         // conditions, so the name is already known by the time any
         // pseudo-class is applied.
-        let name = xpath.local_name.clone();
-        let name = name.as_deref();
-        match (self.kind(), pc) {
+        let name = xpath.local_name();
+        let condition = match (self.kind(), pc) {
             (_, PseudoClass::Dir(_)) => {
                 // :dir() matches by *resolved* directionality, which needs
                 // runtime bidi resolution, so it never matches — in both
@@ -394,18 +393,16 @@ impl Translator {
                 // bdi/form-control defaults, and HTML's invalid-value-
                 // means-inherit rule wrong, all of which occur in real
                 // markup.
-                xpath.add_condition("0");
+                Condition::plain("0")
             }
             (Kind::Generic, PseudoClass::Lang(args)) => {
-                self.lang_generic(xpath, args)?;
+                return self.lang_generic(xpath, args);
             }
             (Kind::Html, PseudoClass::Lang(args)) => {
-                self.lang_html(xpath, args)?;
+                return self.lang_html(xpath, args);
             }
             // HTML overrides
-            (Kind::Html, PseudoClass::Checked) => {
-                xpath.push_condition(checked_condition(name));
-            }
+            (Kind::Html, PseudoClass::Checked) => checked_condition(name),
             // :any-link is :link ∪ :visited. A static document has no
             // visited state, so every link counts as unvisited and the
             // two pseudo-classes coincide — :any-link shares :link's
@@ -420,49 +417,42 @@ impl Translator {
             // matches in HTML. Other translators (selectr) include
             // `link`; they are the ones departing from the text.
             (Kind::Html, PseudoClass::Link) | (Kind::Html, PseudoClass::AnyLink) => {
-                xpath.add_condition(&match name {
-                    Some("a" | "area") => "@href".to_owned(),
-                    Some(_) => "0".to_owned(),
-                    None => "@href and (local-name() = 'a' or local-name() = 'area')".to_owned(),
-                });
+                Condition::plain(match name {
+                    Some("a" | "area") => "@href",
+                    Some(_) => "0",
+                    None => "@href and (local-name() = 'a' or local-name() = 'area')",
+                })
             }
             (Kind::Html, PseudoClass::Required) => {
-                xpath.add_condition(&required_condition(name, "@required"));
+                Condition::plain(required_condition(name, "@required"))
             }
             (Kind::Html, PseudoClass::Optional) => {
-                xpath.add_condition(&required_condition(name, "not(@required)"));
+                Condition::plain(required_condition(name, "not(@required)"))
             }
             // `:disabled` and `:enabled` are one expression read two
             // ways, so they always partition the element set.
             (Kind::Html, PseudoClass::Disabled) => {
-                xpath.push_condition(disabled_condition(name, /* want_disabled = */ true));
+                disabled_condition(name, /* want_disabled = */ true)
             }
             (Kind::Html, PseudoClass::Enabled) => {
-                xpath.push_condition(disabled_condition(name, /* want_disabled = */ false));
+                disabled_condition(name, /* want_disabled = */ false)
             }
             // `:read-write` and `:read-only` are the same trick over a
             // wider set: Selectors 4 defines the latter as the
             // complement of the former, so the two partition *every*
             // element, controls and prose alike.
-            (Kind::Html, PseudoClass::ReadWrite) => {
-                xpath.push_condition(read_write(name));
-            }
+            (Kind::Html, PseudoClass::ReadWrite) => read_write(name),
             (Kind::Html, PseudoClass::ReadOnly) => {
                 // `not(...)` supplies its own grouping, whatever is
                 // inside it.
-                xpath.add_condition(&format!("not({})", read_write(name).expr));
+                Condition::plain(format!("not({})", read_write(name).expr))
             }
-            (Kind::Html, PseudoClass::Default) => {
-                xpath.push_condition(default_condition(name));
-            }
-            (Kind::Html, PseudoClass::PlaceholderShown) => {
-                xpath.push_condition(placeholder_shown_condition(name));
-            }
+            (Kind::Html, PseudoClass::Default) => default_condition(name),
+            (Kind::Html, PseudoClass::PlaceholderShown) => placeholder_shown_condition(name),
             // Everything else never matches.
-            _ => {
-                xpath.add_condition("0");
-            }
-        }
+            _ => Condition::plain("0"),
+        };
+        xpath.push_condition(condition);
         Ok(())
     }
 
@@ -490,7 +480,7 @@ impl Translator {
                 conditions.push(format!("lang({})", xpath_literal(value)));
             }
         }
-        add_lang_conditions(xpath, &conditions);
+        add_lang_conditions(xpath, conditions);
         Ok(())
     }
 
@@ -518,7 +508,7 @@ impl Translator {
                 conditions.push(lang_ancestor_condition(self.lang_source(), &range));
             }
         }
-        add_lang_conditions(xpath, &conditions);
+        add_lang_conditions(xpath, conditions);
         Ok(())
     }
 }
@@ -527,12 +517,12 @@ impl Translator {
 fn checked_condition(name: Option<&str>) -> Condition {
     let type_lc = type_lc();
     match name {
-        Some("option") => plain("@selected"),
-        Some("input") => plain(&format!(
+        Some("option") => Condition::plain("@selected"),
+        Some("input") => Condition::plain(format!(
             "@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')"
         )),
-        Some(_) => plain("0"),
-        None => or_group(&format!(
+        Some(_) => Condition::plain("0"),
+        None => Condition::or_group(format!(
             "(@selected and local-name() = 'option') or \
              (@checked and local-name() = 'input' \
              and ({type_lc} = 'checkbox' or {type_lc} = 'radio'))"
@@ -547,16 +537,16 @@ fn default_condition(name: Option<&str>) -> Condition {
     let type_lc = type_lc();
     let default_button = is_default_button();
     match name {
-        Some("option") => plain("@selected"),
-        Some("button") => plain(&format!(
+        Some("option") => Condition::plain("@selected"),
+        Some("button") => Condition::plain(format!(
             "not({type_lc} = 'reset' or {type_lc} = 'button') and {default_button}"
         )),
-        Some("input") => or_group(&format!(
+        Some("input") => Condition::or_group(format!(
             "(@checked and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
              (({type_lc} = 'submit' or {type_lc} = 'image') and {default_button})"
         )),
-        Some(_) => plain("0"),
-        None => or_group(&format!(
+        Some(_) => Condition::plain("0"),
+        None => Condition::or_group(format!(
             "(@selected and local-name() = 'option') or \
              (@checked and local-name() = 'input' \
              and ({type_lc} = 'checkbox' or {type_lc} = 'radio')) or \
@@ -580,10 +570,10 @@ fn placeholder_shown_condition(name: Option<&str>) -> Condition {
     );
     let textarea = "string-length(@placeholder) > 0 and not(string-length())";
     match name {
-        Some("input") => plain(&input),
-        Some("textarea") => plain(textarea),
-        Some(_) => plain("0"),
-        None => or_group(&format!(
+        Some("input") => Condition::plain(input),
+        Some("textarea") => Condition::plain(textarea),
+        Some(_) => Condition::plain("0"),
+        None => Condition::or_group(format!(
             "(local-name() = 'input' and {input}) or \
              (local-name() = 'textarea' and {textarea})"
         )),
@@ -614,14 +604,14 @@ fn required_condition(name: Option<&str>, attr: &str) -> String {
 fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
     let Some(name) = name else {
         let (set, actually) = (disableable(), actually_disabled());
-        return plain(&if want_disabled {
+        return Condition::plain(if want_disabled {
             format!("{set} and ({actually})")
         } else {
             format!("{set} and not({actually})")
         });
     };
     if !DISABLEABLE.contains(&name) {
-        return plain("0");
+        return Condition::plain("0");
     }
     let (actually, or_group) = match name {
         "optgroup" => (format!("@disabled or {}", nearest_select_disabled()), true),
@@ -642,23 +632,7 @@ fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
         }
     } else {
         // `not(...)` supplies its own grouping, whatever is inside it.
-        plain(&format!("not({actually})"))
-    }
-}
-
-/// A condition with no top-level `or`.
-fn plain(expr: &str) -> Condition {
-    Condition {
-        expr: expr.to_owned(),
-        or_group: false,
-    }
-}
-
-/// A condition whose expression has a top-level `or`.
-fn or_group(expr: &str) -> Condition {
-    Condition {
-        expr: expr.to_owned(),
-        or_group: true,
+        Condition::plain(format!("not({actually})"))
     }
 }
 
@@ -734,11 +708,11 @@ fn check_wildcard_position(range: &str) -> Result<(), Error> {
 
 /// The shared condition-combining tail of both `:lang()` translations: a
 /// single condition is added as-is, multiple are OR-joined.
-fn add_lang_conditions(xpath: &mut XPathExpr, conditions: &[String]) {
+fn add_lang_conditions(xpath: &mut XPathExpr, mut conditions: Vec<String>) {
     match conditions.len() {
         0 => {}
-        1 => xpath.add_condition(&conditions[0]),
-        _ => xpath.add_or_condition(&conditions.join(" or ")),
+        1 => xpath.add_condition(conditions.pop().expect("checked")),
+        _ => xpath.add_or_condition(conditions.join(" or ")),
     }
 }
 
@@ -860,18 +834,19 @@ fn lang_ancestor_condition(source: LangSource, range: &LangRange) -> String {
     let mut tail = if range.wildcard_head {
         format!("substring-after({lang}, '-')")
     } else {
-        let first = xpath_literal(&format!(
-            "{}-",
+        let first = Literal::affixed(
+            "",
             subtags
                 .next()
-                .expect("no literals is the known-language test")
-        ));
+                .expect("no literals is the known-language test"),
+            "-",
+        );
         conditions.push(format!("starts-with({lang}, {first})"));
         format!("substring-after({lang}, {first})")
     };
     // Everything after it is a whole-subtag search through the tail.
     for subtag in subtags {
-        let needle = xpath_literal(&format!("-{subtag}-"));
+        let needle = Literal::affixed("-", subtag, "-");
         let bounded = format!("concat('-', {tail})");
         conditions.push(format!("contains({bounded}, {needle})"));
         tail = format!("substring-after({bounded}, {needle})");

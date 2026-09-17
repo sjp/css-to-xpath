@@ -16,6 +16,8 @@
 //! engine stop at the *k*-th node. Only the `mod a` congruence of a
 //! repeating series still has to count.
 
+use std::fmt;
+
 use selectors::parser::{NthSelectorData, NthType, Selector};
 
 use super::Translator;
@@ -79,7 +81,7 @@ impl Translator {
             // parent is the document node, not an element) matches, the
             // same way the equivalent :first-child:last-child does.
             NthType::OnlyChild => {
-                xpath.add_condition(&format!(
+                xpath.add_condition(format!(
                     "{} and {}",
                     sibling_count_is("preceding-sibling::*", Bound::Exactly, 0),
                     sibling_count_is("following-sibling::*", Bound::Exactly, 0),
@@ -91,10 +93,18 @@ impl Translator {
                 let nodetest = xpath.same_type_nodetest().ok_or_else(|| {
                     Error::unsupported("`:only-of-type` on the universal selector `*`")
                 })?;
-                xpath.add_condition(&format!(
+                xpath.add_condition(format!(
                     "{} and {}",
-                    sibling_count_is(&format!("preceding-sibling::{nodetest}"), Bound::Exactly, 0),
-                    sibling_count_is(&format!("following-sibling::{nodetest}"), Bound::Exactly, 0),
+                    sibling_count_is(
+                        format_args!("preceding-sibling::{nodetest}"),
+                        Bound::Exactly,
+                        0
+                    ),
+                    sibling_count_is(
+                        format_args!("following-sibling::{nodetest}"),
+                        Bound::Exactly,
+                        0
+                    ),
                 ));
                 Ok(())
             }
@@ -165,7 +175,7 @@ impl Translator {
                 }
                 let check = self
                     .arg_conditions(of.selectors, ":nth-child(... of S)", of.depth + 1)?
-                    .and_then(|conditions| Condition::join_or(&conditions));
+                    .and_then(Condition::join_or);
                 if check
                     .as_ref()
                     .is_some_and(|c| c.expr.len() > MAX_NTH_OF_BYTES)
@@ -225,7 +235,7 @@ impl Translator {
 
         // special case of fixed position: nth-*(0n+b)
         if a == 0 {
-            xpath.add_condition(&sibling_count_is(&siblings, Bound::Exactly, b_min_1));
+            xpath.add_condition(sibling_count_is(&siblings, Bound::Exactly, b_min_1));
             return Ok(());
         }
 
@@ -264,8 +274,10 @@ impl Translator {
             expr.push(format!("{left} mod {a} = 0"));
         }
 
-        if !expr.is_empty() {
-            xpath.add_condition(&expr.join(" and "));
+        match expr.len() {
+            0 => {}
+            1 => xpath.add_condition(expr.pop().expect("checked")),
+            _ => xpath.add_condition(expr.join(" and ")),
         }
 
         Ok(())
@@ -292,7 +304,7 @@ enum Bound {
 /// The `[1]` in the zero case is load-bearing: libxml2 takes a
 /// pathological path on a bare `not(preceding-sibling::*)` — minutes for a
 /// list `count()` answers in seconds — which the positional form avoids.
-fn sibling_count_is(siblings: &str, bound: Bound, k: i64) -> String {
+fn sibling_count_is(siblings: impl fmt::Display, bound: Bound, k: i64) -> String {
     debug_assert!(k >= 0, "a sibling count is never negative");
     match bound {
         Bound::Exactly if k == 0 => format!("not({siblings}[1])"),
