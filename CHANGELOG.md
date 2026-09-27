@@ -11,6 +11,8 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-27
+
 ### Changed
 
 - Structural pseudo-classes test sibling positions instead of counting
@@ -509,7 +511,8 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 Initial release, migrated from the `selectrs` package.
 
-[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sjp/css-to-xpath/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/sjp/css-to-xpath/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/sjp/css-to-xpath/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sjp/css-to-xpath/compare/v0.4.0...v0.5.0
