@@ -3,9 +3,7 @@
 
 mod impls;
 
-use cssparser::{
-    Parser as CssParser, ParserInput, SourceLocation, ToCss, Token, match_ignore_ascii_case,
-};
+use cssparser::{Parser as CssParser, ToCss, Token, match_ignore_ascii_case};
 use selectors::parser::{
     Component, NonTSPseudoClass, ParseRelative, PseudoElement, RelativeSelector, Selector,
     SelectorImpl, SelectorList, SelectorParseErrorKind,
@@ -158,8 +156,6 @@ impl ToCss for PseudoClass {
 }
 
 impl NonTSPseudoClass for PseudoClass {
-    type Impl = CssToXpathImpl;
-
     fn is_active_or_hover(&self) -> bool {
         matches!(self, PseudoClass::Active | PseudoClass::Hover)
     }
@@ -191,9 +187,7 @@ impl ToCss for NeverPseudoElement {
     }
 }
 
-impl PseudoElement for NeverPseudoElement {
-    type Impl = CssToXpathImpl;
-}
+impl PseudoElement for NeverPseudoElement {}
 
 pub(crate) struct CssToXpathParser<'a> {
     /// Whether Servo may recover from an invalid `:is()` / `:where()`
@@ -205,11 +199,48 @@ pub(crate) struct CssToXpathParser<'a> {
     /// (see [`CssToXpathParser::default_namespace`]). Built once per
     /// parse, since Servo asks for it once per compound.
     default_namespace: &'a CssString,
+    /// When this parse is one of the truncated probes [`locate`] makes,
+    /// the length of the probe's input. A functional pseudo-class whose
+    /// arguments run out right there was cut short by the truncation,
+    /// not written wrong, so it reports end of input as Servo's own
+    /// constructs do: an error that a longer probe could still undo
+    /// must not read as one already made.
+    probe_end: Option<usize>,
+}
+
+/// Why a functional pseudo-class was rejected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Rejected {
+    /// Its arguments ended before they said enough: `:dir()`,
+    /// `:lang(en,`.
+    Incomplete,
+    /// Something in it is wrong as written: an unknown name, or an
+    /// argument token that cannot be where it is.
+    Invalid,
+}
+
+impl CssToXpathParser<'_> {
+    /// The error for a functional pseudo-class rejected for `why`, with
+    /// `parser` left where its arguments were rejected.
+    fn functional_error(
+        &self,
+        parser: &CssParser<'_>,
+        why: Rejected,
+    ) -> cssparser::ParseError<SelectorParseErrorKind> {
+        // Arguments that ran out at the end of a probe's input, rather
+        // than at their `)`, were cut short by the probe.
+        if why == Rejected::Incomplete && self.probe_end == Some(parser.position().byte_index()) {
+            return cssparser::ParseError::from_basic_kind(
+                cssparser::BasicParseErrorKind::EndOfInput,
+            );
+        }
+        cssparser::ParseError::custom(SelectorParseErrorKind::UnsupportedPseudoClassOrElement)
+    }
 }
 
 impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
     type Impl = CssToXpathImpl;
-    type Error = SelectorParseErrorKind<'i>;
+    type Error = SelectorParseErrorKind;
 
     /// Strict unless [`parse`] is retrying: a selector that fails to
     /// parse must surface an error, never be silently dropped the way
@@ -245,9 +276,8 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
     /// errors (see the policy note on `PseudoClass`).
     fn parse_non_ts_pseudo_class(
         &self,
-        location: SourceLocation,
         name: cssparser::CowRcStr<'i>,
-    ) -> Result<PseudoClass, cssparser::ParseError<'i, Self::Error>> {
+    ) -> Result<PseudoClass, cssparser::ParseError<Self::Error>> {
         let pc = match_ignore_ascii_case! { &name,
             "any-link" => PseudoClass::AnyLink,
             "link" => PseudoClass::Link,
@@ -270,8 +300,8 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
             "default" => PseudoClass::Default,
             "placeholder-shown" => PseudoClass::PlaceholderShown,
             _ => {
-                return Err(location.new_custom_error(
-                    SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
+                return Err(cssparser::ParseError::custom(
+                    SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
                 ));
             },
         };
@@ -298,40 +328,30 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
     /// The non-standard text-content pseudo `:contains()` is deliberately
     /// unsupported and falls through to the rejection arm, as does any
     /// unknown functional pseudo.
-    fn parse_non_ts_functional_pseudo_class<'t>(
+    fn parse_non_ts_functional_pseudo_class(
         &self,
         name: cssparser::CowRcStr<'i>,
-        parser: &mut CssParser<'i, 't>,
+        parser: &mut CssParser<'i>,
         _after_part: bool,
-    ) -> Result<PseudoClass, cssparser::ParseError<'i, Self::Error>> {
+    ) -> Result<PseudoClass, cssparser::ParseError<Self::Error>> {
         if name.eq_ignore_ascii_case("dir") {
             let value = match parser.next() {
                 Ok(Token::Ident(v)) => v.as_ref().to_owned(),
-                _ => {
-                    return Err(parser.new_custom_error(
-                        SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
-                    ));
-                }
+                Ok(_) => return Err(self.functional_error(parser, Rejected::Invalid)),
+                Err(_) => return Err(self.functional_error(parser, Rejected::Incomplete)),
             };
             if parser.next().is_ok() {
-                return Err(parser.new_custom_error(
-                    SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
-                ));
+                return Err(self.functional_error(parser, Rejected::Invalid));
             }
             return Ok(PseudoClass::Dir(value));
         }
         if !name.eq_ignore_ascii_case("lang") {
-            return Err(parser.new_custom_error(
-                SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
-            ));
+            return Err(self.functional_error(parser, Rejected::Invalid));
         }
 
-        match parse_lang_ranges(parser) {
-            Some(ranges) => Ok(PseudoClass::Lang(ranges)),
-            None => Err(parser.new_custom_error(
-                SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
-            )),
-        }
+        parse_lang_ranges(parser)
+            .map(PseudoClass::Lang)
+            .map_err(|why| self.functional_error(parser, why))
     }
 
     /// Identity mapping: `svg|g` translates to `svg:g` — a prefix-only
@@ -365,16 +385,16 @@ impl<'i> selectors::parser::Parser<'i> for CssToXpathParser<'_> {
 }
 
 /// The body of the `:lang()` argument grammar: the comma-separated
-/// ranges, or `None` if the arguments do not spell out at least one
-/// range. Assembling happens here rather than at translation time
-/// because only the token stream records whether two pieces were
-/// adjacent, and adjacency is the whole difference between the range
-/// `en-*` and the pair `en-`, `*`.
+/// ranges, or why the arguments do not spell out at least one range.
+/// Assembling happens here rather than at translation time because only
+/// the token stream records whether two pieces were adjacent, and
+/// adjacency is the whole difference between the range `en-*` and the
+/// pair `en-`, `*`.
 ///
 /// A range is any assembled text, the empty string included: `:lang("")`
 /// is the Level 4 "language not known" range, and the shapes that cannot
 /// match anything are the translators' to reject.
-fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> {
+fn parse_lang_ranges(parser: &mut CssParser<'_>) -> Result<Vec<String>, Rejected> {
     let mut ranges: Vec<String> = Vec::new();
     let mut current = String::new();
     // Whether `current` has a piece yet, and whether the next piece
@@ -383,13 +403,9 @@ fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> 
     // `current` is still empty.
     let mut started = false;
     let mut adjacent = true;
-    loop {
-        // Whitespace and comments both terminate a range, so neither may
-        // be skipped over here.
-        let token = match parser.next_including_whitespace_and_comments() {
-            Ok(t) => t.clone(),
-            Err(_) => break, // end of the function's arguments
-        };
+    // Whitespace and comments both terminate a range, so neither may be
+    // skipped over here. The loop ends with the function's arguments.
+    while let Ok(token) = parser.next_including_whitespace_and_comments().cloned() {
         let piece = match token {
             Token::WhiteSpace(_) | Token::Comment(_) => {
                 adjacent = false;
@@ -397,7 +413,8 @@ fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> 
             }
             Token::Comma => {
                 if !started {
-                    return None; // an empty range slot: `,en`, `en,,fr`
+                    // an empty range slot: `,en`, `en,,fr`
+                    return Err(Rejected::Invalid);
                 }
                 ranges.push(std::mem::take(&mut current));
                 (started, adjacent) = (false, true);
@@ -405,10 +422,11 @@ fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> 
             }
             Token::Ident(ref v) | Token::QuotedString(ref v) => v.as_ref().to_owned(),
             Token::Delim('*') => "*".to_owned(),
-            _ => return None,
+            _ => return Err(Rejected::Invalid),
         };
         if started && !adjacent {
-            return None; // two ranges with no comma between them
+            // two ranges with no comma between them
+            return Err(Rejected::Invalid);
         }
         current.push_str(&piece);
         started = true;
@@ -421,10 +439,11 @@ fn parse_lang_ranges<'i>(parser: &mut CssParser<'i, '_>) -> Option<Vec<String>> 
         adjacent = true;
     }
     if !started {
-        return None; // no ranges at all, or a trailing comma
+        // no ranges at all, or a trailing comma
+        return Err(Rejected::Incomplete);
     }
     ranges.push(current);
-    Some(ranges)
+    Ok(ranges)
 }
 
 /// The maximum functional-pseudo-class nesting depth accepted, measured
@@ -673,7 +692,46 @@ fn scan(css: &str) -> Scan {
 /// The error one parse attempt produced, before it is turned into an
 /// [`Error`] — the kind is needed to tell an empty selector apart from
 /// everything else.
-type ParseFailure<'i> = cssparser::ParseError<'i, SelectorParseErrorKind<'i>>;
+type ParseFailure = cssparser::ParseError<SelectorParseErrorKind>;
+
+/// One way of parsing a selector list: strictly or forgivingly, under
+/// the caller's default namespace. A failed attempt is located by
+/// repeating it on truncations of the input (see [`locate`]), and a
+/// repeat has to be the same attempt to fail the same way, so the two
+/// settings travel together.
+#[derive(Clone, Copy)]
+struct Attempt<'a> {
+    forgiving: bool,
+    default_namespace: &'a CssString,
+}
+
+impl Attempt<'_> {
+    /// One parse of the whole selector list.
+    fn parse(self, css: &str) -> Result<SelectorList<CssToXpathImpl>, ParseFailure> {
+        self.run(css, None)
+    }
+
+    /// One parse of a truncation of the selector, for [`locate`].
+    fn probe(self, css: &str) -> Result<(), ParseFailure> {
+        self.run(css, Some(css.len())).map(drop)
+    }
+
+    fn run(
+        self,
+        css: &str,
+        probe_end: Option<usize>,
+    ) -> Result<SelectorList<CssToXpathImpl>, ParseFailure> {
+        SelectorList::parse(
+            &CssToXpathParser {
+                forgiving: self.forgiving,
+                default_namespace: self.default_namespace,
+                probe_end,
+            },
+            &mut CssParser::new(css),
+            ParseRelative::No,
+        )
+    }
+}
 
 /// Parse a full selector list (comma-separated groups).
 ///
@@ -727,7 +785,15 @@ fn parse_lists(
     default_namespace: Option<&str>,
 ) -> Result<SelectorList<CssToXpathImpl>, Error> {
     let default_namespace = CssString::from(default_namespace.unwrap_or(""));
-    let strict = match parse_list(css, false, &default_namespace) {
+    let strict = Attempt {
+        forgiving: false,
+        default_namespace: &default_namespace,
+    };
+    let forgiving = Attempt {
+        forgiving: true,
+        ..strict
+    };
+    let strict_error = match strict.parse(css) {
         Ok(list) => return Ok(list),
         Err(e) => e,
     };
@@ -736,136 +802,287 @@ fn parse_lists(
     // strict error therefore sits before, or is, something the forgiving
     // parse cannot accept cleanly either, and every outcome of the retry
     // below would report it unchanged — so the retry is skipped.
-    if !is_empty_selector(&strict) {
-        return Err(parse_error(css, &strict));
+    if !is_empty_selector(&strict_error) {
+        return Err(parse_error(css, strict, &strict_error));
     }
-    match parse_list(css, true, &default_namespace) {
+    match forgiving.parse(css) {
         Ok(list) if dropped_nothing(&list) => Ok(list),
         // The forgiving parse recovered from a genuinely invalid
         // argument: the strict error is the one that names it, and
         // points at it.
-        Ok(_) => Err(parse_error(css, &strict)),
+        Ok(_) => Err(parse_error(css, strict, &strict_error)),
         // Both parses failed. An empty argument list is no longer an
         // error, so a strict `EmptySelector` may well be blaming one,
         // while the forgiving parse — which accepts those — stopped at
         // whatever is actually wrong.
-        Err(e) if is_empty_selector(&strict) => Err(parse_error(css, &e)),
-        Err(_) => Err(parse_error(css, &strict)),
+        Err(e) if is_empty_selector(&strict_error) => Err(parse_error(css, forgiving, &e)),
+        Err(_) => Err(parse_error(css, strict, &strict_error)),
     }
 }
 
-/// One parse of the whole selector list.
-fn parse_list<'i>(
-    css: &'i str,
-    forgiving: bool,
-    default_namespace: &CssString,
-) -> Result<SelectorList<CssToXpathImpl>, ParseFailure<'i>> {
-    let mut input = ParserInput::new(css);
-    let mut parser = CssParser::new(&mut input);
-    SelectorList::parse(
-        &CssToXpathParser {
-            forgiving,
-            default_namespace,
-        },
-        &mut parser,
-        ParseRelative::No,
-    )
-}
-
-fn parse_error(css: &str, e: &ParseFailure<'_>) -> Error {
-    let reported = byte_offset(css, e.location);
-    let mut kind = ParseErrorKind::from_kind(&e.kind);
+/// `e`, the error `attempt` failed `css` with, as this crate reports it.
+fn parse_error(css: &str, attempt: Attempt<'_>, e: &ParseFailure) -> Error {
+    let failure = locate(css, attempt, &e.kind);
+    let mut kind = ParseErrorKind::from_kind(&e.kind, failure.token.as_ref());
+    // A kind that echoes the token points at it; one that echoes nothing
+    // points where the parse stopped.
+    let offset = match kind {
+        ParseErrorKind::InvalidPosition | ParseErrorKind::Other(_) => failure.stopped,
+        _ => failure.at,
+    };
     // `EmptySelector` is what `selectors` reports whenever a compound
     // ends up with no components, which covers both "there was nothing
     // here" and "none of what was here parsed". Only the first is what
     // the name says, so the second is re-reported by its cause.
     if matches!(kind, ParseErrorKind::EmptySelector)
-        && let Some(blocked) = blocking_token(css, reported)
+        && let Some(blocked) = blocking_token(css, offset)
     {
         kind = blocked;
     }
-    let offset = named_token_offset(css, reported, &kind).unwrap_or(reported);
     Error::Parse { kind, offset }
 }
 
-/// Where the token a message echoes starts, when it is one of the two
-/// next to `reported`.
-///
-/// The position `cssparser` and `selectors` report is the parser's
-/// stopping point, which is beside the offending token rather than on
-/// it, and which of the two sides depends on where the parser that
-/// failed took its location from. Taking it before reading a token
-/// leaves the position on the whitespace in front of that token
-/// (`[a=b c]`, reported on the space); taking it after leaves it past
-/// the token (`:nth-child(foo)`, reported on the `)`), and past a
-/// function token means on its first argument (`a::part(b)`, reported
-/// on the `b`). Both are one token from what the message names, so both
-/// are offered to the kind, and the caret moves to whichever it claims.
-///
-/// The token that follows is tried first, so a position already sitting
-/// on the offending token stays where it is. `None` when neither
-/// neighbour is the one named — a kind that echoes no token at all, or
-/// a name further off than one token, as `::before`'s is — leaving the
-/// reported position, which is still the best the parser knows.
-fn named_token_offset(css: &str, reported: usize, kind: &ParseErrorKind) -> Option<usize> {
-    // The walk re-tokenises from the start, which is wasted on a kind
-    // that could not claim either neighbour anyway.
-    if !kind.echoes_token() {
-        return None;
-    }
-    let mut following = None;
-    let mut preceding = None;
-    walk_tokens(css, |start, end, token| {
-        if end == reported {
-            preceding = Some((start, token.clone()));
-        }
-        // Whitespace and comments are skipped on the way forward: they
-        // are what the position lands on when it was taken before the
-        // token, and never what a message names.
-        if start >= reported && !matches!(token, Token::WhiteSpace(_) | Token::Comment(_)) {
-            following = Some((start, token.clone()));
-            return false;
-        }
-        true
-    });
-    [following, preceding]
-        .into_iter()
-        .flatten()
-        .find(|(_, token)| kind.names_token(token))
-        .map(|(start, _)| start)
+/// Whether running out of input is itself enough to fail a parse with
+/// `kind`: a construct left open, a group with nothing in it, or a
+/// combinator with nothing after it. Every other kind needs a token
+/// that should not be where it is.
+fn is_truncation_kind(kind: &cssparser::ParseErrorKind<SelectorParseErrorKind>) -> bool {
+    matches!(
+        kind,
+        cssparser::ParseErrorKind::Basic(cssparser::BasicParseErrorKind::EndOfInput)
+            | cssparser::ParseErrorKind::Custom(
+                SelectorParseErrorKind::EmptySelector | SelectorParseErrorKind::DanglingCombinator
+            )
+    )
 }
 
-/// Call `visit` with the byte span of every token of `css`, whitespace
-/// and comments included, until it returns `false`.
+/// Where a parse failed, as [`locate`] finds it.
+struct Failure<'i> {
+    /// The byte offset of the token the parse failed on, or of where it
+    /// ran out.
+    at: usize,
+    /// The byte offset the parse had got to when it failed: past the
+    /// token it failed on, unless it only looked at that token.
+    stopped: usize,
+    /// The token the parse failed on, when it failed on one rather than
+    /// by running out.
+    token: Option<Token<'i>>,
+}
+
+/// One token of the selector, and the byte span it was written at.
+struct Spanned<'i> {
+    start: usize,
+    end: usize,
+    token: Token<'i>,
+}
+
+/// Where a failed `attempt` at `css` went wrong.
+///
+/// Neither `cssparser` nor `selectors` reports a position, so it is
+/// recovered by repeating the attempt on truncations of the input. Servo
+/// reads a selector once, left to right, and fails at the first thing it
+/// cannot use, so a truncation that keeps that thing fails the same way
+/// — and the shortest such truncation ends on it. A truncation that
+/// stops short of it can still fail, but only by running out of input,
+/// which Servo reports as one of the [truncation
+/// kinds](is_truncation_kind) whatever it was in the middle of.
+///
+/// So a failure of any other kind is located by a binary search for the
+/// shortest truncation, cut at a token boundary, that fails with a kind
+/// other than those. A failure of one of those kinds is itself a running
+/// out, of the input or of a block or a comma-separated group, and is
+/// located among the places that can happen instead (see
+/// [`locate_truncation`]).
+fn locate<'i>(
+    css: &'i str,
+    attempt: Attempt<'_>,
+    kind: &cssparser::ParseErrorKind<SelectorParseErrorKind>,
+) -> Failure<'i> {
+    let tokens = tokens(css);
+    let ran_out = |at| Failure {
+        at,
+        stopped: at,
+        token: None,
+    };
+    if is_truncation_kind(kind) {
+        return ran_out(locate_truncation(css, attempt, &tokens, kind));
+    }
+    let Some(last) = tokens.len().checked_sub(1) else {
+        return ran_out(css.len());
+    };
+    // The whole selector is known to fail, so the search is over the
+    // truncations before it, which only ever make the answer earlier.
+    let mut i = tokens[..last].partition_point(|t| match attempt.probe(&css[..t.end]) {
+        Ok(()) => true,
+        Err(e) => is_truncation_kind(&e.kind),
+    });
+    // A string or URL that a newline left bad is a good one if the
+    // input ends before the newline, so the truncation that keeps it
+    // whole succeeds, and the search lands on what follows it.
+    if i > 0 && matches!(tokens[i - 1].token, Token::BadString(_) | Token::BadUrl(_)) {
+        i -= 1;
+    }
+    if let cssparser::ParseErrorKind::Custom(
+        SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
+    ) = kind
+    {
+        i = pseudo_name(&tokens, i);
+    }
+    // A token after whitespace can be one the parser only looked at,
+    // to see whether the whitespace was a descendant combinator, and
+    // then put back: a failure on that combinator stops before it. Any
+    // other combinator is read, and a failure on it stops past it.
+    let combinator = matches!(tokens[i].token, Token::Delim('>' | '+' | '~'));
+    let after_whitespace = tokens[..i]
+        .iter()
+        .rev()
+        .find(|t| !matches!(t.token, Token::Comment(_)))
+        .filter(|t| !combinator && matches!(t.token, Token::WhiteSpace(_)));
+    Failure {
+        at: tokens[i].start,
+        stopped: after_whitespace.map_or(tokens[i].end, |t| t.end),
+        token: Some(tokens[i].token.clone()),
+    }
+}
+
+/// The truncation-kind counterpart of [`locate`].
+///
+/// A block, a comma-separated group, and the input itself all end the
+/// same way as far as the parser inside them is concerned: there is
+/// nothing more to read. So the end that failed is found the way
+/// [`locate`] finds a token, among the truncations just before each
+/// `,`, `)` and `]` and at the end of the input — the first of which to
+/// fail is the one the error ran out at.
+///
+/// That end is the position of an [`EndOfInput`]. An empty compound
+/// (`EmptySelector`, `DanglingCombinator`) is the end too when nothing
+/// came between the compound's start and it (`a > , b`), but when
+/// something did, the compound was not empty but unusable (`a > #1abc`),
+/// and the position is that of the token the parser could not use. That
+/// token is found by another binary search, for the shortest truncation
+/// that fails as an empty compound even with a compound added: before
+/// the token, a truncation that fails that way is only waiting for a
+/// compound, and a `*` completes it; from the token on, nothing can.
+///
+/// [`EndOfInput`]: cssparser::BasicParseErrorKind::EndOfInput
+fn locate_truncation(
+    css: &str,
+    attempt: Attempt<'_>,
+    tokens: &[Spanned<'_>],
+    kind: &cssparser::ParseErrorKind<SelectorParseErrorKind>,
+) -> usize {
+    let ends: Vec<usize> = tokens
+        .iter()
+        .filter(|t| {
+            matches!(
+                t.token,
+                Token::Comma | Token::CloseParenthesis | Token::CloseSquareBracket
+            )
+        })
+        .map(|t| t.start)
+        .collect();
+    let end = ends
+        .get(ends.partition_point(|&end| attempt.probe(&css[..end]).is_ok()))
+        .copied()
+        .unwrap_or(css.len());
+    if matches!(kind, cssparser::ParseErrorKind::Basic(_)) {
+        return end;
+    }
+    // Whitespace and comments are skipped rather than used, so they are
+    // never the token the parser could not use.
+    let candidates: Vec<&Spanned<'_>> = tokens
+        .iter()
+        .take_while(|t| t.end <= end)
+        .filter(|t| !matches!(t.token, Token::WhiteSpace(_) | Token::Comment(_)))
+        .collect();
+    let unusable = candidates.partition_point(|t| {
+        let cut = &css[..t.end];
+        let awaits_compound = attempt.probe(cut).is_err_and(|e| {
+            matches!(
+                e.kind,
+                cssparser::ParseErrorKind::Custom(
+                    SelectorParseErrorKind::EmptySelector
+                        | SelectorParseErrorKind::DanglingCombinator
+                )
+            )
+        });
+        // The `*` goes in behind a comment, which the parser skips but
+        // which keeps it from running into what precedes it: straight
+        // after a `/` it would open a comment of its own.
+        !(awaits_compound && attempt.probe(&format!("{cut}/**/*")).is_err())
+    });
+    candidates.get(unusable).map_or(end, |t| t.start)
+}
+
+/// The token naming the pseudo-class or pseudo-element that failed at
+/// `tokens[i]`: that token itself when it is a name after a colon
+/// (`:frobnicate`, `::before`, `:contains(`), and otherwise the function
+/// whose arguments it is in — a functional pseudo-class fails on its
+/// arguments, and the message names the function.
+fn pseudo_name(tokens: &[Spanned<'_>], i: usize) -> usize {
+    // Comments between the colon and the name are skipped by the
+    // parser, so they are skipped here too.
+    let after_colon = tokens[..i]
+        .iter()
+        .rev()
+        .find(|t| !matches!(t.token, Token::Comment(_)))
+        .is_some_and(|t| matches!(t.token, Token::Colon));
+    if after_colon && matches!(tokens[i].token, Token::Ident(_) | Token::Function(_)) {
+        return i;
+    }
+    // The blocks open before `tokens[i]`, innermost last, so a closing
+    // `tokens[i]` counts as inside the block it closes.
+    let mut open = Vec::new();
+    for (j, t) in tokens[..i].iter().enumerate() {
+        match t.token {
+            Token::Function(_)
+            | Token::ParenthesisBlock
+            | Token::SquareBracketBlock
+            | Token::CurlyBracketBlock => open.push(j),
+            Token::CloseParenthesis | Token::CloseSquareBracket | Token::CloseCurlyBracket => {
+                open.pop();
+            }
+            _ => {}
+        }
+    }
+    // The argument that failed can sit in a block of its own
+    // (`:lang([`), so the name is the innermost *function* around it.
+    open.into_iter()
+        .rev()
+        .find(|&j| matches!(tokens[j].token, Token::Function(_)))
+        .unwrap_or(i)
+}
+
+/// Every token of `css`, whitespace and comments included, with the
+/// byte span it was written at.
 ///
 /// `cssparser`'s `Parser` skips the body of a block whose opening token
 /// it just handed back, rather than descending into it, so the walk
 /// restarts just past every opener: most of a selector's tokens sit
 /// inside `[...]` or a functional argument, and a caret has to be able
 /// to point at those.
-fn walk_tokens<'i>(css: &'i str, mut visit: impl FnMut(usize, usize, &Token<'i>) -> bool) {
+fn tokens(css: &str) -> Vec<Spanned<'_>> {
+    let mut tokens = Vec::new();
     let mut base = 0;
     loop {
-        let mut input = ParserInput::new(&css[base..]);
-        let mut parser = CssParser::new(&mut input);
+        let mut parser = CssParser::new(&css[base..]);
         let restart = loop {
             let start = base + parser.position().byte_index();
             // The token is cloned out because reading the position
             // again needs the parser back.
             let Ok(token) = parser.next_including_whitespace_and_comments().cloned() else {
-                return;
+                return tokens;
             };
             let end = base + parser.position().byte_index();
-            if !visit(start, end, &token) {
-                return;
-            }
-            if matches!(
+            let opens_block = matches!(
                 token,
                 Token::Function(_)
                     | Token::ParenthesisBlock
                     | Token::SquareBracketBlock
                     | Token::CurlyBracketBlock
-            ) {
+            );
+            tokens.push(Spanned { start, end, token });
+            if opens_block {
                 break end;
             }
         };
@@ -882,15 +1099,14 @@ fn walk_tokens<'i>(css: &'i str, mut visit: impl FnMut(usize, usize, &Token<'i>)
 /// that closes it — leaving [`ParseErrorKind::EmptySelector`] to mean
 /// only what it says.
 fn blocking_token(css: &str, offset: usize) -> Option<ParseErrorKind> {
-    let mut input = ParserInput::new(css.get(offset..)?);
-    let mut parser = CssParser::new(&mut input);
+    let mut parser = CssParser::new(css.get(offset..)?);
     match parser.next() {
         Ok(Token::Comma) | Err(_) => None,
         Ok(token) => Some(ParseErrorKind::unexpected_token(token)),
     }
 }
 
-fn is_empty_selector(e: &ParseFailure<'_>) -> bool {
+fn is_empty_selector(e: &ParseFailure) -> bool {
     matches!(
         e.kind,
         cssparser::ParseErrorKind::Custom(SelectorParseErrorKind::EmptySelector)
@@ -957,53 +1173,7 @@ pub(crate) fn is_empty_forgiving_list(list: &[Selector<CssToXpathImpl>]) -> bool
     // Servo keeps the source text it could not parse, so whether the
     // list was empty is decided on that text: nothing but whitespace and
     // comments.
-    let mut input = ParserInput::new(source.as_str());
-    CssParser::new(&mut input).is_exhausted()
-}
-
-/// The byte offset within `css` that `location` points at.
-///
-/// A `SourceLocation` cannot be used as an index: its line is 0-indexed,
-/// its column is 1-indexed, and — the part that bites — the column
-/// counts UTF-16 code units, so a tab counts as one unit but renders as
-/// several columns, a CJK character counts as one but renders as two,
-/// and a non-BMP character counts as two but is a single character. A
-/// byte offset is what the caret renderer needs to look at the source
-/// text itself.
-fn byte_offset(css: &str, location: SourceLocation) -> usize {
-    let bytes = css.as_bytes();
-    // Walk to the start of the error's line. `\r\n`, `\r`, `\n` and `\f`
-    // are all line breaks, matching cssparser's own line counter.
-    let mut offset = 0;
-    let mut line = 0;
-    while line < location.line && offset < bytes.len() {
-        match bytes[offset] {
-            b'\r' => {
-                offset += 1;
-                if bytes.get(offset) == Some(&b'\n') {
-                    offset += 1;
-                }
-                line += 1;
-            }
-            b'\n' | b'\x0C' => {
-                offset += 1;
-                line += 1;
-            }
-            _ => offset += 1,
-        }
-    }
-    // Then across `column - 1` UTF-16 code units of that line. A column
-    // in the middle of a surrogate pair is not reachable from a token
-    // boundary, but `saturating_sub` keeps one from running away.
-    let mut units = location.column.saturating_sub(1);
-    for c in css[offset..].chars() {
-        if units == 0 {
-            break;
-        }
-        units = units.saturating_sub(c.len_utf16() as u32);
-        offset += c.len_utf8();
-    }
-    offset
+    CssParser::new(source.as_str()).is_exhausted()
 }
 
 #[cfg(test)]
@@ -1069,12 +1239,11 @@ mod tests {
     #[test]
     fn lang_range_grammar() {
         fn ranges(css: &str) -> Option<Vec<String>> {
-            let mut input = ParserInput::new(css);
-            let mut parser = CssParser::new(&mut input);
+            let mut parser = CssParser::new(css);
             parser.expect_function_matching("lang").ok()?;
             parser
                 .parse_nested_block(|p| {
-                    Ok::<_, cssparser::ParseError<'_, ()>>(parse_lang_ranges(p))
+                    Ok::<_, cssparser::ParseError<()>>(parse_lang_ranges(p).ok())
                 })
                 .ok()?
         }
@@ -1149,9 +1318,9 @@ mod tests {
     }
 }
 
-/// Pins the early exits in [`parse_lists`] and [`named_token_offset`]:
-/// both skip work on the grounds that it cannot change the result, so
-/// the result is checked against the implementation that did the work.
+/// Pins the early exit in [`parse_lists`]: it skips the forgiving retry
+/// on the grounds that the retry cannot change the result, so the result
+/// is checked against the implementation that always made it.
 #[cfg(test)]
 mod early_exit_tests {
     use super::*;
@@ -1159,52 +1328,31 @@ mod early_exit_tests {
 
     const CORPUS: &str = include_str!("../../tests/corpus/selectors.txt");
 
-    /// `parse_lists` and `parse_error` as they were before the early
-    /// exits: the forgiving retry after every strict failure, and the
-    /// token walk for every kind.
+    /// `parse_lists` as it was before the early exit: the forgiving
+    /// retry after every strict failure.
     fn reference(
         css: &str,
         default_namespace: Option<&str>,
     ) -> Result<SelectorList<CssToXpathImpl>, Error> {
         let default_namespace = CssString::from(default_namespace.unwrap_or(""));
-        let strict = match parse_list(css, false, &default_namespace) {
+        let strict = Attempt {
+            forgiving: false,
+            default_namespace: &default_namespace,
+        };
+        let forgiving = Attempt {
+            forgiving: true,
+            ..strict
+        };
+        let strict_error = match strict.parse(css) {
             Ok(list) => return Ok(list),
             Err(e) => e,
         };
-        match parse_list(css, true, &default_namespace) {
+        match forgiving.parse(css) {
             Ok(list) if dropped_nothing(&list) => Ok(list),
-            Ok(_) => Err(reference_error(css, &strict)),
-            Err(e) if is_empty_selector(&strict) => Err(reference_error(css, &e)),
-            Err(_) => Err(reference_error(css, &strict)),
+            Ok(_) => Err(parse_error(css, strict, &strict_error)),
+            Err(e) if is_empty_selector(&strict_error) => Err(parse_error(css, forgiving, &e)),
+            Err(_) => Err(parse_error(css, strict, &strict_error)),
         }
-    }
-
-    fn reference_error(css: &str, e: &ParseFailure<'_>) -> Error {
-        let reported = byte_offset(css, e.location);
-        let mut kind = ParseErrorKind::from_kind(&e.kind);
-        if matches!(kind, ParseErrorKind::EmptySelector)
-            && let Some(blocked) = blocking_token(css, reported)
-        {
-            kind = blocked;
-        }
-        let mut following = None;
-        let mut preceding = None;
-        walk_tokens(css, |start, end, token| {
-            if end == reported {
-                preceding = Some((start, token.clone()));
-            }
-            if start >= reported && !matches!(token, Token::WhiteSpace(_) | Token::Comment(_)) {
-                following = Some((start, token.clone()));
-                return false;
-            }
-            true
-        });
-        let offset = [following, preceding]
-            .into_iter()
-            .flatten()
-            .find(|(_, token)| kind.names_token(token))
-            .map_or(reported, |(start, _)| start);
-        Error::Parse { kind, offset }
     }
 
     fn assert_agrees(css: &str) -> Result<(), TestCaseError> {

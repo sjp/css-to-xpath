@@ -188,7 +188,7 @@ fn empty_forgiving_argument_lists() {
         t.css_to_xpath(":is() > ::after", "").unwrap_err(),
         css_to_xpath::Error::Parse {
             kind: css_to_xpath::ParseErrorKind::UnsupportedPseudo("after".to_owned()),
-            offset: 9
+            offset: 10
         }
     );
 }

@@ -359,13 +359,11 @@ fn empty_selector_names_what_stopped_it() {
 
 /// When a message echoes a token, the caret is on that token.
 ///
-/// `cssparser` and `selectors` report the position the parse stopped
-/// at, which sits beside the offending token rather than on it, and on
-/// whichever side depends on where the failing parser took its location
-/// from: before reading a token (leaving the position on the whitespace
-/// in front of it) or after (leaving it past the token, or — past a
-/// function token — on that function's first argument). Both are one
-/// token from what the message names, so the caret is moved onto it.
+/// `cssparser` and `selectors` report no position at all, so the parser
+/// finds the token the parse failed on itself (by re-parsing
+/// truncations of the selector), and both the caret and the echo are
+/// that token: never a neighbour of it, nor another token that happens
+/// to be spelled the same way.
 #[test]
 fn caret_is_on_the_token_the_message_names() {
     let t = Translator::new(Mode::Generic);
@@ -386,31 +384,36 @@ fn caret_is_on_the_token_the_message_names() {
         )
     };
 
-    // Reported before the token: an attribute selector's flags, where
-    // the position lands on the space in front of the stray token.
-    // Whitespace and comments are skipped over on the way to it.
+    // A stray token in an attribute selector's flags. Whitespace and
+    // comments before it are not what failed.
     assert_eq!(err("[a=b c]"), unexpected("c", 5));
     assert_eq!(err("a[b=c d]"), unexpected("d", 6));
     assert_eq!(err("[a=b /*x*/ c]"), unexpected("c", 11));
     assert_eq!(err(":is([a=b c])"), unexpected("c", 9));
 
-    // Reported after the token: an `An+B` argument, where the position
-    // lands past what it names.
+    // A bad `An+B` argument. A dimension is echoed whole, as written,
+    // not as the unit the `An+B` grammar choked on.
     assert_eq!(err(":nth-child(foo)"), unexpected("foo", 11));
     assert_eq!(err("a:nth-of-type(+ 2)"), unexpected(" ", 15));
+    assert_eq!(err("e:nth-child(2nof a)"), unexpected("2nof", 12));
 
-    // A functional pseudo is reported on its first argument, or at the
-    // end of input when it has none; either way the caret goes back to
-    // the name the message quotes.
+    // A functional pseudo fails on its arguments, or on running out of
+    // them, and the caret is on the name the message quotes: the
+    // function's, not whatever is in its arguments — a block of their
+    // own, or another pseudo of the same name.
     assert_eq!(err("a::part(b)"), pseudo("part", 3));
     assert_eq!(err("a::slotted(b)"), pseudo("slotted", 3));
     assert_eq!(err("a:dir("), pseudo("dir", 2));
+    assert_eq!(err(":lang({)"), pseudo("lang", 1));
+    assert_eq!(err(":dir(:dir(ltr))"), pseudo("dir", 1));
+    // A comment between the colon and the name is skipped, as the
+    // parser skips it.
+    assert_eq!(err(":is(:/**/b)"), pseudo("b", 9));
 
-    // Positions already on the token they name stay put, including the
-    // one selectr gets wrong the other way: `div.-5` is reported on the
-    // `-5` the message echoes, not on the `.` before it. A pseudo whose
-    // name is not adjacent to the reported position — `::before`, two
-    // tokens along — is left alone rather than searched for.
+    // The token that failed, which `selectr` gets wrong: `div.-5` is
+    // reported on the `-5` the message echoes, not on the `.` before
+    // it. A pseudo-element is reported on its name, past both colons,
+    // and of two tokens spelled alike, the first is the one that failed.
     assert_eq!(
         err("div.-5"),
         (
@@ -419,8 +422,16 @@ fn caret_is_on_the_token_the_message_names() {
         )
     );
     assert_eq!(err("e:frobnicate"), pseudo("frobnicate", 2));
-    assert_eq!(err("a::before"), pseudo("before", 2));
+    assert_eq!(err("a::before"), pseudo("before", 3));
     assert_eq!(err("#1abc"), unexpected("#1abc", 0));
+    assert_eq!(err(":nth-child(##)"), unexpected("#", 11));
+    assert_eq!(
+        err("a:!!"),
+        (
+            css_to_xpath::ParseErrorKind::ExpectedName("!".to_owned()),
+            2
+        )
+    );
     assert_eq!(
         err("[a~]"),
         (
@@ -579,7 +590,7 @@ fn error_messages() {
         t.css_to_xpath("p::before", "").unwrap_err(),
         css_to_xpath::Error::Parse {
             kind: css_to_xpath::ParseErrorKind::UnsupportedPseudo("before".to_owned()),
-            offset: 2
+            offset: 3
         }
     );
 

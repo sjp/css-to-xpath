@@ -18,7 +18,7 @@
 use std::borrow::Borrow;
 use std::fmt;
 
-use cssparser::{Parser as CssParser, ParserInput, ToCss};
+use cssparser::{Parser as CssParser, ToCss};
 use precomputed_hash::PrecomputedHash;
 use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
 use selectors::bloom::BloomFilter;
@@ -129,9 +129,7 @@ impl ToCss for Never {
     }
 }
 
-impl PseudoElement for Never {
-    type Impl = RefImpl;
-}
+impl PseudoElement for Never {}
 
 /// The non-tree-structural pseudo-classes the reference can answer:
 /// HTML's static ones, whose answer is wholly in the document tree.
@@ -199,8 +197,6 @@ impl ToCss for PseudoClass {
 }
 
 impl NonTSPseudoClass for PseudoClass {
-    type Impl = RefImpl;
-
     fn is_active_or_hover(&self) -> bool {
         false
     }
@@ -242,7 +238,7 @@ struct RefParser {
 
 impl<'i> selectors::parser::Parser<'i> for RefParser {
     type Impl = RefImpl;
-    type Error = SelectorParseErrorKind<'i>;
+    type Error = SelectorParseErrorKind;
 
     fn parse_is_and_where(&self) -> bool {
         true
@@ -266,13 +262,12 @@ impl<'i> selectors::parser::Parser<'i> for RefParser {
     /// the trait's rejecting default.
     fn parse_non_ts_pseudo_class(
         &self,
-        location: cssparser::SourceLocation,
         name: cssparser::CowRcStr<'i>,
-    ) -> Result<PseudoClass, cssparser::ParseError<'i, SelectorParseErrorKind<'i>>> {
+    ) -> Result<PseudoClass, cssparser::ParseError<SelectorParseErrorKind>> {
         match PseudoClass::parse(&name).filter(|_| self.html) {
             Some(pc) => Ok(pc),
-            None => Err(location.new_custom_error(
-                SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
+            None => Err(cssparser::ParseError::custom(
+                SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
             )),
         }
     }
@@ -1079,8 +1074,7 @@ impl Reference {
     /// The labels of the elements `css` matches, in document order,
     /// or the parse error if the reference parser rejects it.
     pub(crate) fn select(&self, css: &str) -> Result<Vec<String>, String> {
-        let mut input = ParserInput::new(css);
-        let mut parser = CssParser::new(&mut input);
+        let mut parser = CssParser::new(css);
         let list = SelectorList::parse(&self.parser, &mut parser, ParseRelative::No)
             .map_err(|e| format!("{css:?}: {e:?}"))?;
 

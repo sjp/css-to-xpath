@@ -266,42 +266,52 @@ impl ParseErrorKind {
     /// Translate one parse failure from the dependencies' vocabulary
     /// into this crate's.
     ///
+    /// The dependencies' kinds say what went wrong but not with what, so
+    /// a kind that echoes a piece of the selector takes it from `token`,
+    /// the token the parser located the failure at. Without one it has
+    /// nothing to echo, and falls back to [`ParseErrorKind::Other`].
+    ///
     /// The arms cover every kind the two crates actually produce while
     /// parsing a selector; the rest — the `@`-rule kinds, which need a
     /// stylesheet, and the several `selectors` variants nothing
-    /// constructs — fall through to [`ParseErrorKind::Other`], as would a
+    /// constructs (`ExpectedNamespace` among them, as every prefix maps
+    /// to itself) — fall through to [`ParseErrorKind::Other`], as would a
     /// variant added upstream.
-    pub(crate) fn from_kind(kind: &CssErrorKind<'_, SelectorParseErrorKind<'_>>) -> Self {
+    pub(crate) fn from_kind(
+        kind: &CssErrorKind<SelectorParseErrorKind>,
+        token: Option<&Token<'_>>,
+    ) -> Self {
         use SelectorParseErrorKind as S;
-        match kind {
+        match (kind, token) {
             // A token after an explicit namespace prefix (`ns|5`) is
             // just a token in the wrong place, so it joins the basic
             // kind rather than earning wording of its own.
-            CssErrorKind::Basic(BasicParseErrorKind::UnexpectedToken(t))
-            | CssErrorKind::Custom(S::ExplicitNamespaceUnexpectedToken(t)) => {
-                ParseErrorKind::UnexpectedToken(token_text(t))
-            }
-            CssErrorKind::Basic(BasicParseErrorKind::EndOfInput) => ParseErrorKind::EndOfInput,
-            CssErrorKind::Custom(S::EmptySelector) => ParseErrorKind::EmptySelector,
-            CssErrorKind::Custom(S::DanglingCombinator) => ParseErrorKind::DanglingCombinator,
-            CssErrorKind::Custom(S::InvalidState) => ParseErrorKind::InvalidPosition,
-            CssErrorKind::Custom(S::ClassNeedsIdent(t) | S::PseudoElementExpectedIdent(t)) => {
+            (
+                CssErrorKind::Basic(BasicParseErrorKind::UnexpectedToken)
+                | CssErrorKind::Custom(S::ExplicitNamespaceUnexpectedToken),
+                Some(t),
+            ) => ParseErrorKind::UnexpectedToken(token_text(t)),
+            (CssErrorKind::Basic(BasicParseErrorKind::EndOfInput), _) => ParseErrorKind::EndOfInput,
+            (CssErrorKind::Custom(S::EmptySelector), _) => ParseErrorKind::EmptySelector,
+            (CssErrorKind::Custom(S::DanglingCombinator), _) => ParseErrorKind::DanglingCombinator,
+            (CssErrorKind::Custom(S::InvalidState), _) => ParseErrorKind::InvalidPosition,
+            (CssErrorKind::Custom(S::ClassNeedsIdent | S::PseudoElementExpectedIdent), Some(t)) => {
                 ParseErrorKind::ExpectedName(token_text(t))
             }
-            CssErrorKind::Custom(S::UnsupportedPseudoClassOrElement(name)) => {
-                ParseErrorKind::UnsupportedPseudo(echoed(name))
-            }
-            CssErrorKind::Custom(
-                S::NoQualifiedNameInAttributeSelector(t)
-                | S::InvalidQualNameInAttr(t)
-                | S::ExpectedBarInAttr(t)
-                | S::UnexpectedTokenInAttributeSelector(t)
-                | S::BadValueInAttr(t),
+            (
+                CssErrorKind::Custom(S::UnsupportedPseudoClassOrElement),
+                Some(Token::Ident(name) | Token::Function(name)),
+            ) => ParseErrorKind::UnsupportedPseudo(echoed(name)),
+            (
+                CssErrorKind::Custom(
+                    S::NoQualifiedNameInAttributeSelector
+                    | S::InvalidQualNameInAttr
+                    | S::ExpectedBarInAttr
+                    | S::UnexpectedTokenInAttributeSelector
+                    | S::BadValueInAttr,
+                ),
+                Some(t),
             ) => ParseErrorKind::InvalidAttributeSelector(token_text(t)),
-            CssErrorKind::Custom(S::ExpectedNamespace(prefix)) => ParseErrorKind::Other(format!(
-                "the namespace prefix `{}` is not declared",
-                echoed(prefix)
-            )),
             _ => ParseErrorKind::Other("the selector is not valid CSS".to_owned()),
         }
     }
@@ -312,44 +322,6 @@ impl ParseErrorKind {
     /// are.
     pub(crate) fn unexpected_token(token: &Token<'_>) -> Self {
         ParseErrorKind::UnexpectedToken(token_text(token))
-    }
-
-    /// Whether [`names_token`](Self::names_token) can hold for any token
-    /// at all.
-    pub(crate) fn echoes_token(&self) -> bool {
-        matches!(
-            self,
-            ParseErrorKind::UnexpectedToken(_)
-                | ParseErrorKind::ExpectedName(_)
-                | ParseErrorKind::InvalidAttributeSelector(_)
-                | ParseErrorKind::UnsupportedPseudo(_)
-        )
-    }
-
-    /// Whether `token` is the one this kind's message echoes.
-    ///
-    /// The parser asks this of the tokens on either side of the
-    /// position its dependencies reported, to put the caret on the
-    /// token the message names rather than next to it. The comparison
-    /// is on the payload, so a candidate matches when it spells the
-    /// same way the message does — sanitized and elided included, which
-    /// keeps the two sides exactly comparable.
-    ///
-    /// A pseudo-class name is held without its colons and can have been
-    /// written as a plain name or as a function, so it is compared
-    /// against the token's own name. The kinds that echo nothing —
-    /// there is no token for a caret to move to — never match.
-    pub(crate) fn names_token(&self, token: &Token<'_>) -> bool {
-        match self {
-            ParseErrorKind::UnexpectedToken(text)
-            | ParseErrorKind::ExpectedName(text)
-            | ParseErrorKind::InvalidAttributeSelector(text) => *text == token_text(token),
-            ParseErrorKind::UnsupportedPseudo(name) => match token {
-                Token::Ident(written) | Token::Function(written) => *name == echoed(written),
-                _ => false,
-            },
-            _ => false,
-        }
     }
 }
 
@@ -503,8 +475,8 @@ fn line_bounds(s: &str, offset: usize) -> (usize, usize) {
 }
 
 /// `offset`, moved back to the character boundary at or before it. The
-/// offset in a `Parse` error is derived from a source location rather
-/// than taken from an index, so it is not assumed to land cleanly.
+/// offset in an error is a public field, which a caller can set to
+/// anything, so it is not assumed to land cleanly.
 fn char_boundary(s: &str, mut offset: usize) -> usize {
     while !s.is_char_boundary(offset) {
         offset -= 1;

@@ -11,6 +11,24 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `selectors` to 0.41 and `cssparser` to 0.38. Neither reports where
+  a parse failed any more, nor which token it failed on, so the parser now
+  finds both itself by re-parsing truncations of the selector. Most errors
+  are reported exactly as before. Where they are not, the caret and the
+  echoed text are on the token that actually failed:
+  - A pseudo-element is reported on its name rather than its second colon:
+    `a::before` is at byte 3, not 2.
+  - A functional pseudo-class is reported on its own name, not on another
+    token spelled the same way in its arguments: `:dir(:dir(ltr))` is at the
+    outer `dir`.
+  - Of two adjacent tokens spelled alike, the first is reported when it is
+    the one that failed: `:nth-child(##)` is at byte 11, not 12.
+  - An invalid `An+B` dimension is echoed whole as written, not as its unit:
+    `:nth-child(2nof a)` is "unexpected `2nof`" at the `2`, not "unexpected
+    `nof`".
+
 ## [0.6.0] - 2026-09-27
 
 ### Changed
