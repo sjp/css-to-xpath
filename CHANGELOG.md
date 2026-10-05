@@ -11,6 +11,8 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-05
+
 ### Changed
 
 - Updated `selectors` to 0.41 and `cssparser` to 0.38. Neither reports where
@@ -529,7 +531,8 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 Initial release, migrated from the `selectrs` package.
 
-[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/sjp/css-to-xpath/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/sjp/css-to-xpath/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/sjp/css-to-xpath/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/sjp/css-to-xpath/compare/v0.5.0...v0.5.1
