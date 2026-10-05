@@ -13,8 +13,8 @@ categories = ["parser-implementations", "web-programming", "text-processing"]
 include = ["/src/**/*.rs", "/Cargo.toml", "/LICENSE", "/README.md", "/CHANGELOG.md"]
 
 [dependencies]
-selectors = "0.40"
-cssparser = "0.37"
+selectors = "0.41"
+cssparser = "0.38"
 unicode-width = "0.2"
 precomputed-hash = "0.1"
 
