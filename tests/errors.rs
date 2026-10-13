@@ -508,6 +508,12 @@ fn caret_is_on_the_token_the_message_names() {
             2
         )
     );
+    // Running out where a name or an argument is still owed is not a
+    // token in the wrong place, and the caret is at the end of input.
+    let end_of_input = |at| (css_to_xpath::ParseErrorKind::EndOfInput, at);
+    assert_eq!(err("a["), end_of_input(2));
+    assert_eq!(err("a[x="), end_of_input(4));
+    assert_eq!(err("a:nth-child("), end_of_input(12));
 
     // The rendered gutter for one of each side.
     let sel = "[a=b c]";
@@ -857,6 +863,18 @@ fn error_is_std_error() {
     assert!(e.source().is_none());
 }
 
+/// The deprecated `into_message` is still the same message, only
+/// consuming the error to produce it.
+#[test]
+#[allow(deprecated)]
+fn into_message_is_message() {
+    let t = Translator::new(Mode::Generic);
+    for sel in ["div > ", "a :scope"] {
+        let err = t.css_to_xpath(sel, "").unwrap_err();
+        assert_eq!(err.clone().into_message(sel), err.message(sel));
+    }
+}
+
 /// Neither message form echoes a dependency's `Debug` output: the
 /// wording is this crate's own, so a `selectors`/`cssparser` bump
 /// that renames an internal error variant cannot change it.
@@ -981,6 +999,23 @@ fn error_payloads_are_bounded() {
             offset: 2
         }
     );
+    // Exactly 40 bytes is within the bound, so it is echoed whole.
+    let pseudo = |name: &str| css_to_xpath::Error::Parse {
+        kind: css_to_xpath::ParseErrorKind::UnsupportedPseudo(name.to_owned()),
+        offset: 2,
+    };
+    let forty = "z".repeat(40);
+    assert_eq!(
+        t.css_to_xpath(&format!("a:{forty}"), "").unwrap_err(),
+        pseudo(&forty)
+    );
+    // A character straddling the 40th byte is dropped whole rather
+    // than split: `é` is bytes 39 and 40 here, so the cut is at 39.
+    let straddling = format!("{}é{}", "z".repeat(39), "z".repeat(10));
+    assert_eq!(
+        t.css_to_xpath(&format!("a:{straddling}"), "").unwrap_err(),
+        pseudo(&format!("{}\u{2026}", "z".repeat(39)))
+    );
     assert_eq!(
         t.css_to_xpath("[foo=\u{1}]", "").unwrap_err(),
         css_to_xpath::Error::Parse {
@@ -1086,6 +1121,11 @@ fn error_message_caret_alignment() {
     // and `\f` end a line.
     for sel in ["a,\nbbbb >", "a,\rbbbb >", "a,\r\nbbbb >", "a,\u{c}bbbb >"] {
         assert_eq!(gutter(sel), ("bbbb >".to_owned(), "      ^".to_owned()));
+    }
+    // The same breaks end the line after the caret, where the rest of
+    // the line still has to be echoed up to them.
+    for sel in ["a:zz b\nc", "a:zz b\rc", "a:zz b\r\nc", "a:zz b\u{c}c"] {
+        assert_eq!(gutter(sel), ("a:zz b".to_owned(), "  ^".to_owned()));
     }
 
     // A line wider than the 72-column window is cut down to it,

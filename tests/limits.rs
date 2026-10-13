@@ -3,7 +3,7 @@
 
 mod cases;
 use cases::Cases;
-use css_to_xpath::{Mode, Translator};
+use css_to_xpath::{MAX_NTH_OF_BYTES, Mode, Translator};
 
 /// Nesting depth is bounded before Servo is entered, so neither the
 /// parser, the translator, nor dropping the selector tree can recurse
@@ -184,6 +184,21 @@ fn nth_child_of_nesting_is_bounded() {
     assert!(t.css_to_xpath(&big(20), "").is_ok());
     assert_eq!(
         t.css_to_xpath(&big(200), "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "an `An+B of S` selector list translating to more than 1048576 bytes"
+                .to_owned(),
+            offset: None,
+        }
+    );
+
+    // The limit is inclusive: `[x="v…"]` is the condition `@x = 'v…'`,
+    // seven bytes around the value, so a value seven bytes short of the
+    // limit translates to exactly the limit, and one byte more is over.
+    let sized = |n: usize| format!(":nth-child(2 of [x=\"{}\"])", "v".repeat(n));
+    assert!(t.css_to_xpath(&sized(MAX_NTH_OF_BYTES - 7), "").is_ok());
+    assert_eq!(
+        t.css_to_xpath(&sized(MAX_NTH_OF_BYTES - 6), "")
+            .unwrap_err(),
         css_to_xpath::Error::Unsupported {
             construct: "an `An+B of S` selector list translating to more than 1048576 bytes"
                 .to_owned(),

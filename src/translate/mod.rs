@@ -324,19 +324,9 @@ impl Translator {
         //
         // A written `:scope` is normally caught by the pre-parse scan,
         // which knows where it is and so reports the same construct with
-        // a caret; this check stays as the backstop for one Servo can
-        // introduce with no source text of its own (`ImplicitScope`).
-        // Match order stores the leftmost compound last.
-        let raw = selector.iter_raw_match_order().as_slice();
-        let right_of_leftmost = &raw[..raw.len() - leftmost.len()];
-        if right_of_leftmost
-            .iter()
-            .any(|c| matches!(c, Component::Scope))
-        {
-            return Err(Error::unsupported(
-                "the `:scope` pseudo-class outside the leftmost compound",
-            ));
-        }
+        // a caret; the check in the fold below stays as the backstop for
+        // one Servo can introduce with no source text of its own
+        // (`ImplicitScope`).
         let scope_anchored = leftmost.iter().any(|c| matches!(c, Component::Scope));
 
         // Leftmost compound first, then fold rightwards.
@@ -348,6 +338,11 @@ impl Translator {
         path.push_str(if scope_anchored { "self::" } else { prefix });
         xpath.path = path;
         for (compound, combinator) in compounds {
+            if compound.iter().any(|c| matches!(c, Component::Scope)) {
+                return Err(Error::unsupported(
+                    "the `:scope` pseudo-class outside the leftmost compound",
+                ));
+            }
             let combinator =
                 combinator.ok_or_else(|| Error::unsupported("an unexpected selector structure"))?;
             let right = self.compound_to_xpath(compound, 0)?;

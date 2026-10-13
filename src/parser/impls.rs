@@ -57,3 +57,19 @@ impl PrecomputedHash for CssString {
         0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Servo reaches the string through these traits rather than
+    /// `as_str`, so each must hand back the same text.
+    #[test]
+    fn traits_see_the_string() {
+        let s = CssString::from("a b");
+        assert_eq!(AsRef::<str>::as_ref(&s), "a b");
+        assert_eq!(Borrow::<str>::borrow(&s), "a b");
+        // Serialized as an identifier, so the space is escaped.
+        assert_eq!(s.to_css_string(), "a\\ b");
+    }
+}

@@ -231,7 +231,7 @@ impl Translator {
         if a == 0 {
             push_sibling_count(&mut cond, siblings, Bound::Exactly, b_min_1);
         } else {
-            if a > 0 {
+            if a.is_positive() {
                 // siblings count, an+b-1, is always >= 0, so if a>0 and
                 // (b-1)<=0 an "n" exists to satisfy this; the predicate is
                 // only interesting if (b-1)>0. Nor is it if (b-1)<a: the

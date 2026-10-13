@@ -584,6 +584,15 @@ mod tests {
             Literal::affixed(" ", "'a\"", " ").to_string(),
             "concat(' ',\"'\",'a\" ')"
         );
+        // ...including when only one side has an affix
+        assert_eq!(
+            Literal::affixed("", "a'b\"", "-").to_string(),
+            "concat('a',\"'\",'b\"-')"
+        );
+        assert_eq!(
+            Literal::affixed("-", "a'\"", "").to_string(),
+            "concat('-a',\"'\",'\"')"
+        );
     }
 
     #[test]
@@ -637,6 +646,13 @@ mod tests {
         xp.add_or_condition("@a or @b");
         xp.add_condition("@c");
         assert_eq!(xp.render(), "a[(@a or @b) and @c]");
+    }
+
+    #[test]
+    fn join_or_of_nothing_is_none() {
+        // no translation joins an empty list, so only a direct call
+        // shows that it has no or-join rather than an empty one
+        assert!(Condition::join_or(Vec::new()).is_none());
     }
 
     #[test]

@@ -491,6 +491,8 @@ e:lang(en, "")
 e:lang(en, fr)
 e:lang(en, de, fr)
 e:lang( en , fr )
+e:lang(en).x
+e:lang(en, fr).x
 e:lang(*, fr)
 e:lang(EN)
 e:lang(TÜRK)
@@ -552,6 +554,9 @@ option:default
 *|button:default
 :read-write
 :read-only
+input:read-write.x
+input:read-only.x
+div:read-write.x
 :default
 :placeholder-shown
 DIV
@@ -610,6 +615,9 @@ input:optional
 p:optional
 :disabled
 :enabled
+input:disabled.x
+input:enabled.x
+:disabled.x
 option:disabled
 option:enabled
 optgroup:disabled

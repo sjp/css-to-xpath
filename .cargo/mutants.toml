@@ -14,4 +14,37 @@ exclude_re = [
     # its colon, which returns before the walk, or on the first bad
     # token of its arguments, before any block in them could close.
     "delete match arm Token::CloseParenthesis \\| Token::CloseSquareBracket \\| Token::CloseCurlyBracket in pseudo_name",
+    # The parser never asks a `CssString` for a hash, so any constant
+    # serves as well as `0`.
+    "replace <impl PrecomputedHash for CssString>::precomputed_hash -> u32 with 1",
+    # Namespace and type components always precede the conditions of a
+    # compound, so when one is reached nothing has been built yet: the
+    # `xpath.is_none()` guards are always true there.
+    "replace match guard xpath\\.is_none\\(\\) with true in Translator::compound_to_xpath",
+    # The context named in `arg_conditions` errors only reaches the
+    # message for a combinator Servo never yields in a parsed argument,
+    # so `:is()` and `:where()` cannot be told apart by it.
+    "delete match arm Component::Is\\(_\\) in Translator::apply_simple",
+    # Servo hands `:has()` a non-empty list of arguments, each an anchor
+    # followed by at least one compound, so the structure check never
+    # fails and neither does the count's `0` arm match.
+    "replace \\|\\| with && in Translator::apply_has",
+    "delete match arm 0 in Translator::apply_has",
+    # Every arm is a backstop for a construct the parser or the pre-parse
+    # scan rejects first, so no message names one.
+    "replace describe_component -> String with",
+    # A capacity hint for the sibling-count buffer; capacity is not
+    # observable.
+    "Siblings<'a>::len",
+    # `:dir()` never matches, and neither does the catch-all its arm
+    # falls through to without it.
+    "delete match arm \\(_, PseudoClass::Dir\\(_\\)\\) in Translator::apply_pseudo_class",
+    # `:lang()` takes at least one argument, each adding one condition,
+    # so the `0` arm never matches.
+    "delete match arm 0 in add_lang_conditions",
+    # Both de-duplication strategies keep the first occurrence, so which
+    # one runs never shows in the output.
+    "replace <= with > in for_each_distinct",
+    # A capacity hint for the conjunction buffer.
+    "replace \\+ with \\* in XPathExpr::write_condition",
 ]

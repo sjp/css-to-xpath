@@ -35,6 +35,14 @@ fn lang_and_dir() {
     );
     // Whitespace around the commas is fine.
     t.check("e:lang( en , fr )", "e[lang('en') or lang('fr')]");
+    // Conjoined with another condition, only a list is a disjunction
+    // that needs parentheses.
+    const X: &str = "contains(concat(' ', normalize-space(@class), ' '), ' x ')";
+    t.check("e:lang(en).x", format!("e[lang('en') and {X}]"));
+    t.check(
+        "e:lang(en, fr).x",
+        format!("e[(lang('en') or lang('fr')) and {X}]"),
+    );
     // But whitespace alone is not a separator (selectors-4 wants a
     // comma-separated list), and it does not glue a range together
     // either. `en*` is the case that matters most: read as the two

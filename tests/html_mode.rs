@@ -410,6 +410,46 @@ fn redundant_conditions_are_folded() {
     html.check("p + a:hover", "p/following-sibling::*[1][self::a][0]");
 }
 
+/// A pseudo-class condition conjoined with another is parenthesized
+/// exactly when it is a disjunction at its top level, which `and`
+/// would otherwise split. A negated disjunction is a `not(...)` call,
+/// and a conjunction binds as tightly as the `and` it joins, so
+/// neither gains parentheses.
+#[test]
+fn pseudo_class_disjunctions_are_parenthesized() {
+    let mut html = Cases::new(Mode::Html);
+    const X: &str = "contains(concat(' ', normalize-space(@class), ' '), ' x ')";
+    for (pseudo, disjunction) in [
+        // `(mutable control) or (editable)`, and its negation.
+        ("input:read-write", true),
+        ("input:read-only", false),
+        // A non-control is read-write only by being editable: one
+        // ancestor-or-self step.
+        ("div:read-write", false),
+        // The `@disabled or (fieldset ancestry)` of a pinned control,
+        // and its negation.
+        ("input:disabled", true),
+        ("input:enabled", false),
+        // A wildcard subject: `(disableable) and (actually disabled)`.
+        (":disabled", false),
+    ] {
+        // Alone, a disjunction's parentheses are taken back off, which
+        // leaves the condition as the subject's only predicate.
+        let alone = html.xpath(pseudo);
+        let (subject, condition) = alone.split_once('[').unwrap();
+        let condition = condition.strip_suffix(']').unwrap();
+        let condition = if disjunction {
+            format!("({condition})")
+        } else {
+            condition.to_owned()
+        };
+        html.check(
+            &format!("{pseudo}.x"),
+            format!("{subject}[{condition} and {X}]"),
+        );
+    }
+}
+
 #[test]
 fn html_translator_lowercases_names_not_values() {
     let mut html = Cases::new(Mode::Html);
