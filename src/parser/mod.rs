@@ -592,6 +592,7 @@ fn scan(css: &str) -> Scan {
         host: None,
     };
     while i < bytes.len() {
+        let start = i;
         let b = bytes[i];
         match quote {
             Some(q) => {
@@ -633,12 +634,12 @@ fn scan(css: &str) -> Scan {
                     b'\\' => i += 1, // skip the escaped character
                     b'"' | b'\'' => quote = Some(b),
                     b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                        // Skip the comment body and its closing "*/".
-                        i += 2;
-                        while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                            i += 1;
-                        }
-                        i += 1;
+                        // Skip the comment body and its closing "*/",
+                        // stopping on the `/`; an unclosed comment runs
+                        // to the end of the input.
+                        i = css[i + 2..]
+                            .find("*/")
+                            .map_or(bytes.len(), |end| i + 2 + end + 1);
                     }
                     b'|' if bytes.get(i + 1) == Some(&b'|') => {
                         scan.column_combinator.get_or_insert(i);
@@ -685,6 +686,7 @@ fn scan(css: &str) -> Scan {
             }
         }
         i += 1;
+        debug_assert!(i > start, "the walk only moves forward");
     }
     scan
 }
@@ -1087,6 +1089,7 @@ fn tokens(css: &str) -> Vec<Spanned<'_>> {
                 break end;
             }
         };
+        debug_assert!(restart > base, "the walk only moves forward");
         base = restart;
     }
 }

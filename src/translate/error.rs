@@ -477,9 +477,9 @@ fn line_bounds(s: &str, offset: usize) -> (usize, usize) {
 /// `offset`, moved back to the character boundary at or before it. The
 /// offset in an error is a public field, which a caller can set to
 /// anything, so it is not assumed to land cleanly.
-fn char_boundary(s: &str, mut offset: usize) -> usize {
-    while !s.is_char_boundary(offset) {
-        offset -= 1;
-    }
-    offset
+fn char_boundary(s: &str, offset: usize) -> usize {
+    (0..=offset)
+        .rev()
+        .find(|&i| s.is_char_boundary(i))
+        .unwrap_or(0)
 }
