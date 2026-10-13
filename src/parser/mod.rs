@@ -812,11 +812,10 @@ fn parse_lists(
         // points at it.
         Ok(_) => Err(parse_error(css, strict, &strict_error)),
         // Both parses failed. An empty argument list is no longer an
-        // error, so a strict `EmptySelector` may well be blaming one,
+        // error, so the strict `EmptySelector` may well be blaming one,
         // while the forgiving parse — which accepts those — stopped at
         // whatever is actually wrong.
-        Err(e) if is_empty_selector(&strict_error) => Err(parse_error(css, forgiving, &e)),
-        Err(_) => Err(parse_error(css, strict, &strict_error)),
+        Err(e) => Err(parse_error(css, forgiving, &e)),
     }
 }
 
@@ -919,8 +918,10 @@ fn locate<'i>(
     // A string or URL that a newline left bad is a good one if the
     // input ends before the newline, so the truncation that keeps it
     // whole succeeds, and the search lands on what follows it.
-    if i > 0 && matches!(tokens[i - 1].token, Token::BadString(_) | Token::BadUrl(_)) {
-        i -= 1;
+    if let Some(prev) = i.checked_sub(1)
+        && matches!(tokens[prev].token, Token::BadString(_) | Token::BadUrl(_))
+    {
+        i = prev;
     }
     if let cssparser::ParseErrorKind::Custom(
         SelectorParseErrorKind::UnsupportedPseudoClassOrElement,

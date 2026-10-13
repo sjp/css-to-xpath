@@ -83,6 +83,49 @@ fn unsupported_errors() {
     assert!(t.css_to_xpath("a b, :scope", "").is_ok());
     assert!(t.css_to_xpath("[foo=\" :scope\"]", "").is_ok());
     assert!(t.css_to_xpath("a /* :scope */ b", "").is_ok());
+    // ...while the things that really are combinators, or really end a
+    // string, a comment, or a block, are seen as such: an unspaced
+    // combinator, a string with an escaped quote in it, a comment
+    // whose body holds a lone `*` or `/`, one followed straight away by
+    // a `*`, and one that leads a group before whitespace.
+    // The translator rejects a misplaced `:scope` without the scan, so
+    // it is the offset that shows the scan found it.
+    let scope_not_leftmost = |offset| css_to_xpath::Error::Unsupported {
+        construct: "the `:scope` pseudo-class outside the leftmost compound".to_owned(),
+        offset: Some(offset),
+    };
+    for (sel, offset) in [
+        ("a>:scope", 2),
+        ("[foo=\"x\"] > :scope", 12),
+        ("[foo] :scope", 6),
+        ("/* c */ a > :scope", 12),
+        ("/**/* > :scope", 8),
+    ] {
+        assert_eq!(
+            t.css_to_xpath(sel, "").unwrap_err(),
+            scope_not_leftmost(offset),
+            "{sel:?}"
+        );
+    }
+    assert!(t.css_to_xpath(":not(.a):scope", "").is_ok());
+    assert!(t.css_to_xpath("/**/ :scope", "").is_ok());
+    assert!(t.css_to_xpath("a, /**/ :scope", "").is_ok());
+    assert!(t.css_to_xpath("[foo=\"\\\"&\"]", "").is_ok());
+    assert!(t.css_to_xpath("a /* * & */", "").is_ok());
+    assert!(t.css_to_xpath("a /* / & */", "").is_ok());
+    // An unclosed comment runs to the end of the input, and the scan
+    // stops there rather than reading past it.
+    assert!(t.css_to_xpath("a /* x", "").is_ok());
+    assert!(t.css_to_xpath("a /* x *", "").is_ok());
+    // A comment well into the selector is skipped from where it
+    // starts, so what follows it is still scanned.
+    assert_eq!(
+        t.css_to_xpath("x.aaaaaaaa /**/ &", "").unwrap_err(),
+        css_to_xpath::Error::Unsupported {
+            construct: "the `&` nesting selector".to_owned(),
+            offset: Some(16),
+        }
+    );
     // Inside a functional pseudo-class, the context node is
     // unreachable from an XPath 1.0 predicate: all four entry points
     // report the same construct, each pointing at its own `:scope`.
@@ -406,6 +449,10 @@ fn caret_is_on_the_token_the_message_names() {
     assert_eq!(err("a:dir("), pseudo("dir", 2));
     assert_eq!(err(":lang({)"), pseudo("lang", 1));
     assert_eq!(err(":dir(:dir(ltr))"), pseudo("dir", 1));
+    // A name in the arguments that does not follow a colon is not a
+    // pseudo-class, and a function closed before the failure is not
+    // the one the failure is in.
+    assert_eq!(err(":dir(f() x)"), pseudo("dir", 1));
     // A comment between the colon and the name is skipped, as the
     // parser skips it.
     assert_eq!(err(":is(:/**/b)"), pseudo("b", 9));
@@ -432,6 +479,28 @@ fn caret_is_on_the_token_the_message_names() {
             2
         )
     );
+    // A combinator is not allowed in `:host()`'s argument. A
+    // descendant combinator fails on the token after the whitespace,
+    // which the parser only looked at and put back, so the parse
+    // stopped before it; any other combinator is read, so the parse
+    // stopped past it.
+    let invalid_position = |at| (css_to_xpath::ParseErrorKind::InvalidPosition, at);
+    assert_eq!(err(":host(a b)"), invalid_position(8));
+    assert_eq!(err(":host(a /**/ b)"), invalid_position(13));
+    assert_eq!(err(":host(a > b)"), invalid_position(9));
+    // A string a newline left bad is reported on the string, not on
+    // whatever follows it.
+    assert_eq!(
+        err("[a=\"b\n]"),
+        (
+            css_to_xpath::ParseErrorKind::InvalidAttributeSelector("\"b".to_owned()),
+            3
+        )
+    );
+    // A functional pseudo-class that is complete as written is not
+    // where a later failure is: the truncation that cuts its arguments
+    // short is not mistaken for one that got them wrong.
+    assert_eq!(err(":lang(en, x) :frob"), pseudo("frob", 14));
     assert_eq!(
         err("[a~]"),
         (
