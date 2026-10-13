@@ -1,0 +1,17 @@
+# Mutants that no test can kill, because the mutated code can never
+# behave differently.
+exclude_re = [
+    # The type is uninhabited, so `to_css` can never be called.
+    "impl ToCss for NeverPseudoElement",
+    # In `scan`, a `/` that does not start a comment is invalid CSS, so
+    # treating every `/` as a comment opener changes nothing a test can see.
+    "replace match guard bytes\\.get\\(i \\+ 1\\) == Some\\(&b'\\*'\\) with true in scan",
+    # Skipping the forgiving retry for any error but an empty selector
+    # is a shortcut: the retry would report that error unchanged.
+    "replace is_empty_selector -> bool with true",
+    # In `pseudo_name`, a block closed before the failing token never
+    # matters: a pseudo-class is rejected either on a name right after
+    # its colon, which returns before the walk, or on the first bad
+    # token of its arguments, before any block in them could close.
+    "delete match arm Token::CloseParenthesis \\| Token::CloseSquareBracket \\| Token::CloseCurlyBracket in pseudo_name",
+]

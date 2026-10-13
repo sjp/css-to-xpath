@@ -15,10 +15,16 @@ env:
 
 jobs:
   mutants:
-    name: cargo mutants
+    name: cargo mutants (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     # The whole suite runs once per mutant, so this is long by design.
+    # One job cannot get through every mutant in that time, so they are
+    # split across shards that run side by side.
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -26,10 +32,10 @@ jobs:
       - uses: taiki-e/install-action@cargo-mutants
       # Surviving mutants are reported, not enforced: this is a signal
       # about test coverage to look at, not a gate on every commit.
-      - run: cargo mutants --no-shuffle -- --all-features
+      - run: cargo mutants --no-shuffle --shard ${{ matrix.shard }}/4 -- --all-features
         continue-on-error: true
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: mutants-out
+          name: mutants-out-${{ matrix.shard }}
           path: mutants.out/
