@@ -108,8 +108,8 @@ fn nth_child_of_nesting_is_bounded() {
     };
 
     // One level: `a` appears three times.
-    const S: &str = "self::a and preceding-sibling::*[self::a][1] \
-                     and not(preceding-sibling::*[self::a][2])";
+    const S: &str = "self::a and preceding-sibling::a[1] \
+                     and not(preceding-sibling::a[2])";
     t.check(&nest(1), format!("*[{S}]"));
     // Two levels, in full: `a` appears nine times, not three.
     t.check(
@@ -118,16 +118,16 @@ fn nth_child_of_nesting_is_bounded() {
     );
     // The tripling itself: each level is a little over three times the
     // last.
-    assert_eq!(t.xpath(&nest(4)).len(), 3_170);
-    assert_eq!(t.xpath(&nest(8)).len(), 259_130);
+    assert_eq!(t.xpath(&nest(4)).len(), 2_684);
+    assert_eq!(t.xpath(&nest(8)).len(), 219_764);
     // A series whose `mod` test already implies its lower bound writes
     // `S` only twice, so the same nesting merely doubles.
     let series = |n: usize| format!("{}a{}", ":nth-child(3n+2 of ".repeat(n), ")".repeat(n));
     t.check(
         &series(1),
-        "*[self::a and (count(preceding-sibling::*[self::a]) + 2) mod 3 = 0]",
+        "*[self::a and (count(preceding-sibling::a) + 2) mod 3 = 0]",
     );
-    assert_eq!(t.xpath(&series(8)).len(), 14_545);
+    assert_eq!(t.xpath(&series(8)).len(), 13_393);
 
     // Past the limit it is an error, and a cheap one: the depth is
     // checked before descending, so nothing exponential is built.

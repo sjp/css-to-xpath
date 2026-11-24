@@ -20,6 +20,11 @@ select the same nodes, because callers compare, cache and embed the strings.
   far more slowly. The same elements match. The step takes the node test the
   compound has at the top level (`*[local-name() = 'e']` for `*|e`), and a `+`
   step keeps `preceding-sibling::*[1][self::span]`.
+- The sibling count of an `:nth-child()` or `:nth-last-child()` with a single
+  `of S` selector names that selector's element in the sibling step the same
+  way: `:nth-child(2n+1 of li)` counts `preceding-sibling::li` rather than
+  `preceding-sibling::*[self::li]`. A list of several selectors still counts
+  `*` siblings filtered by the whole list.
 - The of-type pseudo-classes on an element in any namespace
   (`*|e:first-of-type`, `*|e:nth-of-type(2)`, ...) now return
   `Error::Unsupported` ("an of-type pseudo-class on an element in any

@@ -161,6 +161,14 @@ impl Translator {
         // triples the output: both limits guard that growth.
         // A trivially-true list (it contains a universal argument)
         // constrains nothing, like a plain :nth-child.
+        //
+        // A single selector `S` is counted with its own name as the node
+        // test of the sibling step where it has one
+        // (`preceding-sibling::li`, not `preceding-sibling::*[self::li]`),
+        // which selects the same siblings far faster in libxml2; `step`
+        // holds that node test and its condition. A list has no single
+        // name to test, and counts every sibling matching the check.
+        let mut step = None;
         let current_element_check = match of {
             Some(of) => {
                 if of.depth >= MAX_NTH_OF_DEPTH {
@@ -169,9 +177,16 @@ impl Translator {
                          {MAX_NTH_OF_DEPTH} levels deep"
                     )));
                 }
-                let check = self
-                    .arg_conditions(of.selectors, ":nth-child(... of S)", of.depth + 1)?
-                    .and_then(Condition::join_or);
+                let context = ":nth-child(... of S)";
+                let check = if let [selector] = of.selectors {
+                    let argument = self.translate_argument(selector, context, of.depth + 1)?;
+                    let check = argument.clone().into_condition();
+                    step = Some(argument.into_step());
+                    check
+                } else {
+                    self.arg_conditions(of.selectors, context, of.depth + 1)?
+                        .and_then(Condition::join_or)
+                };
                 if check
                     .as_ref()
                     .is_some_and(|c| c.expr.len() > MAX_NTH_OF_BYTES)
@@ -212,16 +227,16 @@ impl Translator {
         }
 
         // The siblings before or after the element, filtered by `S` (CSS
-        // Level 4 `of S`) — the same OR-joined conditions as the
-        // current-element check. Every term below is written straight
+        // Level 4 `of S`) — the current-element check, or a single
+        // selector's own `step`. Every term below is written straight
         // into one buffer: `S` can be up to `MAX_NTH_OF_BYTES`, and any
         // intermediate string holding it multiplies what a nested `of S`
         // allocates.
-        let siblings = Siblings::new(
-            last,
-            nodetest,
-            current_element_check.as_ref().map(|c| c.expr.as_str()),
-        );
+        let (nodetest, filter) = match &step {
+            Some((node_test, filter)) => (node_test.as_ref(), filter.as_ref()),
+            None => (nodetest, current_element_check.as_ref()),
+        };
+        let siblings = Siblings::new(last, nodetest, filter.map(|c| c.expr.as_str()));
         // At most two copies of `siblings` (an exact position, or a bound
         // and the congruence), plus the fixed text and up to three
         // integers around them.

@@ -909,15 +909,25 @@ impl Translator {
     }
 
     /// The condition imposed on the candidate element by the whole
-    /// argument chain. The compound's element becomes a `self::` node
-    /// test, which tests exactly what the name would have tested as the
-    /// node test of a top-level selector: `:is(p)` constrains the same
-    /// elements as `p`, and a prefix still resolves through the caller's
-    /// namespace map. A complex argument applies its rightmost
-    /// compound to the candidate, with everything to its left becoming an
-    /// existence test through reversed axes, each naming its compound's
-    /// element as a path step would: `:is(a > b ~ c)` is
-    /// `self::c and preceding-sibling::b[parent::a]`.
+    /// argument chain; see [`Argument::into_condition`].
+    ///
+    /// `None` means the chain imposes no condition (a bare `*` argument).
+    fn argument_condition(
+        &self,
+        selector: &Selector<CssToXpathImpl>,
+        context: &str,
+        of_depth: usize,
+    ) -> Result<Option<Condition>, Error> {
+        Ok(self
+            .translate_argument(selector, context, of_depth)?
+            .into_condition())
+    }
+
+    /// Translate one functional pseudo-class argument. A complex argument
+    /// applies its rightmost compound to the candidate, with everything
+    /// to its left becoming an existence test through reversed axes, each
+    /// naming its compound's element as a path step would:
+    /// `:is(a > b ~ c)` is `self::c and preceding-sibling::b[parent::a]`.
     ///
     /// The chain is walked twice rather than recursed over, so its length
     /// costs no stack: once left-to-right to translate each compound and
@@ -934,58 +944,47 @@ impl Translator {
     /// nothing conjoined to absorb, stays where it is: `:is(a:is() > b)`
     /// is `self::b and parent::a[0]`, which still says which compound is
     /// the impossible one.
-    ///
-    /// `None` means the chain imposes no condition (a bare `*` argument).
-    fn argument_condition(
+    fn translate_argument(
         &self,
         selector: &Selector<CssToXpathImpl>,
         context: &str,
         of_depth: usize,
-    ) -> Result<Option<Condition>, Error> {
-        // The compounds, rightmost first.
-        let mut subs: Vec<XPathExpr> = Vec::new();
-        // `axes[i]` points back at where the left-hand side of `subs[i]`'s
-        // combinator must be, relative to the element matched by
-        // `subs[i]`: the axis step that selects `subs[i + 1]`. The
-        // leftmost compound has nothing to its left, so there is one
-        // fewer axis than compound.
+    ) -> Result<Argument, Error> {
+        let mut compounds = compounds_match_order(selector);
+        let (compound, mut combinator) = compounds
+            .next()
+            .expect("a selector has at least one compound");
+        let subject = self.compound_to_xpath(compound, of_depth)?;
+        // The compounds to the left of the subject, nearest first, and
+        // the axis step that selects each one from the compound to its
+        // right.
+        let mut lefts: Vec<XPathExpr> = Vec::new();
         let mut axes: Vec<&str> = Vec::new();
-        // Whether the step into the compound being translated is a `+`
-        // combinator's, set by the compound to its right.
-        let mut adjacent = false;
-        for (compound, combinator) in compounds_match_order(selector) {
+        for (compound, next) in compounds {
+            let axis = match combinator {
+                Some(Combinator::Descendant) => "ancestor::",
+                Some(Combinator::Child) => "parent::",
+                Some(Combinator::LaterSibling) => "preceding-sibling::",
+                Some(Combinator::NextSibling) => "preceding-sibling::*[1]",
+                other => {
+                    return Err(Error::unsupported(format!(
+                        "an unexpected combinator ({other:?}) inside `{context}`"
+                    )));
+                }
+            };
             let mut sub = self.compound_to_xpath(compound, of_depth)?;
-            // The candidate itself is matched on any node test, so its
-            // name becomes a `self::` test. A compound further left keeps
-            // its name as the node test of the axis step that selects it
-            // (`preceding-sibling::span`, not
+            // A compound keeps its name as the node test of the axis step
+            // that selects it (`preceding-sibling::span`, not
             // `preceding-sibling::*[self::span]`), exactly as it would be
             // written as a path step at the top level, except under `+`:
             // the position predicate `[1]` must count every sibling, so
             // the name moves after it.
-            if subs.is_empty() || adjacent {
+            if combinator == Some(Combinator::NextSibling) {
                 sub.take_element_into_self_test();
             }
-            // A single compound imposes its own conditions and nothing
-            // else.
-            if combinator.is_none() && subs.is_empty() {
-                return Ok(sub.into_condition());
-            }
-            subs.push(sub);
-            adjacent = matches!(combinator, Some(Combinator::NextSibling));
-            if combinator.is_some() {
-                axes.push(match combinator {
-                    Some(Combinator::Descendant) => "ancestor::",
-                    Some(Combinator::Child) => "parent::",
-                    Some(Combinator::LaterSibling) => "preceding-sibling::",
-                    Some(Combinator::NextSibling) => "preceding-sibling::*[1]",
-                    other => {
-                        return Err(Error::unsupported(format!(
-                            "an unexpected combinator ({other:?}) inside `{context}`"
-                        )));
-                    }
-                });
-            }
+            lefts.push(sub);
+            axes.push(axis);
+            combinator = next;
         }
 
         // A compound that cannot match absorbs the existence test it is
@@ -993,60 +992,94 @@ impl Translator {
         // chain ends there; the compounds to its right keep their own
         // conditions and their brackets. Every compound is translated
         // first, so a discarded one still reports its errors.
-        if let Some(dead) = subs.iter().position(XPathExpr::is_never) {
-            subs.truncate(dead + 1);
-            axes.truncate(dead);
+        if subject.is_never() {
+            lefts.clear();
+        } else if let Some(dead) = lefts.iter().position(XPathExpr::is_never) {
+            lefts.truncate(dead + 1);
         }
-        if subs.len() == 1 {
-            return Ok(subs.pop().expect("one compound").into_condition());
+        if lefts.is_empty() {
+            return Ok(Argument {
+                subject,
+                chain: None,
+            });
         }
 
-        // The nesting reads outward-in — `c0 and parent::e1[c1 and parent::e2[c2]]`
-        // — so write it in that order: each compound emits its own
-        // conditions and the axis step selecting the next, and every
-        // bracket closes at the end. Wrapping the other way (nesting the
-        // condition built so far inside the next compound's brackets)
-        // would copy the whole accumulated condition once per compound,
-        // making a chain of n compounds cost O(n^2) bytes.
-        let mut expr = String::new();
+        // The nesting reads outward-in — `parent::e1[c1 and parent::e2[c2]]`
+        // — so write it in that order: each compound emits the axis step
+        // selecting it and its own conditions, and every bracket closes at
+        // the end. Wrapping the other way (nesting the condition built so
+        // far inside the next compound's brackets) would copy the whole
+        // accumulated condition once per compound, making a chain of n
+        // compounds cost O(n^2) bytes.
+        let mut chain = String::new();
         let mut open = 0usize;
-        let last = subs.len() - 1;
-        for (idx, sub) in subs.iter().enumerate() {
-            // This compound's own conditions come first, conjoined with
-            // the existence test that follows; a lone or-group is
-            // parenthesized there because `and` binds tighter than `or`.
-            // The innermost condition sits inside brackets with nothing
-            // after it, so a top-level `or` needs no parentheses.
-            let written = sub.write_condition(&mut expr, /* as_operand = */ idx < last);
-            if idx == last {
-                break;
-            }
-            if written.is_some() {
-                expr.push_str(" and ");
-            }
-            let axis = axes[idx];
-            expr.push_str(axis);
+        let last = lefts.len() - 1;
+        for (idx, (sub, axis)) in lefts.iter().zip(&axes).enumerate() {
+            let further = idx < last;
+            chain.push_str(axis);
             // A `+` step is already `*[1]`; any other names the element.
             if !axis.ends_with(']') {
-                expr.push_str(subs[idx + 1].element());
+                chain.push_str(sub.element());
             }
             // The bracket is only opened when something goes inside it:
-            // the innermost compound may impose no condition at all (a
+            // the leftmost compound may impose no condition at all (a
             // bare `*`), leaving the step as a plain existence test.
-            if idx + 1 < last || subs[last].has_condition() {
-                expr.push('[');
+            if further || sub.has_condition() {
+                chain.push('[');
                 open += 1;
+            }
+            // A compound's own conditions come first, conjoined with the
+            // existence test that follows; a lone or-group is
+            // parenthesized there because `and` binds tighter than `or`.
+            // The leftmost condition has nothing after it inside its
+            // bracket, so a top-level `or` needs no parentheses.
+            if sub.write_condition(&mut chain, further).is_some() && further {
+                chain.push_str(" and ");
             }
         }
         for _ in 0..open {
-            expr.push(']');
+            chain.push(']');
         }
-        Ok(Some(Condition {
-            expr,
-            // Every compound but the innermost contributes an existence
-            // test conjoined at the top level, so the result is an `and`.
-            or_group: false,
-        }))
+        Ok(Argument {
+            subject,
+            chain: Some(chain),
+        })
+    }
+}
+
+/// A translated functional pseudo-class argument: the compound the
+/// candidate element itself must match, its node test still in place,
+/// and the existence test the compounds to its left impose, if any.
+#[derive(Clone)]
+struct Argument {
+    subject: XPathExpr,
+    chain: Option<String>,
+}
+
+impl Argument {
+    /// The condition on a candidate element whatever its node test. The
+    /// subject's element becomes a `self::` test, which tests exactly
+    /// what the name would have tested as the node test of a top-level
+    /// selector: `:is(p)` constrains the same elements as `p`, and a
+    /// prefix still resolves through the caller's namespace map.
+    ///
+    /// `None` means the argument imposes no condition (a bare `*`).
+    fn into_condition(mut self) -> Option<Condition> {
+        self.subject.take_element_into_self_test();
+        self.into_step().1
+    }
+
+    /// The node test and the condition of an axis step that selects
+    /// exactly what the argument matches, the way the subject would be
+    /// written as a path step.
+    fn into_step(mut self) -> (Cow<'static, str>, Option<Condition>) {
+        let node_test = self.subject.take_element();
+        // Every compound but the subject contributes one existence test,
+        // conjoined with the subject's own conditions.
+        if let Some(chain) = self.chain {
+            self.subject.add_condition(chain);
+        }
+        (node_test, self.subject.into_condition())
     }
 }
 

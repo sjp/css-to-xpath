@@ -226,7 +226,7 @@ fn unprefixed_names_mean_the_null_namespace_everywhere() {
     );
     t.check(
         "e:nth-child(1 of p)",
-        "e[self::p and not(preceding-sibling::*[self::p][1])]",
+        "e[self::p and not(preceding-sibling::p[1])]",
     );
     // :has() looks forward, so the name stays in the node test of the
     // existence path — except under `+`, where the [1] position
@@ -286,7 +286,7 @@ fn default_namespace_qualifies_unprefixed_type_selectors() {
     t.check("p:is(body > p)", "h:p[self::h:p and parent::h:body]");
     t.check(
         "e:nth-child(1 of p)",
-        "h:e[self::h:p and not(preceding-sibling::*[self::h:p][1])]",
+        "h:e[self::h:p and not(preceding-sibling::h:p[1])]",
     );
     // The of-type family counts by the qualified node test, so the
     // prefix reaches the sibling test too.

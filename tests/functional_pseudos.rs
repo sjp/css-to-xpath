@@ -334,18 +334,18 @@ fn complex_pseudo_arguments() {
     t.check(
         "e:nth-child(2n of a b)",
         "e[self::b and ancestor::a and \
-         (count(preceding-sibling::*[self::b and ancestor::a]) + 1) mod 2 = 0]",
+         (count(preceding-sibling::b[ancestor::a]) + 1) mod 2 = 0]",
     );
     t.check(
         "e:nth-child(2n of a > b)",
         "e[self::b and parent::a and \
-         (count(preceding-sibling::*[self::b and parent::a]) + 1) mod 2 = 0]",
+         (count(preceding-sibling::b[parent::a]) + 1) mod 2 = 0]",
     );
     t.check(
         "e:nth-last-child(3 of a b)",
         "e[self::b and ancestor::a \
-         and following-sibling::*[self::b and ancestor::a][2] \
-         and not(following-sibling::*[self::b and ancestor::a][3])]",
+         and following-sibling::b[ancestor::a][2] \
+         and not(following-sibling::b[ancestor::a][3])]",
     );
 }
 
