@@ -163,7 +163,7 @@ fn nth_child_of() {
     t.check("li:nth-child(-n of .item)", "li[0]");
     // An element argument is a self:: test on the current element, and
     // the node test of the sibling step that counts.
-    t.check("div:nth-child(2 of div.foo)", "div[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and self::div and preceding-sibling::div[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][1] and not(preceding-sibling::div[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][2])]");
+    t.check("div:nth-child(2 of div.foo)", "div[contains(concat(' ', normalize-space(@class), ' '), ' foo ') and preceding-sibling::div[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][1] and not(preceding-sibling::div[contains(concat(' ', normalize-space(@class), ' '), ' foo ')][2])]");
     // A universal argument makes the list match everything, like a
     // plain :nth-child.
     t.check(
@@ -177,8 +177,15 @@ fn nth_child_of() {
     // whole check, and a name that is not a plain node test stays in
     // the predicate.
     t.check(
+        "e:nth-child(2 of li, p)",
+        "e[(self::li or self::p) and preceding-sibling::*[self::li or self::p][1] \
+         and not(preceding-sibling::*[self::li or self::p][2])]",
+    );
+    // An `li` is always an `li`, so the current element's check is
+    // always true, but the siblings still have to be counted by it.
+    t.check(
         "li:nth-child(2 of li, p)",
-        "li[(self::li or self::p) and preceding-sibling::*[self::li or self::p][1] \
+        "li[preceding-sibling::*[self::li or self::p][1] \
          and not(preceding-sibling::*[self::li or self::p][2])]",
     );
     t.check(
@@ -189,11 +196,11 @@ fn nth_child_of() {
     let mut html = Cases::new(Mode::Html);
     html.check(
         "LI:nth-child(odd of LI)",
-        "li[self::li and count(preceding-sibling::li) mod 2 = 0]",
+        "li[count(preceding-sibling::li) mod 2 = 0]",
     );
     let mut xhtml = Cases::new(Mode::Xhtml);
     xhtml.check(
         "LI:nth-child(odd of LI)",
-        "LI[self::LI and count(preceding-sibling::LI) mod 2 = 0]",
+        "LI[count(preceding-sibling::LI) mod 2 = 0]",
     );
 }

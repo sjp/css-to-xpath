@@ -16,13 +16,14 @@
 //! engine stop at the *k*-th node. Only the `mod a` congruence of a
 //! repeating series still has to count.
 
+use std::borrow::Cow;
 use std::fmt::{self, Write as _};
 
 use selectors::parser::{NthSelectorData, NthType, Selector};
 
-use super::Translator;
 use super::error::Error;
 use super::xpath_expr::{Condition, XPathExpr};
+use super::{Translator, join_arguments};
 use crate::parser::CssToXpathImpl;
 
 /// The maximum `An+B of S` nesting depth accepted.
@@ -167,7 +168,14 @@ impl Translator {
         // (`preceding-sibling::li`, not `preceding-sibling::*[self::li]`),
         // which selects the same siblings far faster in libxml2; `step`
         // holds that node test and its condition. A list has no single
-        // name to test, and counts every sibling matching the check.
+        // name to test, and counts every sibling matching the whole list.
+        //
+        // The current element's own check leaves out a `self::` test of
+        // the name its compound already tests (`li:nth-child(2 of li)`
+        // needs no `self::li`), but the siblings are other elements and
+        // keep it.
+        let implied = xpath.implied_name_test().map(str::to_owned);
+        let implied = implied.as_deref();
         let mut step = None;
         let current_element_check = match of {
             Some(of) => {
@@ -180,16 +188,22 @@ impl Translator {
                 let context = ":nth-child(... of S)";
                 let check = if let [selector] = of.selectors {
                     let argument = self.translate_argument(selector, context, of.depth + 1)?;
-                    let check = argument.clone().into_condition();
+                    let check = argument.clone().into_condition(implied);
                     step = Some(argument.into_step());
                     check
                 } else {
-                    self.arg_conditions(of.selectors, context, of.depth + 1)?
-                        .and_then(Condition::join_or)
+                    let arguments =
+                        self.translate_arguments(of.selectors, context, of.depth + 1)?;
+                    if implied.is_some() {
+                        let counted = join_arguments(arguments.clone(), None);
+                        step = Some((Cow::Borrowed("*"), counted));
+                    }
+                    join_arguments(arguments, implied)
                 };
-                if check
-                    .as_ref()
-                    .is_some_and(|c| c.expr.len() > MAX_NTH_OF_BYTES)
+                let too_long =
+                    |c: Option<&Condition>| c.is_some_and(|c| c.expr.len() > MAX_NTH_OF_BYTES);
+                if too_long(check.as_ref())
+                    || step.as_ref().is_some_and(|(_, c)| too_long(c.as_ref()))
                 {
                     return Err(Error::unsupported(format!(
                         "an `An+B of S` selector list translating to more than \

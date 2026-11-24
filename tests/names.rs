@@ -283,7 +283,7 @@ fn default_namespace_qualifies_unprefixed_type_selectors() {
     t.check("p:is(a, b)", "h:p[self::h:a or self::h:b]");
     t.check("p:not(a)", "h:p[not(self::h:a)]");
     t.check("p:has(> a)", "h:p[child::h:a]");
-    t.check("p:is(body > p)", "h:p[self::h:p and parent::h:body]");
+    t.check("p:is(body > p)", "h:p[parent::h:body]");
     t.check(
         "e:nth-child(1 of p)",
         "h:e[self::h:p and not(preceding-sibling::h:p[1])]",

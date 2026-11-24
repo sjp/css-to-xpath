@@ -25,6 +25,12 @@ select the same nodes, because callers compare, cache and embed the strings.
   way: `:nth-child(2n+1 of li)` counts `preceding-sibling::li` rather than
   `preceding-sibling::*[self::li]`. A list of several selectors still counts
   `*` siblings filtered by the whole list.
+- An `:is()`, `:where()` or `of S` argument no longer repeats a `self::` test
+  of the node test its compound already makes: `li:is(li)` is `li` rather
+  than `li[self::li]`, and `li:nth-child(3 of li)` drops the `self::li` on the
+  current element but keeps the `li` sibling steps. A different name, prefix
+  or (outside `Mode::Html`) case keeps its test, and so does `:not()`:
+  `li:not(li)` is still `li[not(self::li)]`.
 - The of-type pseudo-classes on an element in any namespace
   (`*|e:first-of-type`, `*|e:nth-of-type(2)`, ...) now return
   `Error::Unsupported` ("an of-type pseudo-class on an element in any

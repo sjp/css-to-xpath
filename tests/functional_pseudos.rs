@@ -354,6 +354,68 @@ fn complex_pseudo_arguments() {
 /// selects what `X` does, so no node-set changes; what does change is
 /// that a list folding down to one branch stops being an or-group, and
 /// so is no longer parenthesized when it is conjoined.
+/// An `:is()`, `:where()` or `of S` argument leaves out a `self::` test
+/// of exactly the node test its compound already makes. One of another
+/// name, another prefix, or another case where case matters stays, as
+/// does every test a negation or a wildcard compound makes.
+#[test]
+fn implied_name_tests_are_left_out() {
+    let mut t = Cases::new(Mode::Generic);
+    const X: &str = "contains(concat(' ', normalize-space(@class), ' '), ' x ')";
+    t.check("li:is(li)", "li");
+    t.check("li:where(li)", "li");
+    t.check("|li:is(li)", "li");
+    t.check("ns|li:is(ns|li)", "ns:li");
+    t.check("li:is(li.x)", format!("li[{X}]"));
+    t.check("li:where(li.x)", format!("li[{X}]"));
+    t.check("li:is(li):is(li.x)", format!("li[{X}]"));
+    t.check("li:is(*:is(li))", "li");
+    t.check("li:is(li, p)", "li");
+    t.check("li:is(li.x, p)", format!("li[{X} or self::p]"));
+    t.check("p:is(span ~ p)", "p[preceding-sibling::span]");
+    t.check("li:is(li > li)", "li[parent::li]");
+    t.check("ul > li:is(li)", "ul/li");
+    t.check(
+        "p + li:is(li.x)",
+        format!("p/following-sibling::*[1][self::li][{X}]"),
+    );
+    t.check(
+        "li:nth-child(3 of li)",
+        "li[preceding-sibling::li[2] and not(preceding-sibling::li[3])]",
+    );
+    t.check(
+        "li:nth-child(2 of li:is(li))",
+        "li[preceding-sibling::li[1] and not(preceding-sibling::li[2])]",
+    );
+    t.check("li:nth-child(n of li)", "li");
+
+    t.check("li:is(p)", "li[self::p]");
+    t.check("ns|li:is(li)", "ns:li[self::li]");
+    t.check("li:is(ns|li)", "li[self::ns:li]");
+    t.check("ns|li:is(b|li)", "ns:li[self::b:li]");
+    t.check("li:not(li)", "li[not(self::li)]");
+    t.check(":is(li)", "*[self::li]");
+    t.check("ns|*:is(ns|li)", "ns:*[self::ns:li]");
+    t.check("*|li:is(li)", "*[local-name() = 'li' and self::li]");
+    t.check("li:is(:is(li, p))", "li[self::li or self::p]");
+    t.check("li:is(li + li)", "li[preceding-sibling::*[1][self::li]]");
+    t.check(
+        "li:nth-child(odd of p)",
+        "li[self::p and count(preceding-sibling::p) mod 2 = 0]",
+    );
+
+    let mut html = Cases::new(Mode::Html);
+    html.check("LI:is(li)", "li");
+    html.check("li:where(LI ~ li)", "li[preceding-sibling::li]");
+    let mut xhtml = Cases::new(Mode::Xhtml);
+    xhtml.check("li:is(li)", "li");
+    xhtml.check("LI:is(li)", "LI[self::li]");
+    xhtml.check(
+        "LI:nth-child(odd of li)",
+        "LI[self::li and count(preceding-sibling::li) mod 2 = 0]",
+    );
+}
+
 #[test]
 fn repeated_argument_branches_are_folded() {
     let mut t = Cases::new(Mode::Generic);

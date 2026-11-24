@@ -546,10 +546,9 @@ impl Translator {
             // :not(). Nesting inside other functional pseudo-classes is
             // allowed (Selectors Level 4).
             Component::Negation(list) => {
-                let joined = self
-                    .arg_conditions(list.slice(), ":not()", of_depth)?
-                    .and_then(Condition::join_or);
-                match joined {
+                // A `self::` test is kept even where the compound's node
+                // test implies it: `li:not(li)` is `li[not(self::li)]`.
+                match self.arg_condition(list.slice(), ":not()", of_depth, None)? {
                     // not(...) supplies its own grouping, so the
                     // or-join needs no parentheses.
                     Some(joined) => xpath.add_condition(format!("not({})", joined.expr)),
@@ -574,10 +573,13 @@ impl Translator {
                     Component::Is(_) => ":is()",
                     _ => ":where()",
                 };
-                // None means an argument matched everything, so the whole
-                // pseudo-class is a no-op constraint.
-                if let Some(conditions) = self.arg_conditions(list.slice(), context, of_depth)?
-                    && let Some(joined) = Condition::join_or(conditions)
+                // The arguments test a candidate the compound has already
+                // named, so `li:is(li)` needs no `self::li`. None means an
+                // argument matched everything, so the whole pseudo-class is
+                // a no-op constraint.
+                let implied = xpath.implied_name_test().map(str::to_owned);
+                if let Some(joined) =
+                    self.arg_condition(list.slice(), context, of_depth, implied.as_deref())?
                 {
                     xpath.push_condition(joined);
                 }
@@ -880,47 +882,32 @@ impl Translator {
         }
     }
 
-    /// Harvest the conditions of a pseudo-class argument list, the shared
-    /// pattern of :not()/:is()/:where() and the nth `of S` handling:
-    /// translate each argument into a condition on the candidate element.
-    ///
-    /// Returns `None` when any argument matches everything (e.g. `*`): the
-    /// OR of the list is then trivially true, so callers must not constrain
-    /// on the remaining arguments.
-    fn arg_conditions(
+    /// Translate every argument of a pseudo-class argument list, the
+    /// shared pattern of :not()/:is()/:where() and the nth `of S`
+    /// handling.
+    fn translate_arguments(
         &self,
         selectors: &[Selector<CssToXpathImpl>],
         context: &str,
         of_depth: usize,
-    ) -> Result<Option<Vec<Condition>>, Error> {
-        let mut conditions = Vec::new();
-        let mut trivially_true = false;
-        for selector in selectors {
-            match self.argument_condition(selector, context, of_depth)? {
-                None => trivially_true = true,
-                Some(condition) => conditions.push(condition),
-            }
-        }
-        Ok(if trivially_true {
-            None
-        } else {
-            Some(conditions)
-        })
+    ) -> Result<Vec<Argument>, Error> {
+        selectors
+            .iter()
+            .map(|selector| self.translate_argument(selector, context, of_depth))
+            .collect()
     }
 
-    /// The condition imposed on the candidate element by the whole
-    /// argument chain; see [`Argument::into_condition`].
-    ///
-    /// `None` means the chain imposes no condition (a bare `*` argument).
-    fn argument_condition(
+    /// The OR of a pseudo-class argument list's conditions on the
+    /// candidate element; see [`join_arguments`].
+    fn arg_condition(
         &self,
-        selector: &Selector<CssToXpathImpl>,
+        selectors: &[Selector<CssToXpathImpl>],
         context: &str,
         of_depth: usize,
+        implied: Option<&str>,
     ) -> Result<Option<Condition>, Error> {
-        Ok(self
-            .translate_argument(selector, context, of_depth)?
-            .into_condition())
+        let arguments = self.translate_arguments(selectors, context, of_depth)?;
+        Ok(join_arguments(arguments, implied))
     }
 
     /// Translate one functional pseudo-class argument. A complex argument
@@ -1063,9 +1050,16 @@ impl Argument {
     /// selector: `:is(p)` constrains the same elements as `p`, and a
     /// prefix still resolves through the caller's namespace map.
     ///
+    /// `implied` is a node test the candidate is already known to pass,
+    /// the compound's own; a `self::` test of exactly that node test is
+    /// then always true and is left out.
+    ///
     /// `None` means the argument imposes no condition (a bare `*`).
-    fn into_condition(mut self) -> Option<Condition> {
+    fn into_condition(mut self, implied: Option<&str>) -> Option<Condition> {
         self.subject.take_element_into_self_test();
+        if let Some(implied) = implied {
+            self.subject.drop_self_test(implied);
+        }
         self.into_step().1
     }
 
@@ -1081,6 +1075,23 @@ impl Argument {
         }
         (node_test, self.subject.into_condition())
     }
+}
+
+/// The OR of the arguments' conditions on a candidate element, each as
+/// [`Argument::into_condition`] gives it.
+///
+/// Returns `None` when any argument matches everything (e.g. `*`): the
+/// OR of the list is then trivially true, so callers must not constrain
+/// on the remaining arguments.
+fn join_arguments(
+    arguments: impl IntoIterator<Item = Argument>,
+    implied: Option<&str>,
+) -> Option<Condition> {
+    let mut conditions = Vec::new();
+    for argument in arguments {
+        conditions.push(argument.into_condition(implied)?);
+    }
+    Condition::join_or(conditions)
 }
 
 /// Join two compound translations with a combinator.

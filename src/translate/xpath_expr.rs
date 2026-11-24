@@ -384,7 +384,7 @@ impl XPathExpr {
     /// combinator's `[1]`), so a `0` here says nothing about them.
     ///
     /// The `0` absorption has a counterpart one level up, in
-    /// `Translator::argument_condition`: the conjunction there is
+    /// `Translator::translate_argument`: the conjunction there is
     /// assembled from a chain of compounds rather than held in one
     /// `conditions`, so that chain applies the same rule for itself.
     pub(crate) fn write_condition(&self, out: &mut String, as_operand: bool) -> Option<bool> {
@@ -540,6 +540,27 @@ impl XPathExpr {
     /// The node test.
     pub(crate) fn element(&self) -> &str {
         &self.element
+    }
+
+    /// The node test every element this compound selects passes, as an
+    /// argument would write it in a `self::` test, when it names one
+    /// element: a wildcard (`*`, `ns:*`) pins no name, and a name folded
+    /// into a condition is left to that condition.
+    pub(crate) fn implied_name_test(&self) -> Option<&str> {
+        let element: &str = &self.element;
+        (element != "*" && !element.ends_with(":*")).then_some(element)
+    }
+
+    /// Drop every `self::{node_test}` conjunct, for an expression whose
+    /// candidate is known to pass `node_test`. Only a whole conjunct
+    /// goes, never one branch of an `or`.
+    pub(crate) fn drop_self_test(&mut self, node_test: &str) {
+        self.conditions.retain(|c| {
+            c.or_group
+                || c.expr
+                    .strip_prefix("self::")
+                    .is_none_or(|test| test != node_test)
+        });
     }
 
     /// Replace the node test with `*`, returning what it was.

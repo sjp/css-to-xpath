@@ -134,7 +134,9 @@ its left: `:is(a > b:hover)` is `*[0]`. The compounds to its right stay
 (`:is(a > b:hover > c)` is `*[self::c and parent::b[0]]`), and so does a
 `0` already alone inside its axis bracket (`:is(a:hover > b)` is
 `*[self::b and parent::a[0]]`), since that is what says which compound
-cannot match. Nothing beyond those rules is folded: the output is a faithful
+cannot match. An `:is()`, `:where()` or `of S` argument also leaves out a
+`self::` test of the very node test its compound makes: `li:is(li)` is
+`li`. Nothing beyond those rules is folded: the output is a faithful
 translation of the selector, not a minimised expression.
 
 `Mode` is an ordinary enum, so a caller that has one picks it at compile
