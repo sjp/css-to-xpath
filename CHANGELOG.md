@@ -18,7 +18,15 @@ select the same nodes, because callers compare, cache and embed the strings.
   matches `de-x-DE`, where `DE` is private-use data, and still matches
   `de-Latn-DE`. Each search after the first subtag now runs over the tail
   cut at its first singleton, so the XPath for a multi-subtag range grows.
-
+- `:lang()` under `Mode::Generic` now does RFC 4647 extended filtering over
+  the nearest `xml:lang`, as the HTML modes do over their language
+  attribute, rather than XPath's `lang()` prefix match: `:lang(en-US)` now
+  matches `en-Latn-US`. A range of more than one subtag translates to the
+  same chain as in the HTML modes, read from `@xml:lang`; a single-subtag
+  range (`en`, `en-*`) is still `lang('en')`. A `*` is now accepted in any
+  position, so `:lang(*-CH)` and `:lang(de-*-DE)` translate instead of
+  returning `Error::Unsupported` ("a wildcard outside the final subtag"),
+  which no mode produces any more.
 - An any-namespace attribute selector with a value test other than plain `=`
   (`[*|a^=x]`, `[*|a~=x]`, `[*|a=x i]`, ...) now matches when *any*
   attribute with that local name passes, not just the first. A string

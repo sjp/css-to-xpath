@@ -211,17 +211,23 @@ XPath reads as a division, not a path.
   (`:is()` translates to `*[0]`), as the forgiving-selector-list grammar
   requires; the rest of forgiveness is not adopted, so an argument that
   fails to parse is an error rather than a silently dropped one.
-- `:scope`, `:root`, `:empty`, `:lang()`. Under `Mode::Generic` a range
-  translates to XPath's `lang()`, except the two that say something
-  *about* an element's language rather than naming one — `:lang(*)`
-  ("known") and `:lang("")` ("not known") — which `lang()` cannot
-  express, so they walk `@xml:lang` instead. `Mode::Xhtml` reads
-  `@xml:lang` for every range.
+- `:scope`, `:root`, `:empty`, `:lang()`. `:lang()` does Level 4's RFC
+  4647 extended filtering in every mode: the first range subtag must
+  equal the tag's first, and each later one must appear as a whole subtag
+  after it and before any *singleton* (a one-character subtag, such as
+  the `x` opening a private-use section), so `:lang(de-DE)` matches
+  `de-DE`, `de-DE-1996` and `de-Latn-DE` but not `de-x-DE`. A leading
+  `*` stands for the tag's first subtag, so `:lang(*-CH)` matches `de-CH`
+  and `fr-Latn-CH` but not `ch`; a `*` anywhere else drops out (`de-*-DE`
+  tests what `de-DE` does). `:lang(*)` matches an element whose language
+  is known, `:lang("")` one whose language is not. Under `Mode::Generic`
+  the language is the nearest `@xml:lang`, and a single-subtag range
+  (`en`, `en-*`) translates to XPath's `lang('en')`, which is exactly
+  that test. `Mode::Xhtml` reads `@xml:lang` too.
   Both rely on the `xml` prefix, which XML binds implicitly and so needs
   no entry in the caller's namespace map; processors that do not pre-bind
-  it need it registered. `:empty` follows Level 3 rather than Level 4,
-  and `:lang()` stops short of Level 4 in the ways listed under
-  [Approximations](#approximations).
+  it need it registered. `:empty` follows Level 3 rather than Level 4
+  (see [Approximations](#approximations)).
 - The `Mode::Html`/`Mode::Xhtml` form and link pseudo-classes listed above.
 
 ## Namespaces
@@ -364,7 +370,7 @@ express them faithfully:
   language range "en-" (an empty subtag, which a language range cannot
   have) ``. The *empty* range `:lang("")` is not one of these: Level 4
   gives it a meaning, and this crate gives it that meaning (see
-  [Approximations](#approximations)).
+  [Supported selectors](#supported-selectors)).
 - Functional pseudo-classes (`:is()`, `:not()`, `:where()`, `:has()`,
   `:nth-child(… of S)`) nested more than **32** levels deep. Parsing and
   translating both recurse once per level, so the depth is capped to turn
@@ -391,26 +397,6 @@ Level 4 asks for, because XPath 1.0 — or a static translation of any
 kind — cannot reach the spec's answer. They are listed here so the
 contract stays honest.
 
-- **`:lang()` under `Mode::Generic` is a prefix match.** Under
-  `Mode::Html` and `Mode::Xhtml` a multi-subtag range is matched by
-  extended filtering, as Level 4 asks: the first range subtag must equal
-  the tag's first, and each later one must appear as a whole subtag after
-  it and before any *singleton* (a one-character subtag, such as the `x`
-  opening a private-use section), so `:lang(de-DE)` matches `de-DE`,
-  `de-DE-1996` and `de-Latn-DE` but not `de-x-DE`. Under `Mode::Generic`
-  the test is XPath's own `lang()`, which is the Level 3 / `[lang|=…]`
-  prefix match — `de-DE` there matches `de-DE` and `de-DE-1996` but not
-  `de-Latn-DE`. A `*` subtag is allowed
-  anywhere in the range under `Mode::Html` and `Mode::Xhtml`, as extended
-  filtering asks: a leading one stands for the tag's first subtag, so
-  `:lang(*-CH)` matches `de-CH` and `fr-Latn-CH` but not `ch`, and one in
-  any other position moves past nothing and drops out (`de-*-DE` tests
-  what `de-DE` does). Under `Mode::Generic` only the whole range (`*`) and
-  the final subtag (`en-*`) may be a wildcard — XPath's `lang()` is a
-  prefix match with nowhere to put the rest — and any other placement is
-  an error. Single-subtag ranges — `en`, `en-*`, `*`, the common case —
-  are exact everywhere, as is the empty range `""`: "the language is not
-  known" is the wildcard's test negated, which needs no filtering at all.
 - **`:empty` follows Level 3, so white space counts.** `e:empty` is
   `e[not(*) and not(string-length())]`, and `<p> </p>` is therefore not
   empty. Level 4 ignores document white space; browsers still ship the
