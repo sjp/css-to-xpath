@@ -20,6 +20,11 @@ select the same nodes, because callers compare, cache and embed the strings.
   now goes in a predicate on the attribute step:
   `*[@*[local-name() = 'a'][starts-with(., 'x')]]`. `[*|a]` and `[*|a=x]`
   are unchanged.
+- In `Mode::Html`, an any-namespace selector for one of HTML's
+  case-insensitive attributes (`[*|type=foo]`, `[*|rel~=x]`, ...) now folds
+  the value of the no-namespace attribute, as `[type=foo]` does, and still
+  compares namespaced ones exactly:
+  `*[@*[local-name() = 'type'][(namespace-uri() = '' and translate(., …) = 'foo') or . = 'foo']]`.
 
 ## [0.6.1] - 2026-10-05
 
