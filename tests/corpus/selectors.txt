@@ -897,3 +897,6 @@ e[foo]:is(a, a)
 e:nth-child(2n of a, a)
 .p
 .q
+:is(BODY ~ P)
+p:is(body > p)
+e:is(svg|di\[v > p)

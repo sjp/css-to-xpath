@@ -13,6 +13,13 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ### Changed
 
+- A compound to the left of a combinator inside a functional pseudo-class
+  argument now names its element in the reversed axis step:
+  `:is(span ~ p)` is `*[self::p and preceding-sibling::span]` rather than
+  `*[self::p and preceding-sibling::*[self::span]]`, which libxml2 evaluates
+  far more slowly. The same elements match. The step takes the node test the
+  compound has at the top level (`*[local-name() = 'e']` for `*|e`), and a `+`
+  step keeps `preceding-sibling::*[1][self::span]`.
 - The of-type pseudo-classes on an element in any namespace
   (`*|e:first-of-type`, `*|e:nth-of-type(2)`, ...) now return
   `Error::Unsupported` ("an of-type pseudo-class on an element in any

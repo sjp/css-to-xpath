@@ -537,6 +537,11 @@ impl XPathExpr {
         *self = XPathExpr { path, ..other };
     }
 
+    /// The node test.
+    pub(crate) fn element(&self) -> &str {
+        &self.element
+    }
+
     /// Replace the node test with `*`, returning what it was.
     pub(crate) fn take_element(&mut self) -> Cow<'static, str> {
         std::mem::replace(&mut self.element, Cow::Borrowed("*"))

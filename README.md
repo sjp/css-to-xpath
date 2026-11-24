@@ -131,9 +131,9 @@ argument list, whose branches are OR-ed: `:is(a, a)` is `*[self::a]`.
 Inside a complex argument the `[0]` absorbs its chain the same way,
 taking the reversed-axis test conjoined with it and every compound to
 its left: `:is(a > b:hover)` is `*[0]`. The compounds to its right stay
-(`:is(a > b:hover > c)` is `*[self::c and parent::*[0]]`), and so does a
+(`:is(a > b:hover > c)` is `*[self::c and parent::b[0]]`), and so does a
 `0` already alone inside its axis bracket (`:is(a:hover > b)` is
-`*[self::b and parent::*[0]]`), since that is what says which compound
+`*[self::b and parent::a[0]]`), since that is what says which compound
 cannot match. Nothing beyond those rules is folded: the output is a faithful
 translation of the selector, not a minimised expression.
 
@@ -243,7 +243,7 @@ An *unprefixed* type name becomes an unprefixed XPath name test, which
 matches the null namespace only. That is the rule everywhere the name can
 appear — at the top level, on the right of a combinator, and inside
 `:is()`, `:where()`, `:not()`, `:has()` and `An+B of S`, where it becomes
-the equivalent `self::` test:
+the node test of an axis step or the equivalent `self::` test:
 
 ```rust
 use css_to_xpath::{css_to_xpath, Mode};
@@ -251,7 +251,7 @@ use css_to_xpath::{css_to_xpath, Mode};
 assert_eq!(css_to_xpath("body > p", "", Mode::Generic).unwrap(), "body/p");
 assert_eq!(
     css_to_xpath(":is(body > p)", "", Mode::Generic).unwrap(),
-    "*[self::p and parent::*[self::body]]"
+    "*[self::p and parent::body]"
 );
 ```
 

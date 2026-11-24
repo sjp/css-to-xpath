@@ -203,72 +203,60 @@ fn empty_forgiving_argument_lists() {
 fn complex_pseudo_arguments() {
     let mut t = Cases::new(Mode::Generic);
     // One reversed axis per combinator.
-    t.check("e:is(a b)", "e[self::b and ancestor::*[self::a]]");
-    t.check("e:is(a > b)", "e[self::b and parent::*[self::a]]");
+    t.check("e:is(a b)", "e[self::b and ancestor::a]");
+    t.check("e:is(a > b)", "e[self::b and parent::a]");
     t.check(
         "e:is(a + b)",
         "e[self::b and preceding-sibling::*[1][self::a]]",
     );
-    t.check(
-        "e:is(a ~ b)",
-        "e[self::b and preceding-sibling::*[self::a]]",
-    );
+    t.check("e:is(a ~ b)", "e[self::b and preceding-sibling::a]");
     // Longer chains nest, each step wrapping the remainder.
-    t.check(
-        "e:is(a b c)",
-        "e[self::c and ancestor::*[self::b and ancestor::*[self::a]]]",
-    );
+    t.check("e:is(a b c)", "e[self::c and ancestor::b[ancestor::a]]");
     t.check(
         "e:is(a > b ~ c)",
-        "e[self::c and preceding-sibling::*[self::b and parent::*[self::a]]]",
+        "e[self::c and preceding-sibling::b[parent::a]]",
     );
     t.check(
         "e:is(a + b > c)",
-        "e[self::c and parent::*[self::b and preceding-sibling::*[1][self::a]]]",
+        "e[self::c and parent::b[preceding-sibling::*[1][self::a]]]",
     );
     // :not() negates the whole chain condition; complex and compound
     // arguments OR together ('and' binds tighter than 'or').
-    t.check("e:not(a b)", "e[not(self::b and ancestor::*[self::a])]");
+    t.check("e:not(a b)", "e[not(self::b and ancestor::a)]");
     t.check(
         "e:not(a > b + c)",
-        "e[not(self::c and preceding-sibling::*[1][self::b and parent::*[self::a]])]",
+        "e[not(self::c and preceding-sibling::*[1][self::b and parent::a])]",
     );
-    t.check(
-        "e:is(a b, c)",
-        "e[self::b and ancestor::*[self::a] or self::c]",
-    );
-    t.check(
-        "e:is(a, b c)",
-        "e[self::a or self::c and ancestor::*[self::b]]",
-    );
+    t.check("e:is(a b, c)", "e[self::b and ancestor::a or self::c]");
+    t.check("e:is(a, b c)", "e[self::a or self::c and ancestor::b]");
     // Universal steps: a bare-`*` left-hand side is a bare axis test,
     // a bare-`*` rightmost compound leaves only the chain test, and a
     // universal *argument* still makes the list trivially true (or
     // :not() unmatchable).
     t.check("e:is(* b)", "e[self::b and ancestor::*]");
-    t.check("e:is(a *)", "e[ancestor::*[self::a]]");
-    t.check("e:not(a *)", "e[not(ancestor::*[self::a])]");
+    t.check("e:is(a *)", "e[ancestor::a]");
+    t.check("e:not(a *)", "e[not(ancestor::a)]");
     t.check("e:is(a b, *)", "e");
     t.check("e:not(a b, *)", "e[0]");
-    // Conditions on chain steps come before each step's name test.
+    // A chain step names its element and keeps its conditions in a
+    // predicate.
     t.check(
         "e:is(a.x b.y)",
         "e[contains(concat(' ', normalize-space(@class), ' '), ' y ') and \
          self::b and \
-         ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' x ') \
-         and self::a]]",
+         ancestor::a[contains(concat(' ', normalize-space(@class), ' '), ' x ')]]",
     );
     t.check(
         "e:is(a[foo='bar'] > b)",
-        "e[self::b and parent::*[@foo = 'bar' and self::a]]",
+        "e[self::b and parent::a[@foo = 'bar']]",
     );
     t.check(
         "e:is(a:first-child b)",
-        "e[self::b and ancestor::*[not(preceding-sibling::*[1]) and self::a]]",
+        "e[self::b and ancestor::a[not(preceding-sibling::*[1])]]",
     );
     // A step that can never match absorbs the rest of its own
-    // conjunction, here the `self::a` the folded element name added.
-    t.check("e:is(a:hover b)", "e[self::b and ancestor::*[0]]");
+    // conjunction.
+    t.check("e:is(a:hover b)", "e[self::b and ancestor::a[0]]");
     // ...and, one step out, the axis test that carries the steps to its
     // left, so the chain ends at the step that cannot match. One case
     // per combinator:
@@ -278,11 +266,11 @@ fn complex_pseudo_arguments() {
     t.check("e:is(a ~ b:hover)", "e[0]");
     t.check("e:is(a > b > c:hover)", "e[0]");
     // The steps to its right are untouched, brackets and all.
-    t.check("e:is(a > b:hover > c)", "e[self::c and parent::*[0]]");
+    t.check("e:is(a > b:hover > c)", "e[self::c and parent::b[0]]");
     // The 0 that is already innermost stays where it is: nothing is
     // conjoined with it to absorb, and folding it away would hide which
     // step is the impossible one.
-    t.check("e:is(a:hover > b)", "e[self::b and parent::*[0]]");
+    t.check("e:is(a:hover > b)", "e[self::b and parent::a[0]]");
     // The fold happens before the wrappers see the condition.
     t.check("e:is(a > b:hover, c)", "e[0 or self::c]");
     t.check("e:not(a > b:hover)", "e[not(0)]");
@@ -293,13 +281,10 @@ fn complex_pseudo_arguments() {
         "e:is(:not(a) b)",
         "e[self::b and ancestor::*[not(self::a)]]",
     );
-    t.check(
-        "e:not(:is(a b))",
-        "e[not(self::b and ancestor::*[self::a])]",
-    );
+    t.check("e:not(:is(a b))", "e[not(self::b and ancestor::a)]");
     t.check(
         "e:is(:not(a b) c)",
-        "e[self::c and ancestor::*[not(self::b and ancestor::*[self::a])]]",
+        "e[self::c and ancestor::*[not(self::b and ancestor::a)]]",
     );
     t.check(
         "e:is(:is(a, b) c)",
@@ -307,12 +292,12 @@ fn complex_pseudo_arguments() {
     );
     t.check(
         "e:is(c :is(a, b))",
-        "e[(self::a or self::b) and ancestor::*[self::c]]",
+        "e[(self::a or self::b) and ancestor::c]",
     );
     // Prefixed names in chain steps stay self:: node tests.
-    t.check("ns|e:is(a b)", "ns:e[self::b and ancestor::*[self::a]]");
-    t.check("e:is(ns|a b)", "e[self::b and ancestor::*[self::ns:a]]");
-    t.check("e:is(a ns|b)", "e[self::ns:b and ancestor::*[self::a]]");
+    t.check("ns|e:is(a b)", "ns:e[self::b and ancestor::a]");
+    t.check("e:is(ns|a b)", "e[self::b and ancestor::ns:a]");
+    t.check("e:is(a ns|b)", "e[self::ns:b and ancestor::a]");
     // :has() walks forward: one joiner per combinator, with the
     // leading combinator choosing the first axis.
     t.check("e:has(a b)", "e[.//a//b]");
@@ -331,10 +316,7 @@ fn complex_pseudo_arguments() {
         "e:has(a > b + c)",
         "e[.//a/b/following-sibling::*[1][self::c]]",
     );
-    t.check(
-        "e:has(> a:is(b c))",
-        "e[child::a[self::c and ancestor::*[self::b]]]",
-    );
+    t.check("e:has(> a:is(b c))", "e[child::a[self::c and ancestor::b]]");
     t.check(
         "e:has(a.x > b.y)",
         "e[.//a[contains(concat(' ', normalize-space(@class), ' '), ' x ')]\
@@ -351,19 +333,19 @@ fn complex_pseudo_arguments() {
     // counted siblings and constrains the current element.
     t.check(
         "e:nth-child(2n of a b)",
-        "e[self::b and ancestor::*[self::a] and \
-         (count(preceding-sibling::*[self::b and ancestor::*[self::a]]) + 1) mod 2 = 0]",
+        "e[self::b and ancestor::a and \
+         (count(preceding-sibling::*[self::b and ancestor::a]) + 1) mod 2 = 0]",
     );
     t.check(
         "e:nth-child(2n of a > b)",
-        "e[self::b and parent::*[self::a] and \
-         (count(preceding-sibling::*[self::b and parent::*[self::a]]) + 1) mod 2 = 0]",
+        "e[self::b and parent::a and \
+         (count(preceding-sibling::*[self::b and parent::a]) + 1) mod 2 = 0]",
     );
     t.check(
         "e:nth-last-child(3 of a b)",
-        "e[self::b and ancestor::*[self::a] \
-         and following-sibling::*[self::b and ancestor::*[self::a]][2] \
-         and not(following-sibling::*[self::b and ancestor::*[self::a]][3])]",
+        "e[self::b and ancestor::a \
+         and following-sibling::*[self::b and ancestor::a][2] \
+         and not(following-sibling::*[self::b and ancestor::a][3])]",
     );
 }
 

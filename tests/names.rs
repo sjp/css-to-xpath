@@ -75,6 +75,10 @@ fn unsafe_names_and_escapes() {
         "e[local-name() = 'di[v' and self::svg:*]",
     );
     t.check(
+        "e:is(svg|di\\[v > p)",
+        "e[self::p and parent::svg:*[local-name() = 'di[v']]",
+    );
+    t.check(
         "e:has(> svg|di\\[v)",
         "e[child::svg:*[local-name() = 'di[v']]",
     );
@@ -215,7 +219,7 @@ fn unprefixed_names_mean_the_null_namespace_everywhere() {
     t.check(":is(p)", "*[self::p]");
     t.check(":where(p)", "*[self::p]");
     t.check(":not(p)", "*[not(self::p)]");
-    t.check(":is(body > p)", "*[self::p and parent::*[self::body]]");
+    t.check(":is(body > p)", "*[self::p and parent::body]");
     t.check(
         ":is(p + p)",
         "*[self::p and preceding-sibling::*[1][self::p]]",
@@ -279,6 +283,7 @@ fn default_namespace_qualifies_unprefixed_type_selectors() {
     t.check("p:is(a, b)", "h:p[self::h:a or self::h:b]");
     t.check("p:not(a)", "h:p[not(self::h:a)]");
     t.check("p:has(> a)", "h:p[child::h:a]");
+    t.check("p:is(body > p)", "h:p[self::h:p and parent::h:body]");
     t.check(
         "e:nth-child(1 of p)",
         "h:e[self::h:p and not(preceding-sibling::*[self::h:p][1])]",

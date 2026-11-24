@@ -476,6 +476,8 @@ fn html_translator_lowercases_names_not_values() {
     html.check("DIV[Value=\"Mixed Case\"]", "div[@value = 'Mixed Case']");
     // The element inside local-name() is lowercased too.
     html.check("*|DIV", "*[local-name() = 'div']");
+    // ...and so is a name in the axis step of a pseudo-class argument.
+    html.check(":is(BODY ~ P)", "*[self::p and preceding-sibling::body]");
     // XHTML is XML, so both halves keep their case: the element name,
     // the attribute name, and the value.
     let mut xhtml = Cases::new(Mode::Xhtml);
@@ -483,6 +485,7 @@ fn html_translator_lowercases_names_not_values() {
     xhtml.check("[FOO]", "*[@FOO]");
     xhtml.check("DIV[FOO=Bar]", "DIV[@FOO = 'Bar']");
     xhtml.check("*|DIV", "*[local-name() = 'DIV']");
+    xhtml.check(":is(BODY ~ P)", "*[self::P and preceding-sibling::BODY]");
 }
 
 /// HTML names are ASCII case-insensitive: the parser lowercases

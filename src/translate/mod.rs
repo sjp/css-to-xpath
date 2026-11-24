@@ -915,9 +915,9 @@ impl Translator {
     /// elements as `p`, and a prefix still resolves through the caller's
     /// namespace map. A complex argument applies its rightmost
     /// compound to the candidate, with everything to its left becoming an
-    /// existence test through reversed axes:
-    /// `:is(a > b ~ c)` matches a `c` with a preceding sibling `b` whose
-    /// parent is an `a`.
+    /// existence test through reversed axes, each naming its compound's
+    /// element as a path step would: `:is(a > b ~ c)` is
+    /// `self::c and preceding-sibling::b[parent::a]`.
     ///
     /// The chain is walked twice rather than recursed over, so its length
     /// costs no stack: once left-to-right to translate each compound and
@@ -928,11 +928,11 @@ impl Translator {
     /// absorbs the rest of a conjunction in [`XPathExpr::write_condition`]:
     /// the existence test it is conjoined with, and every compound
     /// further left, are dropped, so `:is(a > b:is())` is `0` rather
-    /// than `0 and parent::*[self::a]`. The compounds to its right are
+    /// than `0 and parent::a`. The compounds to its right are
     /// untouched — `:is(a > b:is() > c)` keeps `self::c` and its
     /// bracket — and a `0` that is already the innermost condition, with
     /// nothing conjoined to absorb, stays where it is: `:is(a:is() > b)`
-    /// is `self::b and parent::*[0]`, which still says which compound is
+    /// is `self::b and parent::a[0]`, which still says which compound is
     /// the impossible one.
     ///
     /// `None` means the chain imposes no condition (a bare `*` argument).
@@ -946,23 +946,38 @@ impl Translator {
         let mut subs: Vec<XPathExpr> = Vec::new();
         // `axes[i]` points back at where the left-hand side of `subs[i]`'s
         // combinator must be, relative to the element matched by
-        // `subs[i]`. The leftmost compound has nothing to its left, so
-        // there is one fewer axis than compound.
+        // `subs[i]`: the axis step that selects `subs[i + 1]`. The
+        // leftmost compound has nothing to its left, so there is one
+        // fewer axis than compound.
         let mut axes: Vec<&str> = Vec::new();
+        // Whether the step into the compound being translated is a `+`
+        // combinator's, set by the compound to its right.
+        let mut adjacent = false;
         for (compound, combinator) in compounds_match_order(selector) {
             let mut sub = self.compound_to_xpath(compound, of_depth)?;
-            sub.take_element_into_self_test();
+            // The candidate itself is matched on any node test, so its
+            // name becomes a `self::` test. A compound further left keeps
+            // its name as the node test of the axis step that selects it
+            // (`preceding-sibling::span`, not
+            // `preceding-sibling::*[self::span]`), exactly as it would be
+            // written as a path step at the top level, except under `+`:
+            // the position predicate `[1]` must count every sibling, so
+            // the name moves after it.
+            if subs.is_empty() || adjacent {
+                sub.take_element_into_self_test();
+            }
             // A single compound imposes its own conditions and nothing
             // else.
             if combinator.is_none() && subs.is_empty() {
                 return Ok(sub.into_condition());
             }
             subs.push(sub);
+            adjacent = matches!(combinator, Some(Combinator::NextSibling));
             if combinator.is_some() {
                 axes.push(match combinator {
-                    Some(Combinator::Descendant) => "ancestor::*",
-                    Some(Combinator::Child) => "parent::*",
-                    Some(Combinator::LaterSibling) => "preceding-sibling::*",
+                    Some(Combinator::Descendant) => "ancestor::",
+                    Some(Combinator::Child) => "parent::",
+                    Some(Combinator::LaterSibling) => "preceding-sibling::",
                     Some(Combinator::NextSibling) => "preceding-sibling::*[1]",
                     other => {
                         return Err(Error::unsupported(format!(
@@ -982,42 +997,47 @@ impl Translator {
             subs.truncate(dead + 1);
             axes.truncate(dead);
         }
-        let innermost = subs.pop().expect("more than one compound");
-        if subs.is_empty() {
-            return Ok(innermost.into_condition());
+        if subs.len() == 1 {
+            return Ok(subs.pop().expect("one compound").into_condition());
         }
 
-        // The nesting reads outward-in — `c0 and axis0[c1 and axis1[c2]]`
+        // The nesting reads outward-in — `c0 and parent::e1[c1 and parent::e2[c2]]`
         // — so write it in that order: each compound emits its own
-        // conditions and opens its axis bracket, and every bracket closes
-        // at the end. Wrapping the other way (nesting the condition built
-        // so far inside the next compound's brackets) would copy the whole
-        // accumulated condition once per compound, making a chain of n
-        // compounds cost O(n^2) bytes.
+        // conditions and the axis step selecting the next, and every
+        // bracket closes at the end. Wrapping the other way (nesting the
+        // condition built so far inside the next compound's brackets)
+        // would copy the whole accumulated condition once per compound,
+        // making a chain of n compounds cost O(n^2) bytes.
         let mut expr = String::new();
         let mut open = 0usize;
-        for (idx, (sub, axis)) in subs.iter().zip(&axes).enumerate() {
+        let last = subs.len() - 1;
+        for (idx, sub) in subs.iter().enumerate() {
             // This compound's own conditions come first, conjoined with
             // the existence test that follows; a lone or-group is
-            // parenthesized here because `and` binds tighter than `or`.
-            if sub
-                .write_condition(&mut expr, /* as_operand = */ true)
-                .is_some()
-            {
+            // parenthesized there because `and` binds tighter than `or`.
+            // The innermost condition sits inside brackets with nothing
+            // after it, so a top-level `or` needs no parentheses.
+            let written = sub.write_condition(&mut expr, /* as_operand = */ idx < last);
+            if idx == last {
+                break;
+            }
+            if written.is_some() {
                 expr.push_str(" and ");
             }
+            let axis = axes[idx];
             expr.push_str(axis);
+            // A `+` step is already `*[1]`; any other names the element.
+            if !axis.ends_with(']') {
+                expr.push_str(subs[idx + 1].element());
+            }
             // The bracket is only opened when something goes inside it:
             // the innermost compound may impose no condition at all (a
-            // bare `*`), leaving the axis as a plain existence test.
-            if idx + 1 < subs.len() || innermost.has_condition() {
+            // bare `*`), leaving the step as a plain existence test.
+            if idx + 1 < last || subs[last].has_condition() {
                 expr.push('[');
                 open += 1;
             }
         }
-        // The innermost condition sits inside brackets, so a top-level
-        // `or` needs no parentheses of its own.
-        innermost.write_condition(&mut expr, /* as_operand = */ false);
         for _ in 0..open {
             expr.push(']');
         }

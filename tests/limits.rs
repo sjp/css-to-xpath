@@ -81,9 +81,9 @@ fn long_chains_translate() {
     assert_eq!(
         inner,
         format!(
-            "//b[{}self::a{}]",
-            "self::a and parent::*[".repeat(99_999),
-            "]".repeat(99_999)
+            "//b[self::a and parent::a{}{}]",
+            "[parent::a".repeat(99_998),
+            "]".repeat(99_998)
         )
     );
 }
