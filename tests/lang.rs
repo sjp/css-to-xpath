@@ -9,6 +9,10 @@ use css_to_xpath::Mode;
 const LC: &str = "concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
                   'abcdefghijklmnopqrstuvwxyz'), '-')";
 
+/// The `xml:lang` language string, ASCII-lowercased and dash-terminated.
+const XLC: &str = "concat(translate(@xml:lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+                   'abcdefghijklmnopqrstuvwxyz'), '-')";
+
 /// `tail` cut just after its first singleton subtag: every letter and
 /// digit maps to `a`, so a singleton reads `-a-`.
 fn cut(tail: &str) -> String {
@@ -320,19 +324,31 @@ fn lang_and_dir() {
             inner(&xhtml.css_to_xpath("E:lang(*-CH)", "").unwrap()),
         ),
     );
-    // Mode::Generic hands the range to XPath's lang(), which is a prefix
-    // match with nowhere to put a wildcard that is not the whole range
-    // or its final subtag: an interior one errors there rather than
-    // going into lang() as a literal, which would never match.
-    for sel in [
-        "e:lang(*-CH)",
-        "e:lang(\"*-CH\")",
-        "e:lang(de-*-DE)",
-        "e:lang(\"de-*-DE\")",
-        "e:lang(\"*-*\")",
-    ] {
-        assert!(t.css_to_xpath(sel, "").is_err(), "{sel} should error");
-    }
+    // Mode::Generic matches any range that lang() cannot express (more
+    // than one subtag, or a wildcard before the last) by the same
+    // extended filtering, over xml:lang.
+    t.check(
+        "e:lang(en-nz)",
+        format!(
+            "e[ancestor-or-self::*[@xml:lang][1][starts-with({XLC}, 'en-') and \
+             contains(concat('-', {}), '-nz-')]]",
+            cut(&format!("substring-after({XLC}, 'en-')")),
+        ),
+    );
+    let any = cut(&format!("substring-after({XLC}, '-')"));
+    let star_ch =
+        format!("e[ancestor-or-self::*[@xml:lang][1][contains(concat('-', {any}), '-ch-')]]");
+    t.check("e:lang(*-CH)", &star_ch);
+    t.check("e:lang(\"*-CH\")", &star_ch);
+    t.check("e:lang(de-*-DE)", t.xpath("e:lang(de-DE)"));
+    t.check("e:lang(\"*-*\")", t.xpath("e:lang(*)"));
+    // A range that is a single subtag once its later wildcards drop out
+    // is still lang().
+    t.check("e:lang(\"de-*-*\")", "e[lang('de')]");
+    t.check(
+        "e:lang(en, *-CH)",
+        format!("e[lang('en') or {}]", inner(&star_ch)),
+    );
     // :dir() takes exactly one identifier (selectors-4) — none of
     // :lang()'s strings, wildcards, or lists. It never matches in any
     // translator: resolved directionality needs runtime bidi

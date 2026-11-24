@@ -4,8 +4,7 @@
 //! Both `html` and `xhtml` use the HTML overrides (they differ in the
 //! lowercasing flags and in where `:lang()` reads an element's language
 //! from); the generic translator answers `0` (never matches) for
-//! everything except `:lang()`, which it maps to XPath's `lang()`
-//! function.
+//! everything except `:lang()`, which it matches against `xml:lang`.
 
 use std::sync::LazyLock;
 
@@ -49,8 +48,8 @@ macro_rules! cached {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LangSource {
     /// Generic: `xml:lang`, which is what XPath's own `lang()` reads.
-    /// Only the wildcard range needs it spelled out; every other range
-    /// goes through `lang()` itself. XML binds the `xml` prefix
+    /// Only a single-subtag range goes through `lang()` itself; every
+    /// other range needs it spelled out. XML binds the `xml` prefix
     /// implicitly, so it needs no entry in the caller's namespace map —
     /// libxml2 pre-binds it; a processor that resolves prefixes purely
     /// from a caller-supplied map (sxd-xpath, say) needs it registered.
@@ -503,28 +502,19 @@ impl Translator {
         Ok(())
     }
 
-    /// Generic `:lang()`: XPath's `lang()` does language-range prefix
-    /// matching natively, so `en` and `en-*` both become `lang('en')`-style
-    /// tests. The two ranges that say something *about* the language
-    /// rather than matching one — `*` ("known") and `""` ("not known") —
-    /// are what `lang()` cannot express, so they walk the language source
-    /// instead.
+    /// Generic `:lang()`: extended filtering over `xml:lang`, except that
+    /// a single-subtag range (`en`, `en-*`) becomes XPath's `lang('en')`,
+    /// whose prefix match is exactly extended filtering for that shape.
     fn lang_generic(&self, xpath: &mut XPathExpr, ranges: &[String]) -> Result<(), Error> {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_lang_range(value)?;
-            check_wildcard_position(value)?;
-            if value.is_empty() {
-                conditions.push(lang_unknown_condition(self.lang_source()));
-            } else if value == "*" {
-                conditions.push(lang_known_condition(self.lang_source()));
-            } else if let Some(prefix) = value.strip_suffix("-*") {
-                // The trailing '-' goes with the wildcard: lang('en-')
-                // would never match, since libxml2 expects the argument
-                // itself to end at a subtag boundary.
-                conditions.push(format!("lang({})", xpath_literal(prefix)));
+            let mut subtags = value.split('-');
+            let primary = subtags.next().expect("split is non-empty");
+            if !primary.is_empty() && primary != "*" && subtags.all(|subtag| subtag == "*") {
+                conditions.push(format!("lang({})", xpath_literal(primary)));
             } else {
-                conditions.push(format!("lang({})", xpath_literal(value)));
+                conditions.push(lang_range_condition(self.lang_source(), value));
             }
         }
         add_lang_conditions(xpath, conditions);
@@ -734,10 +724,9 @@ fn disabled_condition(name: Option<&str>, want_disabled: bool) -> Condition {
 ///
 /// The check lives here rather than in the parser's argument grammar —
 /// which only asks whether the tokens assemble into ranges at all — so
-/// that the message can name the offending range, as the wildcard-
-/// position one below does. What is left to the grammar is what only the
-/// token stream knows: the adjacency that separates `en-*` from `en-`,
-/// `*`.
+/// that the message can name the offending range. What is left to the
+/// grammar is what only the token stream knows: the adjacency that
+/// separates `en-*` from `en-`, `*`.
 fn check_lang_range(range: &str) -> Result<(), Error> {
     if range.is_empty() {
         return Ok(()); // no subtags to be wrong about
@@ -753,31 +742,6 @@ fn check_lang_range(range: &str) -> Result<(), Error> {
         };
         return Err(Error::unsupported(format!(
             "the :lang() language range {:?} ({fault})",
-            echoed(range)
-        )));
-    }
-    Ok(())
-}
-
-/// Under `Mode::Generic` a wildcard is accepted only as a whole range
-/// (`*`) or as the final subtag (`en-*`), the two shapes XPath's `lang()`
-/// can be handed. RFC 4647 extended filtering also allows one in any
-/// other position (`*-CH`, `de-*-DE`): `lang()` does a prefix match and
-/// has nowhere to put such a range, so it is rejected rather than
-/// silently over- or under-matching. The HTML modes build the comparison
-/// themselves and take a wildcard anywhere (see [`LangRange`]).
-///
-/// ([`check_lang_range`] has already rejected a `*` that is not a whole
-/// subtag, such as `en*`, so a range that passes here is either `*`
-/// itself or ends in `-*`.)
-fn check_wildcard_position(range: &str) -> Result<(), Error> {
-    if let Some(pos) = range.find('*')
-        && pos != range.len() - 1
-    {
-        return Err(Error::unsupported(format!(
-            "the :lang() language range {:?} \
-             (a wildcard outside the final subtag, \
-             which XPath's lang() cannot express)",
             echoed(range)
         )));
     }

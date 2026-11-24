@@ -52,8 +52,8 @@ pub(crate) enum Kind {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum Mode {
     /// Plain CSS/XPath semantics: case-sensitive names, no
-    /// HTML-specific pseudo-classes, and `:lang()` via XPath's own
-    /// `lang()` function.
+    /// HTML-specific pseudo-classes, and `:lang()` read from the
+    /// nearest `xml:lang` ancestor.
     ///
     /// This is the [`Default`], as the flavour that assumes least about
     /// the document.

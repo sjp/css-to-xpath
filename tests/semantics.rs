@@ -365,8 +365,8 @@ fn generic_logical_pseudos() {
     );
 }
 
-/// `Mode::Generic` translates `:lang()` to XPath's `lang()`, which reads
-/// `xml:lang` from the nearest ancestor-or-self that carries it.
+/// `Mode::Generic` reads `xml:lang` from the nearest ancestor-or-self that
+/// carries it.
 #[test]
 fn generic_lang() {
     check(
@@ -382,8 +382,8 @@ fn generic_lang() {
     );
 }
 
-/// `:lang(*)` — "any known language" — is the one range XPath's `lang()`
-/// cannot express, so it walks `@xml:lang` directly instead.
+/// `:lang(*)` — "any known language" — is a range XPath's `lang()` cannot
+/// express, so it walks `@xml:lang` directly instead.
 #[test]
 fn generic_lang_wildcard_and_multiple_ranges() {
     check(
@@ -397,6 +397,45 @@ fn generic_lang_wildcard_and_multiple_ranges() {
             // XPath's lang() compares case-insensitively.
             ("book:lang(en-gb)", &["b1"]),
             ("book:lang(en-US)", &[]),
+        ],
+    );
+}
+
+/// A range that names more than one subtag, or has a wildcard before its
+/// last, is matched under `Mode::Generic` by RFC 4647 extended filtering
+/// over the nearest `xml:lang`, as the HTML modes match `lang`.
+#[test]
+fn generic_lang_extended_filtering() {
+    let fixture = Fixture::new(
+        r#"<r id="r">
+             <e id="e1" xml:lang="en-US"/>
+             <e id="e2" xml:lang="en-Latn-US"/>
+             <e id="e3" xml:lang="en"/>
+             <e id="e4" xml:lang="de-CH"/>
+             <e id="e5" xml:lang="ch"/>
+             <e id="e6" xml:lang="de-x-DE"/>
+             <e id="e7" xml:lang="de-DE"/>
+             <g id="g1" xml:lang="EN-us">
+               <e id="e8"/>
+               <g id="g2" xml:lang="fr-CH"><e id="e9"/></g>
+               <g id="g3" xml:lang=""><e id="e10"/></g>
+             </g>
+           </r>"#,
+        &[],
+    );
+    check(
+        &fixture,
+        Mode::Generic,
+        &[
+            ("e:lang(en-US)", &["e1", "e2", "e8"]),
+            ("e:lang(*-CH)", &["e4", "e9"]),
+            ("e:lang(de-*-DE)", &["e7"]),
+            // `DE` past the singleton `x` is private-use data.
+            ("e:lang(de-DE)", &["e7"]),
+            // The nearest `xml:lang` wins, and an empty one resets the
+            // language rather than deferring to the tag above.
+            ("e:lang(en)", &["e1", "e2", "e3", "e8"]),
+            ("e:lang(en-*)", &["e1", "e2", "e3", "e8"]),
         ],
     );
 }

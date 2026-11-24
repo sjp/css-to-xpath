@@ -950,28 +950,10 @@ fn lang_range_errors_name_the_range() {
         }
     }
 
-    // An interior wildcard is a well-formed range that only
-    // Mode::Generic has to refuse, and its message names the range the
-    // same way. The HTML modes translate it.
-    let t = Translator::new(Mode::Generic);
-    assert_eq!(
-        t.css_to_xpath("e:lang(*-CH)", "").unwrap_err(),
-        css_to_xpath::Error::Unsupported {
-            construct: "the :lang() language range \"*-CH\" (a wildcard outside the final \
-                        subtag, which XPath's lang() cannot express)"
-                .to_owned(),
-            offset: None,
-        }
-    );
-    assert!(
-        Translator::new(Mode::Html)
-            .css_to_xpath("e:lang(*-CH)", "")
-            .is_ok()
-    );
-
     // Positionless, so the message is the plain sentence with no caret
     // gutter: the range reaches translation as a parsed component, which
     // no longer knows where in the selector it was written.
+    let t = Translator::new(Mode::Generic);
     let sel = "e:lang(en-)";
     assert_eq!(
         t.css_to_xpath(sel, "").unwrap_err().message(sel),
