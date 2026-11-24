@@ -200,6 +200,46 @@ fn any_namespace_attribute_value_tests_every_attribute() {
     );
 }
 
+/// In an HTML document, `[*|type]` folds the value of the no-namespace
+/// `type` attribute, as `[type]` does, but compares a namespaced one
+/// exactly. `Mode::Xhtml` is XML, so there every attribute is exact.
+#[test]
+fn any_namespace_attribute_value_folds_only_html_attribute() {
+    let fixture = Fixture::new(
+        r#"<r xmlns:n="urn:n" xmlns:m="urn:m">
+             <e id="e1" n:type="Bar" type="Foo" m:type="Baz" rel="Next NoFollow"/>
+             <e id="e2" n:type="Foo" n:rel="nofollow"/>
+             <e id="e3" n:type="FOO" type="x" n:rel="NOFOLLOW"/>
+           </r>"#,
+        &[("n", "urn:n"), ("m", "urn:m")],
+    );
+    check(
+        &fixture,
+        Mode::Html,
+        &[
+            ("[*|type=foo]", &["e1"]),
+            ("[*|type=Foo]", &["e1", "e2"]),
+            ("[*|type=foo s]", &[]),
+            ("[*|type=Foo s]", &["e1", "e2"]),
+            ("[*|type=FOO i]", &["e1", "e2", "e3"]),
+            ("[*|type^=FO]", &["e1", "e3"]),
+            ("[*|type$=OO]", &["e1", "e3"]),
+            ("[*|type*=O]", &["e1", "e3"]),
+            ("[*|type|=FOO]", &["e1", "e3"]),
+            ("[*|rel~=NOFOLLOW]", &["e1", "e3"]),
+        ],
+    );
+    check(
+        &fixture,
+        Mode::Xhtml,
+        &[
+            ("[*|type=foo]", &[]),
+            ("[*|type^=FO]", &["e3"]),
+            ("[*|rel~=NOFOLLOW]", &["e3"]),
+        ],
+    );
+}
+
 /// A namespace prefix is written into the node test as it stands, so a
 /// non-ASCII one is only translatable if the evaluator will parse it as
 /// a name. That is what this checks — the string-pinning suite cannot,

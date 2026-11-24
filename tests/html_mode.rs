@@ -56,7 +56,24 @@ fn html_case_insensitive_attribute_values() {
     // A namespaced attribute is not an HTML attribute, so it never
     // folds — but `[|type]`, which means the same as `[type]`, does.
     html.check("[svg|type=X]", "*[@svg:type = 'X']");
-    html.check("[*|type=X]", "*[@*[local-name() = 'type'] = 'X']");
+    // `[*|type]` matches that attribute as well as the namespaced ones,
+    // so only the no-namespace one folds.
+    html.check(
+        "[*|type=X]",
+        "*[@*[local-name() = 'type'][(namespace-uri() = '' and \
+         translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+         'abcdefghijklmnopqrstuvwxyz') = 'x') or . = 'X']]",
+    );
+    html.check(
+        "[*|type^=X]",
+        "*[@*[local-name() = 'type'][(namespace-uri() = '' and \
+         starts-with(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+         'abcdefghijklmnopqrstuvwxyz'), 'x')) or starts-with(., 'X')]]",
+    );
+    html.check("[*|type=X s]", "*[@*[local-name() = 'type'] = 'X']");
+    html.check("[*|type='']", "*[@*[local-name() = 'type'] = '']");
+    html.check("[*|data-foo=X]", "*[@*[local-name() = 'data-foo'] = 'X']");
+    xhtml.check("[*|type=X]", "*[@*[local-name() = 'type'] = 'X']");
     html.check("[|type=X]", format!("*[{LOWER_TYPE} = 'x']"));
 
     // The `i` flag still folds where the document language does not.

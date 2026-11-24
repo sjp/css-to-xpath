@@ -638,6 +638,7 @@ impl Translator {
                     } if matches!(ns, NsConstraint::Any) => self.any_ns_attrib_value(
                         xpath,
                         &attrib,
+                        attr.local_name.as_str(),
                         operator,
                         value.as_str(),
                         case_sensitivity,
@@ -788,27 +789,53 @@ impl Translator {
     /// attributes, one per namespace. `=` compares every node of a
     /// node-set, but a string function only sees the first, so any other
     /// test goes in a predicate on the attribute step, against `.`.
+    ///
+    /// With no flag, HTML's legacy case-insensitive attributes fold only
+    /// in no namespace, so in an HTML document the no-namespace
+    /// attribute gets the folded test and every attribute the exact one.
+    /// An exact match implies a folded one, so the exact arm needs no
+    /// namespace guard.
     fn any_ns_attrib_value(
         &self,
         xpath: &mut XPathExpr,
         attrib: &str,
+        local_name: &str,
         operator: AttrSelectorOperator,
         value: &str,
         case_sensitivity: ParsedCaseSensitivity,
     ) -> Result<(), Error> {
         let (test, value) = self.apply_case_flag(".".to_owned(), value, case_sensitivity);
-        if operator == AttrSelectorOperator::Equal && test == "." {
+        let html_fold = case_sensitivity == ParsedCaseSensitivity::CaseSensitive
+            && self.html_document()
+            && !value.is_empty()
+            && is_html_case_insensitive_attribute(&local_name.to_ascii_lowercase());
+        if operator == AttrSelectorOperator::Equal && !html_fold && test == "." {
             attrib_equals(xpath, attrib, &value);
             return Ok(());
         }
-        let mut on_attrib = XPathExpr::new("*");
-        attrib_operator(&mut on_attrib, &test, operator, &value)?;
-        match on_attrib.into_condition() {
-            Some(condition) if !condition.is_never() => {
-                xpath.add_condition(format!("{attrib}[{}]", condition.expr));
-            }
-            _ => xpath.add_condition("0"),
+        let mut exact = XPathExpr::new("*");
+        attrib_operator(&mut exact, &test, operator, &value)?;
+        // Folding changes neither emptiness nor white space, so the
+        // folded test never matches wherever the exact one never does.
+        if exact.is_never() {
+            xpath.add_condition("0");
+            return Ok(());
         }
+        let mut condition = String::new();
+        if html_fold {
+            let mut folded = XPathExpr::new("*");
+            attrib_operator(
+                &mut folded,
+                &xpath_expr::ascii_lower("."),
+                operator,
+                &value.to_ascii_lowercase(),
+            )?;
+            condition.push_str("(namespace-uri() = '' and ");
+            folded.write_condition(&mut condition, true);
+            condition.push_str(") or ");
+        }
+        exact.write_condition(&mut condition, false);
+        xpath.add_condition(format!("{attrib}[{condition}]"));
         Ok(())
     }
 
@@ -1094,6 +1121,63 @@ fn unsafe_prefix_error(prefix: &str) -> Error {
     ))
 }
 
+/// HTML's legacy attributes whose values compare ASCII
+/// case-insensitively. The `selectors` crate keeps the same list
+/// private, and applies it only to an attribute selector with no
+/// namespace; `[*|attr]` needs it too.
+const HTML_CASE_INSENSITIVE_ATTRIBUTES: &[&str] = &[
+    "accept",
+    "accept-charset",
+    "align",
+    "alink",
+    "axis",
+    "bgcolor",
+    "charset",
+    "checked",
+    "clear",
+    "codetype",
+    "color",
+    "compact",
+    "declare",
+    "defer",
+    "dir",
+    "direction",
+    "disabled",
+    "enctype",
+    "face",
+    "frame",
+    "hreflang",
+    "http-equiv",
+    "lang",
+    "language",
+    "link",
+    "media",
+    "method",
+    "multiple",
+    "nohref",
+    "noresize",
+    "noshade",
+    "nowrap",
+    "readonly",
+    "rel",
+    "rev",
+    "rules",
+    "scope",
+    "scrolling",
+    "selected",
+    "shape",
+    "target",
+    "text",
+    "type",
+    "valign",
+    "valuetype",
+    "vlink",
+];
+
+fn is_html_case_insensitive_attribute(local_name_lower: &str) -> bool {
+    HTML_CASE_INSENSITIVE_ATTRIBUTES.contains(&local_name_lower)
+}
+
 /// Human-readable construct names for unsupported-error messages.
 fn describe_component(component: &Component<CssToXpathImpl>) -> String {
     match component {
@@ -1121,5 +1205,28 @@ fn describe_component(component: &Component<CssToXpathImpl>) -> String {
         // profile is the caller's to choose, and `panic = abort` there
         // would tear down its process.
         other => format!("an unexpected construct ({other:?})"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The list agrees with the one `selectors` applies to `[attr]`, and
+    /// an attribute outside it is not folded by either.
+    #[test]
+    fn html_case_insensitive_attributes_match_selectors() {
+        let html = Translator::new(Mode::Html);
+        let folds = |name: &str| {
+            html.css_to_xpath(&format!("[{name}=X]"), "")
+                .unwrap()
+                .contains("translate(")
+        };
+        for name in HTML_CASE_INSENSITIVE_ATTRIBUTES {
+            assert!(folds(name), "{name}");
+        }
+        for name in ["id", "class", "href", "title", "data-type"] {
+            assert!(!folds(name) && !is_html_case_insensitive_attribute(name));
+        }
     }
 }
