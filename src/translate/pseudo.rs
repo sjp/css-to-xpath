@@ -540,23 +540,28 @@ impl Translator {
         let mut conditions: Vec<String> = Vec::new();
         for value in ranges {
             check_lang_range(value)?;
-            if value.is_empty() {
-                // Not a filtering range at all: the empty range asks
-                // that there be no language to filter.
-                conditions.push(lang_unknown_condition(self.lang_source()));
-                continue;
-            }
-            let range = LangRange::parse(value);
-            if range.subtags.is_empty() {
-                // Nothing but wildcards ("*", "*-*"): the whole test is
-                // that the tag has a first subtag to match them against.
-                conditions.push(lang_known_condition(self.lang_source()));
-            } else {
-                conditions.push(lang_ancestor_condition(self.lang_source(), &range));
-            }
+            conditions.push(lang_range_condition(self.lang_source(), value));
         }
         add_lang_conditions(xpath, conditions);
         Ok(())
+    }
+}
+
+/// One `:lang()` range, already through [`check_lang_range`], matched by
+/// RFC 4647 extended filtering against the language `source` reads.
+fn lang_range_condition(source: LangSource, value: &str) -> String {
+    if value.is_empty() {
+        // Not a filtering range at all: the empty range asks that there
+        // be no language to filter.
+        return lang_unknown_condition(source);
+    }
+    let range = LangRange::parse(value);
+    if range.subtags.is_empty() {
+        // Nothing but wildcards ("*", "*-*"): the whole test is that the
+        // tag has a first subtag to match them against.
+        lang_known_condition(source)
+    } else {
+        lang_ancestor_condition(source, &range)
     }
 }
 
@@ -848,7 +853,7 @@ impl LangRange {
     /// [`check_lang_range`] has already rejected a `*` that is not a
     /// whole subtag (`en*`) and an empty subtag (`en-`), and the empty
     /// range is answered before the split (see
-    /// [`Translator::lang_html`]), so every subtag reaching this is
+    /// [`lang_range_condition`]), so every subtag reaching this is
     /// either `*` or a non-empty literal.
     fn parse(range: &str) -> Self {
         let mut subtags = range.split('-').map(str::to_ascii_lowercase);
@@ -886,7 +891,7 @@ impl LangRange {
 /// literals are searched for in what follows. `*-de` therefore matches
 /// `gsw-de` and not `de` — the tag's first subtag is spent on the `*`.
 /// A range of nothing but wildcards has no literals left to search for
-/// and does not reach here (see [`Translator::lang_html`]).
+/// and does not reach here (see [`lang_range_condition`]).
 ///
 /// The search also stops at a *singleton* (a one-letter or one-digit
 /// subtag, such as the `x` opening a private-use section): in `de-x-de`
