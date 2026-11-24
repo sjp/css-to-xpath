@@ -14,6 +14,8 @@
       translator folds into name()/local-name();
     - an attribute with an empty value, one carrying whitespace, one in
       a namespace, and one differing only in case;
+    - one local name on an element in several namespaces with different
+      values (a3), so [*|attr] tests have more than one attribute to try;
     - an element that is empty, one holding only white space, and one
       holding text, for :empty.
 -->
@@ -38,6 +40,6 @@
     <x:c id="c4" class="one two"/>
     <b id="b9"/>
   </a>
-  <a id="a3"/>
+  <a id="a3" y:data-v="gamma" data-v="Alpha-Beta" x:data-v="one two"/>
   <café id="cf3" data-v="beta"/>
 </root>

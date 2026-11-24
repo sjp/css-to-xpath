@@ -56,9 +56,9 @@ fn case_sensitivity_flags() {
     // The flag composes with namespaced attribute forms.
     t.check(
         "e[*|foo=\"Bar\" i]",
-        "e[translate(@*[local-name() = 'foo'], \
+        "e[@*[local-name() = 'foo'][translate(., \
          'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
-         'abcdefghijklmnopqrstuvwxyz') = 'bar']",
+         'abcdefghijklmnopqrstuvwxyz') = 'bar']]",
     );
 }
 

@@ -13,6 +13,9 @@ e[foo|bar]
 ns|e
 [ns|a]
 [*|a='v']
+[*|a^='v']
+[*|a|='v']
+[*|a^='']
 e[foo="bar"]
 e[foo=""]
 e[foo|=""]
@@ -687,6 +690,14 @@ svg|rect
 *|creator
 [dc|role]
 [*|role]
+[*|lang^="en"]
+[*|lang$="US"]
+[*|lang*="-U"]
+[*|lang~="en-US"]
+[*|lang|="en"]
+[*|lang="EN-us" i]
+[*|lang="en-US"]
+[*|lang="fr"]
 rect
 creator
 shelf:has(magazine)

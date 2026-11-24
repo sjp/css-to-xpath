@@ -24,6 +24,17 @@ fn simple_selectors() {
     t.check("ns|e", "ns:e");
     t.check("[ns|a]", "*[@ns:a]");
     t.check("[*|a='v']", "*[@*[local-name() = 'a'] = 'v']");
+    // `=` already compares every attribute in the node-set, but a string
+    // function would see only the first, so other tests go in a predicate.
+    t.check(
+        "[*|a^='v']",
+        "*[@*[local-name() = 'a'][starts-with(., 'v')]]",
+    );
+    t.check(
+        "[*|a|='v']",
+        "*[@*[local-name() = 'a'][. = 'v' or starts-with(., 'v-')]]",
+    );
+    t.check("[*|a^='']", "*[0]");
     t.check("e[foo=\"bar\"]", "e[@foo = 'bar']");
     t.check("e[foo=\"\"]", "e[@foo = '']");
     t.check("e[foo|=\"\"]", "e[@foo = '' or starts-with(@foo, '-')]");

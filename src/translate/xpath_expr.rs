@@ -161,7 +161,7 @@ impl Condition {
         Condition::plain("0")
     }
 
-    fn is_never(&self) -> bool {
+    pub(crate) fn is_never(&self) -> bool {
         self.expr == "0"
     }
 

@@ -13,7 +13,9 @@ pub use nth::{MAX_NTH_OF_BYTES, MAX_NTH_OF_DEPTH};
 use std::borrow::Cow;
 use std::fmt;
 
-use selectors::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
+use selectors::attr::{
+    AttrSelectorOperator, NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity,
+};
 use selectors::parser::{Combinator, Component, RelativeSelector, Selector};
 
 use crate::parser::{self, CssToXpathImpl};
@@ -633,6 +635,17 @@ impl Translator {
                         operator,
                         case_sensitivity,
                         ref value,
+                    } if matches!(ns, NsConstraint::Any) => self.any_ns_attrib_value(
+                        xpath,
+                        &attrib,
+                        operator,
+                        value.as_str(),
+                        case_sensitivity,
+                    ),
+                    ParsedAttrSelectorOperation::WithValue {
+                        operator,
+                        case_sensitivity,
+                        ref value,
                     } => {
                         let (attrib, value) =
                             self.apply_case_flag(attrib, value.as_str(), case_sensitivity);
@@ -769,6 +782,34 @@ impl Translator {
         } else {
             (attrib, Cow::Borrowed(value))
         }
+    }
+
+    /// `[*|attr <op> value]`, where `attrib` may select several
+    /// attributes, one per namespace. `=` compares every node of a
+    /// node-set, but a string function only sees the first, so any other
+    /// test goes in a predicate on the attribute step, against `.`.
+    fn any_ns_attrib_value(
+        &self,
+        xpath: &mut XPathExpr,
+        attrib: &str,
+        operator: AttrSelectorOperator,
+        value: &str,
+        case_sensitivity: ParsedCaseSensitivity,
+    ) -> Result<(), Error> {
+        let (test, value) = self.apply_case_flag(".".to_owned(), value, case_sensitivity);
+        if operator == AttrSelectorOperator::Equal && test == "." {
+            attrib_equals(xpath, attrib, &value);
+            return Ok(());
+        }
+        let mut on_attrib = XPathExpr::new("*");
+        attrib_operator(&mut on_attrib, &test, operator, &value)?;
+        match on_attrib.into_condition() {
+            Some(condition) if !condition.is_never() => {
+                xpath.add_condition(format!("{attrib}[{}]", condition.expr));
+            }
+            _ => xpath.add_condition("0"),
+        }
+        Ok(())
     }
 
     /// Attribute-name handling: ASCII-lowercase (html), safety check, namespace

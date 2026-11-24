@@ -170,6 +170,36 @@ fn generic_namespaces() {
     );
 }
 
+/// `[*|lang]` selects one attribute per namespace, and a value test
+/// matches when any of them passes. Each element carries a non-matching
+/// attribute on either side of the matching one, so whichever order the
+/// evaluator keeps attributes in, the first is one that does not match.
+#[test]
+fn any_namespace_attribute_value_tests_every_attribute() {
+    let fixture = Fixture::new(
+        r#"<r xmlns:n="urn:n" xmlns:m="urn:m">
+             <e id="e1" n:lang="fr" lang="en-US" m:lang="de"/>
+             <e id="e2" lang="fr" n:lang="en-US"/>
+             <e id="e3" n:lang="fr"/>
+           </r>"#,
+        &[("n", "urn:n"), ("m", "urn:m")],
+    );
+    check(
+        &fixture,
+        Mode::Generic,
+        &[
+            ("[*|lang^=\"en\"]", &["e1", "e2"]),
+            ("[*|lang$=\"US\"]", &["e1", "e2"]),
+            ("[*|lang*=\"-U\"]", &["e1", "e2"]),
+            ("[*|lang~=\"en-US\"]", &["e1", "e2"]),
+            ("[*|lang|=\"en\"]", &["e1", "e2"]),
+            ("[*|lang=\"EN-us\" i]", &["e1", "e2"]),
+            ("[*|lang=\"en-US\"]", &["e1", "e2"]),
+            ("[*|lang=\"fr\"]", &["e1", "e2", "e3"]),
+        ],
+    );
+}
+
 /// A namespace prefix is written into the node test as it stands, so a
 /// non-ASCII one is only translatable if the evaluator will parse it as
 /// a name. That is what this checks — the string-pinning suite cannot,
