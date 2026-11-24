@@ -53,8 +53,8 @@
     <p id="p2">hello</p>
     <!-- Language tags for RFC 4647 extended filtering: a script subtag
          between the two a range names, a private-use singleton the RFC
-         forbids skipping past (which this translation nonetheless
-         skips), and tags a range must not match a mere prefix of. l9
+         forbids skipping past, and tags a range must not match a mere
+         prefix of. l9
          has no tag of its own and inherits the document's. -->
     <div id="langs">
       <span id="l1" lang="de-DE">1</span>

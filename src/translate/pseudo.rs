@@ -888,14 +888,21 @@ impl LangRange {
 /// A range of nothing but wildcards has no literals left to search for
 /// and does not reach here (see [`Translator::lang_html`]).
 ///
+/// The search also stops at a *singleton* (a one-letter or one-digit
+/// subtag, such as the `x` opening a private-use section): in `de-x-de`
+/// the second `de` is not a region, so `:lang(de-DE)` must not reach
+/// it. Each search therefore runs over `cut`, the tail truncated just
+/// after its first singleton (see [`singleton_cut`]), while `tail` keeps
+/// the whole remainder. The cut is taken only once the first subtag is
+/// spent, since that may be a singleton itself (`x-foo`, `i-klingon`),
+/// and it keeps the singleton, so a singleton in the range (`de-x-foo`)
+/// can still match it. A literal found in the cut is at the same place
+/// in the tail, so both advance with the same `substring-after`, and a
+/// matched singleton cuts the tail afresh.
+///
 /// A single-subtag range is just the `starts-with`, which is both the
 /// whole of extended filtering for that shape and the dash-terminated
-/// prefix match the translation has always emitted. The one RFC rule the
-/// chain does not model is that a subtag may not be skipped past a
-/// *singleton* (a one-character subtag, such as the `x` opening a
-/// private-use section): measuring the length of every skipped subtag is
-/// not expressible in XPath 1.0, so `:lang(de-DE)` also matches
-/// `de-x-de`. See the README's Approximations.
+/// prefix match the translation has always emitted.
 fn lang_ancestor_condition(source: LangSource, range: &LangRange) -> String {
     let lang = folded_lang(source);
     let mut subtags = range.subtags.iter();
@@ -917,13 +924,34 @@ fn lang_ancestor_condition(source: LangSource, range: &LangRange) -> String {
         conditions.push(format!("starts-with({lang}, {first})"));
         format!("substring-after({lang}, {first})")
     };
-    // Everything after it is a whole-subtag search through the tail.
+    // Everything after it is a whole-subtag search through the tail, up
+    // to its first singleton.
+    let mut cut = singleton_cut(&tail);
     for subtag in subtags {
         let needle = Literal::affixed("-", subtag, "-");
-        let bounded = format!("concat('-', {tail})");
-        conditions.push(format!("contains({bounded}, {needle})"));
-        tail = format!("substring-after({bounded}, {needle})");
+        conditions.push(format!("contains(concat('-', {cut}), {needle})"));
+        tail = format!("substring-after(concat('-', {tail}), {needle})");
+        cut = if subtag.len() == 1 {
+            singleton_cut(&tail)
+        } else {
+            format!("substring-after(concat('-', {cut}), {needle})")
+        };
     }
 
     format!("{}[{}]", source.nearest(), conditions.join(" and "))
+}
+
+/// A lowercased, dash-terminated tail of subtags (`latn-x-de-`) cut just
+/// after its first singleton (`latn-x-`), or whole if it has none.
+///
+/// XPath 1.0 has no regular expressions, so `translate()` maps every
+/// letter and digit to `a`, a singleton then reads `-a-`, and
+/// `substring-before()` measures the tail in front of it. The appended
+/// `a-` guarantees a match at the very end when there is no singleton.
+fn singleton_cut(tail: &str) -> String {
+    format!(
+        "substring({tail}, 1, string-length(substring-before(concat(translate(concat('-', {tail}), \
+         'abcdefghijklmnopqrstuvwxyz0123456789', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), 'a-'), \
+         '-a-')) + 2)"
+    )
 }

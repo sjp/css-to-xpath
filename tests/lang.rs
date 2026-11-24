@@ -5,6 +5,20 @@ mod cases;
 use cases::Cases;
 use css_to_xpath::Mode;
 
+/// The HTML language string, ASCII-lowercased and dash-terminated.
+const LC: &str = "concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+                  'abcdefghijklmnopqrstuvwxyz'), '-')";
+
+/// `tail` cut just after its first singleton subtag: every letter and
+/// digit maps to `a`, so a singleton reads `-a-`.
+fn cut(tail: &str) -> String {
+    format!(
+        "substring({tail}, 1, string-length(substring-before(concat(translate(concat('-', {tail}), \
+         'abcdefghijklmnopqrstuvwxyz0123456789', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), 'a-'), \
+         '-a-')) + 2)"
+    )
+}
+
 #[test]
 fn lang_and_dir() {
     /// Strip the outer `e[`…`]` predicate off a single-condition
@@ -108,13 +122,50 @@ fn lang_and_dir() {
     // subtag is an equality, and each later one is searched for as a
     // whole subtag in what is left after the previous match — so
     // `en-nz` matches `en-NZ` and also `en-Latn-NZ`.
-    html.check("e:lang(en-nz)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-') and contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')), '-nz-')]]");
-    // The chain extends a step per subtag, each searching the tail the
-    // step before it left.
-    html.check("e:lang(zh-Hant-TW)", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'zh-') and contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'zh-')), '-hant-') and contains(concat('-', substring-after(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'zh-')), '-hant-')), '-tw-')]]");
+    // The search stops at the tag's first singleton, though: in
+    // `en-x-nz` the `nz` is private-use data, not a region.
+    html.check(
+        "e:lang(en-nz)",
+        format!(
+            "e[ancestor-or-self::*[@lang][1][starts-with({LC}, 'en-') and \
+             contains(concat('-', {}), '-nz-')]]",
+            cut(&format!("substring-after({LC}, 'en-')")),
+        ),
+    );
+    // The chain extends a step per subtag, each searching the cut tail
+    // the step before it left.
+    let zh = cut(&format!("substring-after({LC}, 'zh-')"));
+    html.check(
+        "e:lang(zh-Hant-TW)",
+        format!(
+            "e[ancestor-or-self::*[@lang][1][starts-with({LC}, 'zh-') and \
+             contains(concat('-', {zh}), '-hant-') and \
+             contains(concat('-', substring-after(concat('-', {zh}), '-hant-')), '-tw-')]]"
+        ),
+    );
+    // A singleton in the range matches the tag's singleton, and the
+    // tail after it is cut afresh at the next one.
+    let de = format!("substring-after({LC}, 'de-')");
+    html.check(
+        "e:lang(de-x-foo)",
+        format!(
+            "e[ancestor-or-self::*[@lang][1][starts-with({LC}, 'de-') and \
+             contains(concat('-', {}), '-x-') and \
+             contains(concat('-', {}), '-foo-')]]",
+            cut(&de),
+            cut(&format!("substring-after(concat('-', {de}), '-x-')")),
+        ),
+    );
     // Subtags come from strings as well as idents, so each one is
     // quoted as an XPath literal rather than pasted in.
-    html.check("e:lang(\"a'b-c\\\"d\")", "e[ancestor-or-self::*[@lang][1][starts-with(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), \"a'b-\") and contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), \"a'b-\")), '-c\"d-')]]");
+    html.check(
+        "e:lang(\"a'b-c\\\"d\")",
+        format!(
+            "e[ancestor-or-self::*[@lang][1][starts-with({LC}, \"a'b-\") and \
+             contains(concat('-', {}), '-c\"d-')]]",
+            cut(&format!("substring-after({LC}, \"a'b-\")")),
+        ),
+    );
     // A trailing wildcard is dropped whatever the range's length: RFC
     // 4647 skips a final `*` over whatever is left of the tag.
     html.check(
@@ -165,7 +216,12 @@ fn lang_and_dir() {
         xhtml
             .css_to_xpath("E:lang(en-nz)", "")
             .unwrap()
-            .ends_with("'-'), 'en-') and contains(concat('-', substring-after(concat(translate(concat(@xml:lang, substring(@lang, 1, string-length(@lang) * not(@xml:lang))), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')), '-nz-')]]")
+            .ends_with(&format!(
+                "'-'), 'en-') and contains(concat('-', {}), '-nz-')]]",
+                cut("substring-after(concat(translate(concat(@xml:lang, \
+                     substring(@lang, 1, string-length(@lang) * not(@xml:lang))), \
+                     'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), 'en-')"),
+            ))
     );
     xhtml.check(
         "E:lang(en, fr)",
@@ -195,9 +251,19 @@ fn lang_and_dir() {
     // the comparison themselves rather than handing it to XPath's
     // lang(). A leading * stands for the tag's first subtag, so the
     // walk starts one subtag in instead of anchoring with starts-with.
-    html.check("e:lang(*-CH)", "e[ancestor-or-self::*[@lang][1][contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), '-')), '-ch-')]]");
+    let any = cut(&format!("substring-after({LC}, '-')"));
+    html.check(
+        "e:lang(*-CH)",
+        format!("e[ancestor-or-self::*[@lang][1][contains(concat('-', {any}), '-ch-')]]"),
+    );
     // ... and the chain then continues as it does after a starts-with.
-    html.check("e:lang(\"*-Hant-TW\")", "e[ancestor-or-self::*[@lang][1][contains(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), '-')), '-hant-') and contains(concat('-', substring-after(concat('-', substring-after(concat(translate(@lang, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '-'), '-')), '-hant-')), '-tw-')]]");
+    html.check(
+        "e:lang(\"*-Hant-TW\")",
+        format!(
+            "e[ancestor-or-self::*[@lang][1][contains(concat('-', {any}), '-hant-') and \
+             contains(concat('-', substring-after(concat('-', {any}), '-hant-')), '-tw-')]]"
+        ),
+    );
     // Only a leading wildcard spends a subtag of the tag. A later one
     // moves past nothing — every range subtag after the first is already
     // searched for through the whole remaining tag — so it drops out.

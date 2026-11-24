@@ -139,10 +139,8 @@ impl PseudoElement for Never {}
 /// set is empty in everything but the HTML-mode suite, which builds its
 /// parser with [`Reference::new_html`].
 ///
-/// `:lang()` is deliberately absent: it is the one HTML translation
-/// that knowingly diverges from the spec (RFC 4647's singleton rule),
-/// so a reference for it would have to encode the divergence rather
-/// than check it.
+/// `:lang()` is absent: the reference has no extended filtering of its
+/// own, so `tests/lang.rs` and `tests/semantics.rs` pin it by hand.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum PseudoClass {
     Disabled,

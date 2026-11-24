@@ -753,10 +753,9 @@ fn html_lang_extended_filtering() {
             // a `de` document, and neither is `de-DEUTSCH` (l5) a
             // `de-DE` one, since `de` has to match a whole subtag.
             ("span:lang(de)", &["l1", "l2", "l3", "l4", "l5", "l6"]),
-            // l4 (`de-x-de`) is the documented over-match: RFC 4647
-            // forbids skipping past the singleton `x`, which measuring
-            // subtag lengths in XPath 1.0 cannot check.
-            ("span:lang(de-DE)", &["l1", "l2", "l3", "l4"]),
+            // l4 (`de-x-de`) is out: the search may not skip past the
+            // singleton `x`, after which `de` is private-use data.
+            ("span:lang(de-DE)", &["l1", "l2", "l3"]),
             ("span:lang(de-1996)", &["l2"]),
             ("span:lang(de-DE-1996)", &["l2"]),
             // A range subtag that is not in the tag at all, and one
@@ -769,7 +768,7 @@ fn html_lang_extended_filtering() {
             // A trailing wildcard adds nothing to a multi-subtag range,
             // and the language is still inherited from the nearest
             // ancestor that has one.
-            ("span:lang(de-DE-*)", &["l1", "l2", "l3", "l4"]),
+            ("span:lang(de-DE-*)", &["l1", "l2", "l3"]),
             ("span:lang(en)", &["l9"]),
             (
                 "span:lang(*)",
@@ -791,19 +790,19 @@ fn html_lang_wildcard_subtags() {
         &[
             // The same four tags `de-DE` reaches, now without asking
             // for `de` first: l5 (`de-DEUTSCH`) is still out, since
-            // `DEUTSCH` is not the subtag `DE`, and l4 (`de-x-de`) is
-            // still the documented singleton over-match.
-            ("span:lang(*-DE)", &["l1", "l2", "l3", "l4"]),
+            // `DEUTSCH` is not the subtag `DE`, and l4 (`de-x-de`) has
+            // its `de` only past a singleton.
+            ("span:lang(*-DE)", &["l1", "l2", "l3"]),
             // l6 is `de` alone: the leading `*` spends the tag's first
             // subtag, so a one-subtag tag has nothing left to match.
-            ("span:lang(*-de)", &["l1", "l2", "l3", "l4"]),
+            ("span:lang(*-de)", &["l1", "l2", "l3"]),
             ("span:lang(\"*-1996\")", &["l2"]),
             ("span:lang(*-Hant-TW)", &["l8"]),
             ("span:lang(*-TW-Hant)", &[]),
             ("span:lang(*-FR)", &[]),
             // A wildcard anywhere else moves past nothing: a later
             // range subtag already searches the whole remaining tag.
-            ("span:lang(de-*-DE)", &["l1", "l2", "l3", "l4"]),
+            ("span:lang(de-*-DE)", &["l1", "l2", "l3"]),
             // Wildcards all the way down is `:lang(*)`: the tag needs a
             // first subtag, and nothing more.
             (
@@ -813,8 +812,51 @@ fn html_lang_wildcard_subtags() {
             // A wildcard range is a range like any other wherever it
             // sits in the list: both orders of the same pair are the
             // union of the two, in document order.
-            ("span:lang(zh-TW, *-DE)", &["l1", "l2", "l3", "l4", "l8"]),
-            ("span:lang(*-DE, zh-TW)", &["l1", "l2", "l3", "l4", "l8"]),
+            ("span:lang(zh-TW, *-DE)", &["l1", "l2", "l3", "l8"]),
+            ("span:lang(*-DE, zh-TW)", &["l1", "l2", "l3", "l8"]),
+        ],
+    );
+}
+
+/// RFC 4647's search for a range subtag stops at a singleton, the one
+/// letter or digit that opens an extension or private-use section.
+#[test]
+fn html_lang_stops_at_a_singleton() {
+    let fixture = Fixture::new(
+        r#"<r>
+             <span id="s1" lang="de-DE"/>
+             <span id="s2" lang="de-Latn-DE"/>
+             <span id="s3" lang="de-DE-x-foo"/>
+             <span id="s4" lang="de-Latn-DE-1996"/>
+             <span id="s5" lang="de-x-DE"/>
+             <span id="s6" lang="de-a-DE"/>
+             <span id="s7" lang="de-1-DE"/>
+             <span id="s8" lang="de-Latn-x-DE"/>
+             <span id="s9" lang="de-x-foo"/>
+             <span id="s10" lang="de-x-a-foo"/>
+             <span id="s11" lang="x-foo"/>
+             <span id="s12" lang="i-klingon"/>
+             <span id="s13" lang="de-CH"/>
+             <span id="s14" lang="de-x-CH"/>
+           </r>"#,
+        &[],
+    );
+    check(
+        &fixture,
+        Mode::Html,
+        &[
+            ("span:lang(de-DE)", &["s1", "s2", "s3", "s4"]),
+            ("span:lang(*-DE)", &["s1", "s2", "s3", "s4"]),
+            ("span:lang(de-1996)", &["s4"]),
+            // A singleton in the range matches the tag's own, and the
+            // search past it stops at the next one (s10's `a`).
+            ("span:lang(de-x-foo)", &["s3", "s9"]),
+            ("span:lang(de-x-DE)", &["s5", "s8"]),
+            ("span:lang(de-1)", &["s7"]),
+            // A singleton primary subtag is matched like any other.
+            ("span:lang(x-foo)", &["s11"]),
+            ("span:lang(i-klingon)", &["s12"]),
+            ("span:lang(*-CH)", &["s13"]),
         ],
     );
 }

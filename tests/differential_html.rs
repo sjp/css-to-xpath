@@ -39,9 +39,7 @@
 //!
 //! # What the grammar does not generate
 //!
-//! - **`:lang()`.** Extended filtering is the one place the crate
-//!   knowingly diverges from the spec (RFC 4647's singleton rule), so a
-//!   reference for it would encode the divergence rather than check it.
+//! - **`:lang()`.** The reference has no extended filtering of its own;
 //!   `tests/lang.rs` and `tests/semantics.rs` pin it by hand instead.
 //! - **The of-type pseudo-classes**, exhausted by the generic suite over
 //!   a fixture built to discriminate them; here every element is in one
