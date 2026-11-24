@@ -493,6 +493,9 @@ fn html_translator_lowercases_names_not_values() {
 fn html_name_lowercasing_is_ascii_only() {
     let mut html = Cases::new(Mode::Html);
     html.check("\u{130}", "*[name() = '\u{130}' and namespace-uri() = '']");
-    html.check("[\u{130}]", "*[attribute::*[name() = '\u{130}']]");
+    html.check(
+        "[\u{130}]",
+        "*[attribute::*[name() = '\u{130}' and namespace-uri() = '']]",
+    );
     html.check("*|\u{130}", "*[local-name() = '\u{130}']");
 }

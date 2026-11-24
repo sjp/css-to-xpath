@@ -875,7 +875,7 @@ impl Translator {
                 format!("@{name}")
             } else {
                 format!(
-                    "attribute::*[name() = {}]",
+                    "attribute::*[name() = {} and namespace-uri() = '']",
                     xpath_expr::xpath_literal(&name)
                 )
             }),

@@ -272,6 +272,38 @@ fn generic_non_ascii_namespace_prefix() {
     );
 }
 
+/// An escaped colon is part of an unprefixed attribute's local name, so
+/// `[a\:b]` means a no-namespace attribute and must not match `b` in the
+/// namespace bound to `a`, even though that attribute's `name()` is `a:b`.
+#[test]
+fn escaped_colon_attribute_name_is_in_no_namespace() {
+    let fixture = Fixture::new(
+        r#"<r xmlns:a="urn:a">
+             <e id="e1" a:b="c"/>
+             <e id="e2" é="c"/>
+             <e id="e3" a:é="c"/>
+             <e id="e4" xml:lang="en"/>
+           </r>"#,
+        &[("a", "urn:a")],
+    );
+    for mode in MODES {
+        check(
+            &fixture,
+            mode,
+            &[
+                ("[a\\:b]", &[]),
+                ("[a\\:b=c]", &[]),
+                ("[a|b]", &["e1"]),
+                ("[a|b=c]", &["e1"]),
+                ("[é]", &["e2"]),
+                ("[a|é]", &["e3"]),
+                ("[xml\\:lang]", &[]),
+                ("[xml|lang]", &["e4"]),
+            ],
+        );
+    }
+}
+
 #[test]
 fn generic_structural_pseudos() {
     check(

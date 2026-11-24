@@ -73,6 +73,14 @@ h1 + p:first-child
 h1 + p:nth-child(2)
 di\[v
 [h\]ref]
+[a\:b]
+[a\:b=c]
+[a|b]
+[a|b=c]
+[xml\:lang]
+[xml|lang]
+[é]
+[a|é]
 di v
 #\31 23
 \31 23

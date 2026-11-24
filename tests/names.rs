@@ -13,7 +13,24 @@ fn unsafe_names_and_escapes() {
     // a name that can be one means; see
     // `unprefixed_names_mean_the_null_namespace_everywhere`.
     t.check("di\\[v", "*[name() = 'di[v' and namespace-uri() = '']");
-    t.check("[h\\]ref]", "*[attribute::*[name() = 'h]ref']]");
+    t.check(
+        "[h\\]ref]",
+        "*[attribute::*[name() = 'h]ref' and namespace-uri() = '']]",
+    );
+    // An escaped colon is part of the local name, so `[a\:b]` must not
+    // match the attribute `b` in whatever namespace `a` is bound to.
+    t.check(
+        "[a\\:b]",
+        "*[attribute::*[name() = 'a:b' and namespace-uri() = '']]",
+    );
+    t.check(
+        "[a\\:b=c]",
+        "*[attribute::*[name() = 'a:b' and namespace-uri() = ''] = 'c']",
+    );
+    t.check(
+        "[xml\\:lang]",
+        "*[attribute::*[name() = 'xml:lang' and namespace-uri() = '']]",
+    );
     t.check(
         "di\u{a0}v",
         "*[name() = 'di\u{a0}v' and namespace-uri() = '']",
@@ -22,7 +39,10 @@ fn unsafe_names_and_escapes() {
     // in idents, hashes, and strings alike.
     t.check("#\\31 23", "*[@id = '123']");
     t.check("\\31 23", "*[name() = '123' and namespace-uri() = '']");
-    t.check("[\\31 23]", "*[attribute::*[name() = '123']]");
+    t.check(
+        "[\\31 23]",
+        "*[attribute::*[name() = '123' and namespace-uri() = '']]",
+    );
     t.check("e[foo='\\31 23']", "e[@foo = '123']");
     t.check("e[foo='x\\79 z']", "e[@foo = 'xyz']");
     // A single hex digit is still a valid escape.
