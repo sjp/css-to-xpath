@@ -11,6 +11,16 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Fixed
+
+- An any-namespace attribute selector with a value test other than plain `=`
+  (`[*|a^=x]`, `[*|a~=x]`, `[*|a=x i]`, ...) now matches when *any*
+  attribute with that local name passes, not just the first. A string
+  function sees only the first node of `@*[local-name() = 'a']`, so the test
+  now goes in a predicate on the attribute step:
+  `*[@*[local-name() = 'a'][starts-with(., 'x')]]`. `[*|a]` and `[*|a=x]`
+  are unchanged.
+
 ## [0.6.1] - 2026-10-05
 
 ### Changed
