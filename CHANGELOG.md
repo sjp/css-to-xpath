@@ -25,6 +25,12 @@ select the same nodes, because callers compare, cache and embed the strings.
   the value of the no-namespace attribute, as `[type=foo]` does, and still
   compares namespaced ones exactly:
   `*[@*[local-name() = 'type'][(namespace-uri() = '' and translate(., …) = 'foo') or . = 'foo']]`.
+- An unprefixed attribute name that cannot be an XPath name test, such as
+  one with an escaped colon, is now pinned to no namespace, as the element
+  fallback already was: `[a\:b]` is
+  `*[attribute::*[name() = 'a:b' and namespace-uri() = '']]` and no longer
+  matches the attribute `b` in the namespace bound to `a`. In particular,
+  `[xml\:lang]` no longer matches `xml:lang`; write `[xml|lang]` for that.
 
 ## [0.6.1] - 2026-10-05
 
