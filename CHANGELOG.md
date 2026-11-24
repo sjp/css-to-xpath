@@ -11,6 +11,18 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+### Changed
+
+- The of-type pseudo-classes on an element in any namespace
+  (`*|e:first-of-type`, `*|e:nth-of-type(2)`, ...) now return
+  `Error::Unsupported` ("an of-type pseudo-class on an element in any
+  namespace (`*|e`)") in every mode, as they already did on `*` and `ns|*`.
+  They used to count siblings by local name alone, but the type is the
+  expanded name, so an `n:e` after a no-namespace `e` was not matched as the
+  first of its type. XPath 1.0 cannot compare a sibling's namespace with the
+  subject's. This includes `*|\2a:first-of-type`. `ns|e`, `|e` and `e` are
+  unchanged, as is `*|e:nth-child(2 of *|e)`.
+
 ### Fixed
 
 - `:lang()` under `Mode::Html` and `Mode::Xhtml` no longer searches for a
