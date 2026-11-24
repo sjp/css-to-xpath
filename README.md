@@ -391,19 +391,16 @@ Level 4 asks for, because XPath 1.0 — or a static translation of any
 kind — cannot reach the spec's answer. They are listed here so the
 contract stays honest.
 
-- **`:lang()` does not honour RFC 4647's singleton rule, and under
-  `Mode::Generic` is a prefix match.** Under `Mode::Html` and
-  `Mode::Xhtml` a multi-subtag range is matched by extended filtering, as
-  Level 4 asks: the first range subtag must equal the tag's first, and
-  each later one must appear as a whole subtag after it, so `:lang(de-DE)`
-  matches `de-DE`, `de-DE-1996` and `de-Latn-DE`. The one rule not
-  modelled is that a subtag may not be skipped past a *singleton* (a
-  one-character subtag, such as the `x` opening a private-use section):
-  measuring the length of every skipped subtag is not expressible in
-  XPath 1.0, so `:lang(de-DE)` also matches `de-x-de`, which Level 4 says
-  it should not. Under `Mode::Generic` the test is XPath's own `lang()`,
-  which is the Level 3 / `[lang|=…]` prefix match — `de-DE` there matches
-  `de-DE` and `de-DE-1996` but not `de-Latn-DE`. A `*` subtag is allowed
+- **`:lang()` under `Mode::Generic` is a prefix match.** Under
+  `Mode::Html` and `Mode::Xhtml` a multi-subtag range is matched by
+  extended filtering, as Level 4 asks: the first range subtag must equal
+  the tag's first, and each later one must appear as a whole subtag after
+  it and before any *singleton* (a one-character subtag, such as the `x`
+  opening a private-use section), so `:lang(de-DE)` matches `de-DE`,
+  `de-DE-1996` and `de-Latn-DE` but not `de-x-DE`. Under `Mode::Generic`
+  the test is XPath's own `lang()`, which is the Level 3 / `[lang|=…]`
+  prefix match — `de-DE` there matches `de-DE` and `de-DE-1996` but not
+  `de-Latn-DE`. A `*` subtag is allowed
   anywhere in the range under `Mode::Html` and `Mode::Xhtml`, as extended
   filtering asks: a leading one stands for the tag's first subtag, so
   `:lang(*-CH)` matches `de-CH` and `fr-Latn-CH` but not `ch`, and one in
@@ -613,12 +610,11 @@ Five layers, all run by `cargo test`:
   button algorithms) rather than from this crate's code. It evaluates
   `Mode::Xhtml` and asserts that `Mode::Html` translates every generated
   selector to the same string, which is what makes the answer both
-  modes'. `:lang()` is left out on purpose: extended filtering is the
-  one HTML translation that knowingly diverges from the spec (see
-  Approximations), so a reference for it would encode the divergence
-  rather than check it. The divergence it does have — the overrides
-  identify elements by `local-name()`, so an element of that name in
-  another namespace is treated as the HTML one — is pinned as a test.
+  modes'. `:lang()` is left out, as the reference has no extended
+  filtering of its own; it is pinned by hand instead. The divergence the
+  overrides do have — they identify elements by `local-name()`, so an
+  element of that name in another namespace is treated as the HTML one —
+  is pinned as a test.
 
 Fuzzing lives in `fuzz/` and needs
 [`cargo-fuzz`](https://crates.io/crates/cargo-fuzz) and a nightly

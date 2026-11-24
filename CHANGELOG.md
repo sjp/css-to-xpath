@@ -13,6 +13,12 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ### Fixed
 
+- `:lang()` under `Mode::Html` and `Mode::Xhtml` no longer searches for a
+  range subtag past a singleton, as RFC 4647 asks: `:lang(de-DE)` no longer
+  matches `de-x-DE`, where `DE` is private-use data, and still matches
+  `de-Latn-DE`. Each search after the first subtag now runs over the tail
+  cut at its first singleton, so the XPath for a multi-subtag range grows.
+
 - An any-namespace attribute selector with a value test other than plain `=`
   (`[*|a^=x]`, `[*|a~=x]`, `[*|a=x i]`, ...) now matches when *any*
   attribute with that local name passes, not just the first. A string
