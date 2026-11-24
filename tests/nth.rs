@@ -3,7 +3,7 @@
 
 mod cases;
 use cases::Cases;
-use css_to_xpath::Mode;
+use css_to_xpath::{Error, Mode};
 
 /// The nth-* family and its an+b arithmetic.
 #[test]
@@ -70,11 +70,16 @@ fn nth_family() {
     t.check("é:nth-of-type(2)", "*[name() = 'é' and namespace-uri() = '' and preceding-sibling::*[name() = 'é' and namespace-uri() = ''][1] and not(preceding-sibling::*[name() = 'é' and namespace-uri() = ''][2])]");
     t.check("é:nth-last-of-type(1)", "*[name() = 'é' and namespace-uri() = '' and not(following-sibling::*[name() = 'é' and namespace-uri() = ''][1])]");
     t.check("é:only-of-type", "*[name() = 'é' and namespace-uri() = '' and not(preceding-sibling::*[name() = 'é' and namespace-uri() = ''][1]) and not(following-sibling::*[name() = 'é' and namespace-uri() = ''][1])]");
-    // Explicit-namespace and no-namespace elements go through
-    // local-name()/name()-plus-namespace-uri() the same way.
+    // A namespaced or no-namespace element is counted by the node test
+    // it translates to.
     t.check(
-        "*|e:first-of-type",
-        "*[local-name() = 'e' and not(preceding-sibling::*[local-name() = 'e'][1])]",
+        "ns|e:first-of-type",
+        "ns:e[not(preceding-sibling::ns:e[1])]",
+    );
+    t.check("|e:first-of-type", "e[not(preceding-sibling::e[1])]");
+    t.check(
+        "ns|é:first-of-type",
+        "ns:*[local-name() = 'é' and not(preceding-sibling::ns:*[local-name() = 'é'][1])]",
     );
     t.check("|é:first-of-type", "*[name() = 'é' and namespace-uri() = '' and not(preceding-sibling::*[name() = 'é' and namespace-uri() = ''][1])]");
     t.check(
@@ -100,6 +105,47 @@ fn nth_family() {
         "e:nth-child(-2n+2)",
         "e[not(preceding-sibling::*[2]) and (count(preceding-sibling::*) + 1) mod -2 = 0]",
     );
+}
+
+/// An element in any namespace has no node test for its type, which is
+/// the expanded name: local-name() would count `a:e` and a no-namespace
+/// `e` as one type. So every of-type pseudo-class refuses it, while an
+/// `of S` count, which filters siblings by `S` rather than by type,
+/// still translates.
+#[test]
+fn any_namespace_of_type() {
+    for mode in [Mode::Generic, Mode::Html, Mode::Xhtml] {
+        let mut t = Cases::new(mode);
+        for css in [
+            "*|e:first-of-type",
+            "*|e:last-of-type",
+            "*|e:nth-of-type(2)",
+            "*|e:nth-last-of-type(2)",
+        ] {
+            assert_eq!(
+                t.css_to_xpath(css, ""),
+                Err(Error::Unsupported {
+                    construct: "an of-type pseudo-class on an element in any namespace (`*|e`)"
+                        .to_owned(),
+                    offset: None,
+                }),
+                "{css} in {mode:?}"
+            );
+        }
+        assert_eq!(
+            t.css_to_xpath("*|e:only-of-type", ""),
+            Err(Error::Unsupported {
+                construct: "`:only-of-type` on an element in any namespace (`*|e`)".to_owned(),
+                offset: None,
+            }),
+            "in {mode:?}"
+        );
+        t.check(
+            "*|e:nth-child(2 of *|e)",
+            "*[local-name() = 'e' and preceding-sibling::*[local-name() = 'e'][1] \
+             and not(preceding-sibling::*[local-name() = 'e'][2])]",
+        );
+    }
 }
 
 /// `of S` selector lists (CSS Level 4), nth-child only.

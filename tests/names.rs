@@ -134,10 +134,13 @@ fn an_escaped_asterisk_names_an_element() {
          and contains(concat(' ', normalize-space(@class), ' '), ' x ')]",
     );
     // And the name test is a type, so the of-type pseudo-classes count
-    // by it instead of refusing the compound as universal.
-    t.check(
-        "*|\\2a:first-of-type",
-        "*[local-name() = '*' and not(preceding-sibling::*[local-name() = '*'][1])]",
+    // by it instead of refusing the compound as universal. In any
+    // namespace they refuse it as such an element, not as `*`.
+    assert_eq!(
+        t.css_to_xpath("*|\\2a:first-of-type", "")
+            .unwrap_err()
+            .to_string(),
+        "unsupported CSS construct: an of-type pseudo-class on an element in any namespace (`*|e`)"
     );
     t.check(
         "\\2a:only-of-type",

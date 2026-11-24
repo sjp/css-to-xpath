@@ -495,22 +495,28 @@ impl XPathExpr {
     }
 
     /// The node test selecting siblings of the same type, for the of-type
-    /// pseudo-classes. `None` when the subject is a wildcard, prefixed
-    /// or not, and so has no single type.
-    pub(crate) fn same_type_nodetest(&self) -> Option<String> {
+    /// pseudo-classes. When the subject has no such node test, `Err`
+    /// describes it, for the error message.
+    pub(crate) fn same_type_nodetest(&self) -> Result<String, &'static str> {
         match &self.name_test {
             // A name test is set whenever the element alone is not the
             // whole story: either it was folded into a condition on `*`,
             // or it is a prefixed wildcard pinned by a local-name() test.
-            Some(name_test) => Some(name_test.clone()),
+            Some(name_test) => Ok(name_test.clone()),
+            // `*|e`: a name pinned on `*` with no name test. Its type
+            // includes the namespace, which XPath 1.0 cannot compare
+            // against the subject's from a sibling step.
+            None if self.element == "*" && self.folded_name.is_some() => {
+                Err("an element in any namespace (`*|e`)")
+            }
             // A wildcard subject has no single type to count siblings
             // by: `ns|*` matches every name in that namespace, so
             // counting `ns|*` siblings would be "position among elements
             // in the namespace", not among elements of the same type.
             None if self.element != "*" && !self.element.ends_with(":*") => {
-                Some(self.element.clone().into_owned())
+                Ok(self.element.clone().into_owned())
             }
-            None => None,
+            None => Err("the universal selector `*`"),
         }
     }
 

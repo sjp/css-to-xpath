@@ -557,7 +557,7 @@ fn every_pseudo_class_in_every_context() {
             format!("* + *|input{pseudo}"),
             format!("*|input{pseudo} ~ *|input"),
             format!("*|body > *:nth-child(2n+1 of {pseudo})"),
-            format!("*|input{pseudo}:nth-of-type(1)"),
+            format!("xhtml|input{pseudo}:nth-of-type(1)"),
             format!("{pseudo}{pseudo}"),
         ]
         .into_iter()

@@ -90,8 +90,8 @@ impl Translator {
             }
             // :only-of-type
             NthType::OnlyOfType => {
-                let nodetest = xpath.same_type_nodetest().ok_or_else(|| {
-                    Error::unsupported("`:only-of-type` on the universal selector `*`")
+                let nodetest = xpath.same_type_nodetest().map_err(|subject| {
+                    Error::unsupported(format!("`:only-of-type` on {subject}"))
                 })?;
                 let mut cond = String::new();
                 for (i, last) in [false, true].into_iter().enumerate() {
@@ -117,8 +117,8 @@ impl Translator {
             // :nth-last-of-type() — none are implemented on the universal
             // selector `*`.
             NthType::OfType | NthType::LastOfType => {
-                let nodetest = xpath.same_type_nodetest().ok_or_else(|| {
-                    Error::unsupported("an of-type pseudo-class on the universal selector `*`")
+                let nodetest = xpath.same_type_nodetest().map_err(|subject| {
+                    Error::unsupported(format!("an of-type pseudo-class on {subject}"))
                 })?;
                 self.xpath_nth_child(
                     xpath,

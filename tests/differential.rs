@@ -33,9 +33,8 @@
 //!   is left untested by writing it that way.
 //! - **Of-type pseudo-classes only on a subject whose type is one
 //!   `(namespace, local name)` pair.** They are unsupported on a wildcard
-//!   subject, and on `*|e` the translation counts siblings by local name
-//!   alone; [`any_namespace_of_type_counts_by_local_name`] pins that
-//!   divergence rather than generating around it silently.
+//!   subject and on `*|e`; [`any_namespace_of_type_is_refused`] pins
+//!   the latter.
 //! - No `:has()` inside `:has()`, which the translator rejects, and no
 //!   pseudo-class whose answer is not in the document tree (`:hover`,
 //!   `:checked`, `:lang()`), which the reference has no way to answer.
@@ -149,8 +148,7 @@ impl Ty {
 
     /// Whether this type names exactly one `(namespace, local name)`
     /// pair, which is what an of-type pseudo-class needs: the translator
-    /// rejects the wildcard and implicit forms outright, and on `*|e` it
-    /// counts by local name — see the module comment.
+    /// rejects the wildcard, implicit and `*|e` forms.
     fn is_single_type(&self) -> bool {
         matches!(*self, Ty::NoNsNamed(_) | Ty::NsNamed(..))
     }
@@ -623,21 +621,21 @@ fn differential_regressions() {
     assert!(failures.is_empty(), "differential mismatch:{failures}");
 }
 
-/// The one divergence the generated selectors are steered around, pinned
-/// so that it stays exactly this and nothing more.
-///
-/// `*|b` is `*[local-name() = 'b']`, and the of-type pseudos count
-/// siblings by that same node test — by local name alone. Per the spec
-/// `b` and `x:b` are different types, so Servo counts them separately
-/// and calls `x:b` the first of its own type.
+/// `*|b`'s type is its expanded name, so `b` and `x:b` are different
+/// types and Servo calls `x:b` the first of its own. XPath 1.0 cannot
+/// count siblings by the subject's namespace, so the of-type pseudos on
+/// `*|b` are refused rather than counted by local name, which would
+/// miss it.
 #[test]
-fn any_namespace_of_type_counts_by_local_name() {
+fn any_namespace_of_type_is_refused() {
     let env = Env::new();
-    let (translated, reference) = env.answers("*|b:first-of-type");
-    assert_eq!(translated, ["b1", "b6", "b7"]);
+    let reference = env.reference.select("*|b:first-of-type").unwrap();
     assert_eq!(reference, ["b1", "b3", "b6", "b7"]);
-    // Everything else about `*|b` agrees: the divergence is in the
-    // counting, not in what the type selector itself matches.
+    assert!(matches!(
+        css_to_xpath::css_to_xpath("*|b:first-of-type", "", Mode::Generic),
+        Err(css_to_xpath::Error::Unsupported { .. })
+    ));
+    // `*|b` itself translates exactly.
     let (translated, reference) = env.answers("*|b");
     assert_eq!(translated, reference);
 }

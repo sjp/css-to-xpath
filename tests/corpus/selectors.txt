@@ -259,6 +259,11 @@ svg|*:nth-last-of-type(2)
 svg|*:only-of-type
 *|*:first-of-type
 |*:first-of-type
+*|e:first-of-type
+*|e:last-of-type
+*|e:nth-of-type(2)
+*|e:nth-last-of-type(2)
+*|e:only-of-type
 :lang()
 :lang(5)
 :lang(-)
@@ -349,8 +354,11 @@ e:only-of-type
 é:nth-of-type(2)
 é:nth-last-of-type(1)
 é:only-of-type
-*|e:first-of-type
+ns|e:first-of-type
+|e:first-of-type
+ns|é:first-of-type
 |é:first-of-type
+*|e:nth-child(2 of *|e)
 e ~ f:nth-child(3)
 e:nth-child(n+1)
 e:nth-child(n-5)

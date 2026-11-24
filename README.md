@@ -333,9 +333,9 @@ express them faithfully:
   to refer to the element being matched from inside a nested one, which
   XPath 1.0 cannot do.
 - of-type pseudos (`:first-of-type`, `:nth-of-type()`, …) on any
-  wildcard subject (`*`, `*|*`, `|*`, `ns|*`) or implicit-type compound:
-  XPath 1.0 cannot compare a sibling's name against the matched
-  element's own.
+  wildcard subject (`*`, `*|*`, `|*`, `ns|*`), an implicit-type compound,
+  or an element in any namespace (`*|e`): XPath 1.0 cannot compare a
+  sibling's name or namespace against the matched element's own.
 - Nested `:has()`, and `:host()` — shadow-DOM host selection has nothing
   to match against in a plain document tree. A bare `:host` is not a
   pseudo-class this crate's parser accepts, so it fails to parse rather
@@ -583,11 +583,8 @@ Five layers, all run by `cargo test`:
   exhausted rather than sampled.
 
   The first suite is `Mode::Generic`, and only shapes the translation
-  renders exactly: the one divergence (`*|e:first-of-type` counts
-  siblings by local name, since XPath 1.0 cannot compare a sibling's
-  namespace against the subject's) is pinned as a test of its own. The
-  second adds the HTML pseudo-classes whose answer is in the document
-  tree — `:disabled`/`:enabled`, `:required`/`:optional`,
+  renders exactly. The second adds the HTML pseudo-classes whose answer
+  is in the document tree — `:disabled`/`:enabled`, `:required`/`:optional`,
   `:read-write`/`:read-only`, `:default`, `:checked`,
   `:placeholder-shown`, `:link`/`:any-link` — over an XHTML fixture that
   holds both answers for every corner of them, with the reference

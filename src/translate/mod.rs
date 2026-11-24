@@ -453,14 +453,12 @@ impl Translator {
             NsConstraint::Any => {
                 // '*|e': 'e' in any namespace, including none. An unprefixed
                 // XPath name test only matches the null namespace, so test
-                // against local-name() instead. The of-type nodetest counts
-                // by local name too, an approximation: siblings sharing the
-                // name across namespaces are distinct types per the spec,
-                // but XPath 1.0 cannot compare a sibling's namespace
-                // against the matched element's.
+                // against local-name() instead. No `name_test` is recorded:
+                // the type is the expanded name, and local-name() would
+                // count `a:e` and a no-namespace `e` together, so the
+                // of-type pseudo-classes refuse it.
                 let cond = format!("local-name() = {}", xpath_expr::xpath_literal(&name));
                 let mut xpath = XPathExpr::new("*");
-                xpath.name_test = Some(format!("*[{cond}]"));
                 xpath.folded_name = Some(name.into_owned());
                 xpath.add_condition(cond);
                 Ok(xpath)
