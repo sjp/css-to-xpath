@@ -334,7 +334,7 @@ fn generic_structural_pseudos() {
 
 /// `:empty` here is Selectors 3's reading — no children at all — so an
 /// element holding only whitespace does not match. Selectors 4 relaxed
-/// that; see `issues/08-spec-divergences-to-fix-or-document.md`.
+/// that.
 #[test]
 fn generic_empty_does_not_match_whitespace_only_content() {
     check(&generic_fixture(), Mode::Generic, &[("spaces:empty", &[])]);
