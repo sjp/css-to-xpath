@@ -11,6 +11,8 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-26
+
 ### Changed
 
 - A compound to the left of a combinator inside a functional pseudo-class
@@ -596,7 +598,8 @@ select the same nodes, because callers compare, cache and embed the strings.
 
 Initial release, migrated from the `selectrs` package.
 
-[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/sjp/css-to-xpath/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sjp/css-to-xpath/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/sjp/css-to-xpath/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/sjp/css-to-xpath/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/sjp/css-to-xpath/compare/v0.5.1...v0.5.2
